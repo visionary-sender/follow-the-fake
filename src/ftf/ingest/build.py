@@ -12,6 +12,7 @@ from ftf.ingest import ids
 from ftf.ingest.model import AD_TYPES, RawCapture, RawIncident
 
 PAGE_EXPECTED = (ArtefactType.html, ArtefactType.har)
+MANIFEST_SUFFIX = ":manifest"
 AD_EXPECTED = (ArtefactType.ad_screenshot, ArtefactType.video, ArtefactType.ad_library)
 
 
@@ -183,8 +184,10 @@ def _collapse_duplicates(incidents: list[Incident], records: list[CaptureRecord]
     groups: dict[tuple[str, ...], list[str]] = {}
     for inc in incidents:
         for cap in inc.captures:
-            digests = tuple(sorted(a.sha256 for a in cap.artefacts if a.sha256))
-            if digests and len(digests) == len(cap.artefacts):
+            # a collector manifest (``…:manifest``) differs on every run; it is not content
+            content = [a for a in cap.artefacts if not (a.type is ArtefactType.other and a.id.endswith(MANIFEST_SUFFIX))]
+            digests = tuple(sorted(a.sha256 for a in content if a.sha256))
+            if digests and len(digests) == len(content):
                 groups.setdefault(digests, []).append(cap.id)
     dup_of: dict[str, str] = {}
     for members in groups.values():

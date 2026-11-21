@@ -157,9 +157,9 @@ def test_refetch_with_victim_profile_is_one_incident(tmp_path):
     assert set(by_id) == {f"fetch:{first}", f"fetch:{second}"}
     pi = by_id[f"fetch:{first}"]
     assert [c.id for c in pi.captures] == [f"fetch:{first}:c1", f"fetch:{first}:c2"]
-    # artefact ids keep the fetcher's ids
+    # the first fetch keeps the fetcher's artefact ids; the merged one's follow its new capture id
     assert f"fetch:{first}:har" in {a.id for a in pi.captures[0].artefacts}
-    assert "fetch:20261121T215900Z-pi.example.test-00000000:har" in {a.id for a in pi.captures[1].artefacts}
+    assert {f"fetch:{first}:c2:har", f"fetch:{first}:c2:manifest"} <= {a.id for a in pi.captures[1].artefacts}
     prof = {i.capture_id: i for i in pi.indicators if i.kind == "fetch_profile"}
     assert prof[f"fetch:{first}:c1"].value == "default" and prof[f"fetch:{first}:c2"].value == "victim-pl-mobile"
     for ind in pi.indicators:
@@ -185,6 +185,28 @@ def test_fetches_sharing_an_incident_id_merge_and_keep_capture_ids(tmp_path):
     assert a.name in merged.captures[0].artefacts[0].path
 
 
+def test_copied_fetch_folder_does_not_break_ingest(tmp_path):
+    out = tmp_path / "captures"
+    a = fetcher_capture(out, "20261121T220000Z-chi.example.test-00000001", "https://chi.example.test/")
+    import shutil
+    shutil.copytree(a, out / "20261121T230000Z-chi.example.test-copy")
+    ds = load_inputs([out])
+    (inc,) = ds.incidents
+    assert [c.id for c in inc.captures] == [f"{inc.id}:c1", f"{inc.id}:c2"]
+    assert inc.captures[1].duplicate_of == inc.captures[0].id  # same content; manifests are not content
+
+
+def test_identical_scans_under_two_ids_are_duplicates(tmp_path):
+    out = tmp_path / "scanner"
+    same = {"ad_id": "x", "stable_id": "x", "key": "x", "ad_archive_id": "x"}
+    scan_capture(out, "1000000000000007", ad=same)
+    scan_capture(out, "1000000000000008", ad=same)
+    for d in out.iterdir():  # identical creative bytes too
+        (d / "creative-1.jpg").write_bytes(b"\xff\xd8 same")
+    c = caps(load_inputs([out]))
+    assert c["adlib:1000000000000008:ad"].duplicate_of == "adlib:1000000000000007:ad"
+
+
 # -- untrusted manifests ----------------------------------------------------------------------------
 
 
@@ -202,6 +224,15 @@ def test_paths_outside_the_folder_are_ignored(tmp_path):
     paths = [a.path for a in inc.captures[0].artefacts]
     assert all("secret" not in p and "creative-9" not in p for p in paths)
     assert artefact_file(d, "creative-9.jpg") is None
+
+
+def test_artefact_path_prefers_the_named_file(tmp_path):
+    d = tmp_path / "run" / "cap"
+    write(d / "page.html", "<p>top</p>")
+    write(d / "assets" / "page.html", "<p>nested</p>")
+    assert artefact_file(d, "assets/page.html") == d / "assets" / "page.html"
+    assert artefact_file(d, "cap/page.html") == d / "page.html"
+    assert artefact_file(d, "renamed/page.html") == d / "page.html"  # a renamed capture folder
 
 
 def test_unknown_tool_or_version_is_refused(tmp_path, capsys):

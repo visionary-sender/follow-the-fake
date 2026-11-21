@@ -86,9 +86,9 @@ def has_manifest(path: Path) -> bool:
 def read_manifest(folder: Path) -> Manifest:
     """Parse and check ``<folder>/capture.json``; ``ValueError`` if it is not one of ours."""
     path = folder / MANIFEST
-    if path.stat().st_size > MAX_MANIFEST_BYTES:
-        raise ValueError(f"{path}: manifest larger than {MAX_MANIFEST_BYTES} bytes")
     try:
+        if path.stat().st_size > MAX_MANIFEST_BYTES:
+            raise ValueError(f"{path}: manifest larger than {MAX_MANIFEST_BYTES} bytes")
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, ValueError) as e:
         raise ValueError(f"{path}: unreadable manifest ({e.__class__.__name__})") from None
@@ -139,8 +139,11 @@ def artefact_file(folder: Path, path: object) -> Path | None:
     parts = safe_parts(path)
     if parts is None:
         return None
-    tries = [parts[1:]] if len(parts) > 1 else []
+    # ``<folder>/<file>`` first, then the path as given, then (a renamed folder) without its first part
+    tries = [parts[1:]] if len(parts) > 1 and parts[0] == folder.name else []
     tries.append(parts)
+    if len(parts) > 1 and parts[0] != folder.name:
+        tries.append(parts[1:])
     for t in tries:
         found = _inside(folder, t)
         if found is not None:
@@ -270,9 +273,13 @@ def _merge_fetches(group: list[Manifest]) -> RawIncident:
     cap_ids = [c.fixed_id for c in caps]
     if not (all(r.fixed_id == first.fixed_id for r in raws) and len(set(cap_ids)) == len(cap_ids)):
         for n, c in enumerate(caps, start=1):
+            new_id = f"{first.fixed_id}:c{n}"
+            if new_id == c.fixed_id:
+                continue
             c.notes.append(f"fetch {c.fixed_id} merged into {first.fixed_id} (same requested URL)")
-            c.key = f"c{n}"
-            c.fixed_id = f"{first.fixed_id}:c{n}"
+            c.key, c.fixed_id = f"c{n}", new_id
+            for a in c.artefacts:  # artefact ids follow their capture, so copied folders cannot collide
+                a.fixed_id = f"{new_id}:{a.fixed_id.rsplit(':', 1)[-1]}" if a.fixed_id else None
     return RawIncident(source=first.source, source_ref=first.source_ref, captures=caps, fixed_id=first.fixed_id)
 
 
