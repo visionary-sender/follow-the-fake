@@ -77,9 +77,11 @@ def _articles(args: argparse.Namespace) -> int:
 
 
 def _tag_ingested(args: argparse.Namespace) -> int:
-    from ftf.corpus.ingested import tag_ingested
+    from ftf.corpus.ingested import check_indicators, tag_ingested
 
-    print(json.dumps(tag_ingested(Path(args.dataset), Path(args.manifest), Path(args.out)), indent=2))
+    summary = tag_ingested(Path(args.dataset), Path(args.manifest), Path(args.out))
+    print(json.dumps(summary, indent=2))
+    check_indicators(summary, json.loads(Path(args.dataset).read_text(encoding="utf-8")))
     return 0
 
 

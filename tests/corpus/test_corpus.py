@@ -501,3 +501,28 @@ def test_article_links_keep_non_tracking_query():
 
     html = '<a href="/news/a-b-c-1234?id=7&utm_source=x">a</a>'
     assert article_links(html, "https://site.example/", 5) == ["https://site.example/news/a-b-c-1234?id=7"]
+
+
+def test_tag_ingested_scanner_items_and_check(corpus, tmp_path):
+    from ftf.corpus.ingested import check_indicators, tag_ingested
+
+    root, picked = corpus
+    build_corpus(root, "scanner", [RUN], ["fetch-1", "fetch-2"], None, [], "t")
+    ing = {"incidents": [
+        {"id": "adlib:meta-1", "captures": [{"id": "adlib:meta-1:ad"}], "indicators": [{"layer": "creative"}]},
+        {"id": "certpl:dead.example", "captures": [{"id": "certpl:dead.example:listing"}], "indicators": []},
+        {"id": "fetch:cap-live", "captures": [{"id": "fetch:cap-live:c1", "observed": "live"}],
+         "indicators": [{"layer": "kit"}, {"layer": "kit"}]},
+    ]}
+    (tmp_path / "ing.json").write_text(json.dumps(ing))
+    out = tmp_path / "k.jsonl"
+    s = tag_ingested(tmp_path / "ing.json", root / "manifest.jsonl", out)
+    rows = {r["incident_id"]: r for r in map(json.loads, out.read_text().splitlines())}
+    assert rows["adlib:meta-1"]["corpus_kind"] == "ad_record"
+    assert rows["certpl:dead.example"]["corpus_kind"] == "bare_domain"
+    assert rows["fetch:cap-live"]["corpus_kind"] == "fetched_landing"
+    assert s["untagged"] == 0 and s["indicators_by_layer"] == {"creative": 1, "kit": 2}
+    check_indicators(s, ing)
+    empty = {"incidents": [{"id": "fetch:x", "captures": [{"id": "fetch:x:c1", "observed": "live"}], "indicators": []}]}
+    with pytest.raises(SystemExit):
+        check_indicators({"indicators_by_layer": {}}, empty)
