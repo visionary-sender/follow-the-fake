@@ -14,6 +14,8 @@ Challenge data lives in a private bucket and never in this repository.
 |---|---|
 | `src/ftf/` | the Python package; `ftf` is the command-line entry point |
 | `src/ftf/enrich/` | keyless domain enrichment (`ftf enrich-domain`, see below) |
+| `src/ftf/pipeline/` | end-to-end analysis of one input (`ftf analyze`); stage adapters in `stages.py` |
+| `src/ftf/app/` | Streamlit demo app (`ftf serve`); evidence ledger logic in `ledger.py` |
 | `tests/` | pytest suite |
 | `scripts/spend.py` | read-only cloud spend report (see Cloud spend) |
 | `scripts/vm.sh` | cloud dev loop (sync to the workbench VM, run tests or commands there) |
@@ -161,6 +163,25 @@ is generic (`ftf-domain-enrichment/0.1 (+keyless registry lookups; research)`).
 Failures never raise. A source that fails three times in a row is skipped for the rest of the
 run, and its cached answers are used, labelled `stale-cache`. The shared User-Agent and pacing
 are in `src/ftf/enrich/http.py`; the service policies are in `src/ftf/enrich/sources.py`.
+
+## Run the demo app on the VM
+
+The app needs the `app` extra (`pip install -e '.[app]'`; `scripts/vm.sh` installs it). The
+campaign base is a contract `dataset.json`: `--base`, else `$FTF_BASE`, else the fixture
+(`$FTF_FIXTURE_DIR`). On the workbench it binds to `127.0.0.1` only; view it through an IAP tunnel.
+
+```bash
+scripts/vm.sh run -- env FTF_FIXTURE_DIR=/data/derived/fixture-v0 ftf serve --port 8501
+# second terminal on the laptop, then open http://localhost:8501
+gcloud compute ssh ftf-workbench --project follow-the-fake --zone europe-central2-a \
+  --tunnel-through-iap -- -N -L 8501:127.0.0.1:8501
+```
+
+The same analysis without the UI: `ftf analyze INPUT [--kind K] [--base PATH] [--online] [--out result.json]`
+prints a stage summary and writes a contract dataset (exit 0 for assign, new and review).
+Inputs are copied to a per-run directory (`$FTF_RUN_DIR`, else the system temp dir) and
+hashed, never executed; captured HTML is never rendered, and URLs are shown defanged.
+Enrichment and fetching are offline unless `--online` is given.
 
 ## Methods
 
