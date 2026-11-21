@@ -270,11 +270,11 @@ def threshold(ctx: ScoringContext, relation: Relation = Relation.campaign) -> fl
 
 
 def verdict(score: PairScore, ctx: ScoringContext) -> str:
-    """`link` at or above τ, `review` within REVIEW_BAND below it, else `no link`."""
+    """`link` at or above τ, `review` within REVIEW_BAND below it (and above 0 bits), else `no link`."""
     tau = threshold(ctx, score.relation)
     if score.bits >= tau:
         return "link"
-    return "review" if score.bits >= tau - REVIEW_BAND else "no link"
+    return "review" if score.bits > 0 and score.bits >= tau - REVIEW_BAND else "no link"
 
 
 def level_of(score: PairScore) -> LinkLevel:
