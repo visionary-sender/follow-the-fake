@@ -27,7 +27,7 @@ def har(entries: list[dict], pages: list[dict] | None = None) -> bytes:
     return json.dumps({"log": {"version": "1.2", "creator": {"name": "test"}, "pages": pages or [], "entries": entries}}).encode()
 
 
-def entry(url: str, t: str = "2026-10-09T06:24:00.000Z", headers=None, post=None, response=None) -> dict:
+def entry(url: str, t: str = "2025-01-02T01:11:00.000Z", headers=None, post=None, response=None) -> dict:
     req = {"method": "POST" if post else "GET", "url": url, "headers": headers or [{"name": "User-Agent", "value": UA}]}
     if post:
         req["postData"] = post
@@ -45,7 +45,7 @@ AIO_VISIT = {
         "location_postal_code": "00-001",
         "country_code": "PL",
         "useragent": UA,
-        "created_at": "2026-10-09T06:23:55Z",
+        "created_at": "2025-01-02T01:10:55Z",
         "browser_window_width": "1000",
         "browser_window_height": "700",
         "fields": {"fb_pixel": "1234567890123456", "fbclid": make_fbclid(SESSION)},
@@ -68,9 +68,9 @@ def capture_root(tmp_path: Path):
     d.mkdir()
     post_form = {
         "mimeType": "application/x-www-form-urlencoded",
-        "text": f"browser_time_zone=Europe%2FWarsaw&browser_window_width=1000&browser_window_height=700&fingerprint={FP}",
+        "text": f"browser_time_zone=Etc%2FGMT-3&browser_window_width=1000&browser_window_height=700&fingerprint={FP}",
         "params": [
-            {"name": "browser_time_zone", "value": "Europe%2FWarsaw"},
+            {"name": "browser_time_zone", "value": "Etc%2FGMT-3"},
             {"name": "browser_window_width", "value": "1000"},
             {"name": "browser_window_height", "value": "700"},
             {"name": "fingerprint", "value": FP},
@@ -79,28 +79,28 @@ def capture_root(tmp_path: Path):
     post_json = {"mimeType": "application/json", "text": json.dumps({"useragent": UA, "viewport": {"width": 1000, "height": 700}})}
     geo = {"status": 200, "content": {"mimeType": "application/json", "text": json.dumps({"ip": "198.51.100.7", "city": "Testville", "org": "AS64500 Example"})}}
     entries = [
-        entry("https://landing.example.test/?utm_visit=x&fbclid=" + make_fbclid(SESSION), t="2026-10-09T06:24:01.000Z",
+        entry("https://landing.example.test/?utm_visit=x&fbclid=" + make_fbclid(SESSION), t="2025-01-02T01:11:01.000Z",
               headers=[{"name": "User-Agent", "value": UA}, {"name": "x-client-data", "value": "CIa2yQEIo7bJAQ=="}]),
         entry("https://landing.example.test/api/v1/trigger/field/abc/", post=post_form),
         entry("https://landing.example.test/api/v1/agent/x/", post=post_json),
         entry("https://geo.example.test/json", response=geo),
         entry("https://www.facebook.com/tr/?id=1234567890123456&ev=PageView&sw=1920&sh=1080&fbp=fb.1.1760000000000.123456789"),
     ]
-    (d / "page.har").write_bytes(har(entries, pages=[{"startedDateTime": "2026-10-09T06:23:59.000Z", "id": "page_1"}]))
+    (d / "page.har").write_bytes(har(entries, pages=[{"startedDateTime": "2025-01-02T01:10:59.000Z", "id": "page_1"}]))
     (d / "page.html").write_bytes(aio_html())
     (d / "Zrzut ekranu 2025-01-02 031405.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\x00IEND\xaeB`\x82")
     mhtml = (
         "From: <Saved by Blink>\r\nSnapshot-Content-Location: https://landing.example.test/\r\n"
-        "Subject: test\r\nDate: Thu, 08 Oct 2026 09:09:43 GMT\r\nMIME-Version: 1.0\r\n"
+        "Subject: test\r\nDate: Wed, 01 Jan 2025 04:05:06 GMT\r\nMIME-Version: 1.0\r\n"
         'Content-Type: multipart/related; type="text/html"; boundary="B"\r\n\r\n'
         "--B\r\nContent-Type: text/html\r\nContent-Location: https://landing.example.test/\r\n\r\n<html>hi</html>\r\n--B--\r\n"
     )
     (d / "page.mhtml").write_bytes(mhtml.encode())
-    (d / "archive_info.json").write_text(json.dumps({"url": "https://landing.example.test/", "timestamp_utc": "2026-10-08T09:09:43.4", "user_agent": UA}))
+    (d / "archive_info.json").write_text(json.dumps({"url": "https://landing.example.test/", "timestamp_utc": "2025-01-01T04:05:06.4", "user_agent": UA}))
     cap = Capture(
         id="c1:s1",
         stage="lander",
-        captured_on="2026-10-09",
+        captured_on="2025-01-02",
         artefacts=[
             Artefact(id="c1:s1:har", type="har", path="case/page.har"),
             Artefact(id="c1:s1:html", type="html", path="case/page.html"),
@@ -178,12 +178,12 @@ def test_user_agent_and_times(capture_root):
     kinds = by_kind(collector.extract(inc, cap, root))
     assert {i.value for i in kinds["user_agent"]} == {UA}
     times = {i.value for i in kinds["capture_time"]}
-    assert "2026-10-09T06:23:59.000Z" in times  # earliest HAR time (page)
-    assert "2026-10-09T06:23:55Z" in times  # aio visit created_at
+    assert "2025-01-02T01:10:59.000Z" in times  # earliest HAR time (page)
+    assert "2025-01-02T01:10:55Z" in times  # aio visit created_at
     assert "2025-01-02T03:14:05 local" in times  # screenshot file name
-    assert "2026-10-08T09:09:43+00:00" in times  # MHTML Date
-    assert "2026-10-08T09:09:43.4" in times  # archiver timestamp
-    assert {"2026-10-09", "2026-10-08"} <= {i.value for i in kinds["capture_day"]}
+    assert "2025-01-01T04:05:06+00:00" in times  # MHTML Date
+    assert "2025-01-01T04:05:06.4" in times  # archiver timestamp
+    assert {"2025-01-02", "2025-01-01"} <= {i.value for i in kinds["capture_day"]}
     assert {i.value for i in kinds["screenshot_date"]} == {"2025-01-02"}
 
 
@@ -251,10 +251,10 @@ def test_hostile_har_shapes_do_not_crash(tmp_path: Path, payload: bytes):
 
 
 def test_earliest_har_time_compares_instants(tmp_path: Path):
-    payload = har([entry("https://x.example.test/a", t="2026-10-09T07:30:00Z"), entry("https://x.example.test/b", t="2026-10-09T08:00:00+02:00")])
+    payload = har([entry("https://x.example.test/a", t="2025-01-02T07:30:00Z"), entry("https://x.example.test/b", t="2025-01-02T08:00:00+02:00")])
     inc, cap = one_har_capture(tmp_path, payload)
     times = {i.value for i in collector.extract(inc, cap, tmp_path) if i.kind == "capture_time"}
-    assert times == {"2026-10-09T08:00:00+02:00"}
+    assert times == {"2025-01-02T08:00:00+02:00"}
 
 
 def test_invalid_screenshot_name_date_is_ignored(tmp_path: Path):
@@ -265,7 +265,7 @@ def test_invalid_screenshot_name_date_is_ignored(tmp_path: Path):
 
 
 def test_mhtml_date_without_zone_is_utc(tmp_path: Path):
-    (tmp_path / "p.mhtml").write_bytes(b"From: <Saved by Blink>\r\nDate: Thu, 08 Oct 2026 09:09:43 -0000\r\nMIME-Version: 1.0\r\nContent-Type: text/html\r\n\r\n<html></html>\r\n")
+    (tmp_path / "p.mhtml").write_bytes(b"From: <Saved by Blink>\r\nDate: Wed, 01 Jan 2025 04:05:06 -0000\r\nMIME-Version: 1.0\r\nContent-Type: text/html\r\n\r\n<html></html>\r\n")
     cap = Capture(id="c7:s1", stage="lander", artefacts=[Artefact(id="c7:a", type="mhtml", path="p.mhtml")])
     inds = list(collector.extract(Incident(id="c7", source="t", captures=[cap]), cap, tmp_path))
-    assert {i.value for i in inds if i.kind == "capture_time"} == {"2026-10-08T09:09:43+00:00"}
+    assert {i.value for i in inds if i.kind == "capture_time"} == {"2025-01-01T04:05:06+00:00"}
