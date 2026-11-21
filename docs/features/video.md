@@ -38,8 +38,8 @@ families). Extractor name: `video@0.1`.
    soon as `ftf.features.image` imports.
 5. **Video metadata (`video_meta`).** For ad videos and HLS segments: `resolution=<w>x<h>`, and
    for whole videos `duration_s=<seconds>`. An ad's length and size are properties of the
-   creative and help match re-uploads. Screen recordings (file names like `ScreenRecording…`,
-   `Nagrywanie ekranu…`) describe the analyst's phone, not the scam. Their resolution is
+   creative and help match re-uploads. Screen recordings (detected by the usual English and Polish screen-recording file-name
+   patterns, see `_SCREEN_RECORDING`) describe the analyst's phone, not the scam. Their resolution is
    emitted as the collector kind `screen_size` in the `collector` layer (never linkable) and
    their duration is not emitted. Capture times and recording dates are never emitted.
 6. **Speech (`speech_text`, opt-in).** With `FTF_VIDEO_SPEECH=1`, the audio is decoded by our own
@@ -72,8 +72,8 @@ There is a test for the renamed-playlist case.
 | Pillow | MIT-CMU (HPND) | PyPI | ~4 MB | thumbnails |
 | ImageHash | BSD-2-Clause | PyPI | small | stopgap `image_phash` |
 | faster-whisper 1.2.1 | MIT | PyPI | small; pulls ctranslate2 (MIT), av (BSD-3-Clause), onnxruntime (MIT), tokenizers (Apache-2.0), huggingface_hub (Apache-2.0) | speech |
-| `Systran/faster-whisper-base` | MIT (OpenAI Whisper weights) | Hugging Face | SIZE_BASE | speech, faster |
-| `Systran/faster-whisper-small` | MIT (OpenAI Whisper weights) | Hugging Face | SIZE_SMALL | speech, default |
+| `Systran/faster-whisper-base` | MIT (OpenAI Whisper weights) | Hugging Face | 148 MB | speech, faster |
+| `Systran/faster-whisper-small` | MIT (OpenAI Whisper weights) | Hugging Face | 486 MB | speech, default |
 
 Whisper weights download on first use into `ftf.features.common.model_dir()/faster-whisper`
 (`FTF_MODEL_DIR`). ffmpeg is called as an external program, not linked, so the copyleft
@@ -88,7 +88,7 @@ Adding both is the Demo project's job (HACK-32).
 
 | Video | Length, size | Keyframes | Wall | CPU (user+sys) |
 |---|---|---|---|---|
-| case 5 ad (`Czytać […].mp4`) | 198 s, 500×500 h264 30 fps | 40 | 2.7 s | 7.1 s |
+| case 5 ad video | 198 s, 500×500 h264 30 fps | 40 | 2.7 s | 7.1 s |
 | case 47 screen recording | 166 s, 512×698 h264 30 fps | 33 | 2.6 s | 7.4 s |
 | case 14 iPhone screen recording | 249 s, 1170×2532 HEVC 60 fps | 40 | 55 s | 149 s |
 
@@ -101,13 +101,33 @@ Speech (CPU int8, 4 threads, audio of case 5, 198 s):
 | Model | CPU s | CPU s per audio minute |
 |---|---|---|
 | base | 116 | 35 |
-| small | SMALL_CPU | SMALL_PER_MIN |
+| small | 264 | 80 |
 
-SPEECH_VERDICT
+Small transcribes Polish visibly better than base (fewer broken words) at 2.3× the CPU.
+At about 80 CPU s per audio minute plus a 486 MB download, speech is **opt-in**
+(`FTF_VIDEO_SPEECH=1`): the default container run does keyframes only. With `base` it is
+35 CPU s per minute and 148 MB. In the coverage run (four other workers sharing the VM) the
+same 198 s video took 315 CPU s with small.
 
 ## Results against the acceptance criteria
 
-COVERAGE
+Coverage run: Ingestion's organiser dataset (`outputs/ingest/organiser/dataset.json`,
+25 incidents, 31 captures) with `--families video` and speech on (small). Exit 0, 234 s wall,
+730 s CPU on ftf-visual. Outputs (dataset, keyframes, log): `gs://follow-the-fake-data/outputs/visual/hack-16/coverage/`.
+
+| Case | Video artefacts | Keyframes (`image_phash`) | `video_meta` | `screen_size` (collector) | `speech_text` |
+|---|---|---|---|---|---|
+| 5 | 1 ad video | 40 | 2 | – | 1 (2,859 chars) |
+| 14 | 1 screen recording + 2 HLS segments | 40 + 6 + 6 | 2 (segment resolutions) | 1 | 3 |
+| 47 | 1 screen recording | 33 | – | 1 | – (silent track) |
+
+- **The organiser videos produce keyframe features in the contract format:** yes. All five video
+  artefacts gave keyframe indicators with `artefact_id` and `t=<s>s` locators, and the dataset
+  validates. While text, image and faces are not merged, the feature per keyframe is the
+  stopgap `image_phash`. Once they merge, the same keyframes feed them without code changes.
+- **Everything runs on CPU in the container, or is clearly optional:** keyframes are CPU-only
+  ffmpeg + Pillow (seconds per video). Speech is opt-in by flag. ffmpeg still has to be added
+  to the Dockerfile (see the container gap above).
 
 ## Known limits
 
