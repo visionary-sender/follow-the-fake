@@ -96,6 +96,31 @@ def test_defang():
     assert R.defang("https://scam.example.com/a") == "hxxps://scam[.]example[.]com/a"
     assert R.defang("px-1") == "px-1"
     assert R.defang(None) == ""
+    assert R.defang("pi is 3.14") == "pi is 3.14"
+
+
+@pytest.mark.parametrize("raw,want", [
+    ("https://bücher.example/x", "hxxps://bücher[.]example/x"),
+    ("пример.испытание", "пример[.]испытание"),
+    ("visit 例え.テスト now", "visit 例え[.]テスト now"),
+    ("http://xn--bcher-kva.example", "hxxp://xn--bcher-kva[.]example"),
+    ("shop.xn--p1ai", "shop[.]xn--p1ai"),
+    ("scam。example", "scam[.]example"),  # ideographic full stop separates labels too
+    ("a．b．example", "a[.]b[.]example"),  # full-width full stop
+    ("नमस्ते.उदाहरण", "नमस्ते[.]उदाहरण"),  # combining marks inside labels
+    ("„shop.example”", "„shop[.]example”"),  # quotes stay outside the host
+    ("see shop.example… now", "see shop[.]example… now"),
+])
+def test_defang_idn(raw, want):
+    assert R.defang(raw) == want
+
+
+def test_defang_long_string_is_fast():
+    import time
+
+    start = time.perf_counter()
+    R.defang("a" * 20000 + " " + "ü" * 20000)
+    assert time.perf_counter() - start < 2
 
 
 def test_figures_escape_hostile_values(ds):

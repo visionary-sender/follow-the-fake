@@ -15,7 +15,7 @@ from pathlib import Path
 import streamlit as st
 
 from ftf.app import ledger
-from ftf.app.base import load_base
+from ftf.app.base import base_dir, load_base
 from ftf.pipeline import AnalysisInput, analyze
 
 st.set_page_config(page_title="Follow the Fake", layout="wide")
@@ -112,7 +112,7 @@ if st.button("Analyse", type="primary", key="analyze"):
     else:
         _clear_result()  # one run directory at a time: the previous upload copy is deleted
         with st.spinner("Running the pipeline…"):
-            st.session_state["result"] = analyze(inp, base, offline=not online)
+            st.session_state["result"] = analyze(inp, base, offline=not online, base_dir=base_dir(source or None))
     finally:
         if tmp is not None:
             shutil.rmtree(tmp, ignore_errors=True)

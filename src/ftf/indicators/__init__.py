@@ -22,7 +22,14 @@ from types import ModuleType
 
 from ftf.contract import Capture, Dataset, Incident, Indicator
 
-_TOKEN = re.compile(r"(access_token=|\bEAA[A-Za-z0-9]{20,})[^&\s\"']*")
+# access_token as a URL parameter (plain, URL-encoded once or twice, or \u-escaped "=") or as a
+# JSON key (also backslash-escaped or URL-encoded), and bare Meta "EAA..." tokens after any %xx or
+# \u00xx escape. A value ends at a raw or encoded delimiter, not at every "%", so app tokens
+# written "id%7Csecret" are cut whole.
+_TOKEN_SEP = r"(?:=|%3D|%253D|\\u003d|\\?\"\s*:\s*\\?\"|%22%3A%22|%2522%253A%2522)"
+_TOKEN_VALUE = r"(?:(?!%2[0236]|%25|\\u00)[^&\s\"'<>#,;}\\])*"
+_TOKEN_PARAM = re.compile(r"(access_token" + _TOKEN_SEP + ")" + _TOKEN_VALUE, re.I)
+_TOKEN_EAA = re.compile(r"(?:(?<=%[0-9A-Fa-f]{2})|(?<=\\u00[0-9A-Fa-f]{2})|(?<![A-Za-z0-9]))EAA[A-Za-z0-9]{20,}")
 
 
 def extractors() -> list[ModuleType]:
@@ -45,7 +52,8 @@ def _stopped():
 
 
 def redact(text: str) -> str:
-    return _TOKEN.sub(lambda m: m.group(1) + "REDACTED" if m.group(1) == "access_token=" else "REDACTED", text)
+    text = _TOKEN_PARAM.sub(lambda m: m.group(1) + "REDACTED", text)
+    return _TOKEN_EAA.sub("REDACTED", text)
 
 
 def extract_capture(incident: Incident, capture: Capture, root: Path, mods: Iterable[ModuleType]) -> list[Indicator]:
