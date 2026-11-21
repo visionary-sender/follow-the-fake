@@ -29,7 +29,7 @@ Kinds and where they come from:
 - `capture_time`, `capture_day`: the first HAR `startedDateTime`, MHTML `Date:`, the aio visit's
   `created_at`, the archiver's `timestamp_utc`, screenshot file names; `capture_day` is the date part
   of each, plus the capture's `captured_on`.
-- `screenshot_date`: the date in a screenshot's file name ("Zrzut ekranu 2026-10-09 082411.png") or
+- `screenshot_date`: the date in a screenshot's file name ("Zrzut ekranu 2025-01-02 031405.png") or
   its PNG metadata.
 
 Privacy: values that point at a person or a device (IP, geo fields, user name, local path,
