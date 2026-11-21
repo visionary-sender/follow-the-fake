@@ -72,6 +72,7 @@ def test_git_directory_entry():
 def test_secret_contents():
     assert _rules({"usr/lib/k.pem": FAKE_KEY}) == ["private key"]
     assert _rules({"usr/lib/libtls.so": KEY_HEADER_ONLY}) == []
+    assert _rules({"usr/lib/libgnutls.so": b"\x7fELF" + FAKE_KEY}) == []  # sample key inside a library
     assert _rules({"usr/lib/sa.txt": b'{"type": "service_account"}'}) == ["service account"]
     assert _rules({"usr/lib/t.txt": b"token=ghp_" + b"a" * 36}) == ["github token"]
 

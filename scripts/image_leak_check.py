@@ -12,7 +12,7 @@ Rules:
 * paths: `.git`, capture formats (.har, .mhtml, ...), campaign-base files (dataset.json,
   cache.json, build-report.json, vectors/), credential file names, anything under /data or
   /base, images or videos outside library trees (/usr, /etc, /opt/ms-playwright);
-* contents (files up to 32 MB): private keys, service-account JSON and well-known token formats.
+* contents (non-ELF files up to 32 MB): private keys, service-account JSON and well-known token formats.
 
 Standard library only. Hits print paths and the rule, never file contents.
 """
@@ -109,6 +109,10 @@ def path_hits(name: str, raw: RawIndex | None) -> list[str]:
 
 
 def content_hits(data: bytes) -> list[str]:
+    # Compiled libraries carry sample keys and token-like constants (libgnutls has a test key);
+    # a key or token of ours would be a text file, so ELF binaries are not pattern-scanned.
+    if data[:4] == b"\x7fELF":
+        return []
     return [label for label, rx in SECRET_PATTERNS if rx.search(data)]
 
 
