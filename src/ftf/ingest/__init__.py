@@ -20,8 +20,8 @@ Splitting a case folder into captures
    the HTML's ``saved from url`` comment, the HAR's page URL or the MHTML's
    ``Snapshot-Content-Location``. A saved HTML takes its ``<stem>_files/`` folder (files there
    are ``asset`` artefacts, ``.pobrane`` suffixes ignored for typing). A page that names no host
-   joins the only site in the folder. Folder 2 so yields two captures:
-   ``acrosscommunities.live`` (HAR + saved page) and ``healthlinkq.pro`` (case 3's HAR).
+   joins the only site in the folder. Folder 2 so yields two captures, one per site; case 3's
+   HAR becomes its own capture.
 3. Remaining top-level files (screenshots, videos, yt-dlp ``.info.json``, notes) are ad material:
    images are ``ad_screenshot``, ``.info.json`` is ``ad_library``. They join the site capture when
    the folder has exactly one, else they form their own capture (61's ``reklama_1``).
@@ -40,6 +40,9 @@ Stage heuristics
   was); kept when a source states it.
 - ``unknown``: anything else, e.g. a bare URL that was not fetched.
 
+Fetcher and scanner folders (``capture.json``) keep the stages, ids and missing modalities their
+manifest states; see :mod:`ftf.ingest.manifests`.
+
 ``observed`` is ``live`` when the capture holds a HAR of ``http(s)`` traffic, else ``static``. A HAR
 whose page is a ``file://`` URL (61 ``strona_1/.har``: the analyst reopened the saved page) is a
 local-file capture: ``static``, with a note in the timing report. Its URL is never copied out
@@ -56,11 +59,11 @@ from __future__ import annotations
 import os
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from ftf.contract import Dataset
-from ftf.ingest import adapters
+from ftf.contract import ArtefactType, Dataset
+from ftf.ingest import adapters, manifests
 from ftf.ingest.build import CaptureRecord, build
 from ftf.ingest.model import RawIncident
 
@@ -72,6 +75,22 @@ class IngestResult:
     dataset: Dataset
     captures: list[CaptureRecord]
     seconds: float
+    root: Path | None = None
+    unopened: list[str] = field(default_factory=list)  # artefact paths that are not a file under ``root``
+
+    def indicators_by_layer(self) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for ind in self.dataset.indicators():
+            counts[ind.layer.value] = counts.get(ind.layer.value, 0) + 1
+        return dict(sorted(counts.items()))
+
+    def empty_pages(self) -> int:
+        """Non-duplicate captures with an HTML or HAR artefact, when none of them yielded an indicator (else 0)."""
+        pages = {c.id for i in self.dataset.incidents for c in i.captures
+                 if not c.duplicate_of and c.modalities & {ArtefactType.html, ArtefactType.har}}
+        if any(ind.capture_id in pages for ind in self.dataset.indicators()):
+            return 0
+        return len(pages)
 
     def summary(self) -> dict:
         times = [c.seconds for c in self.captures]
@@ -81,6 +100,8 @@ class IngestResult:
             "duplicates": sum(1 for c in self.captures if c.duplicate_of),
             "artefacts": sum(c.artefacts for c in self.captures),
             "indicators": len(self.dataset.indicators()),
+            "indicators_by_layer": self.indicators_by_layer(),
+            "unopened_artefacts": len(self.unopened),
             "seconds_total": round(self.seconds, 3),
             "seconds_per_capture_mean": round(sum(times) / len(times), 4) if times else 0.0,
             "seconds_per_capture_max": round(max(times), 4) if times else 0.0,
@@ -137,12 +158,20 @@ def run(
     raw: list[RawIncident] = []
     for item in items:
         raw.extend(adapters.load(item, fetch=fetch, fetch_dir=fetch_dir, fetcher=fetcher))
+    raw = manifests.merge_fetches(raw)
     if root is None:
         root = default_root(items, [fetch_dir] if fetch and fetch_dir is not None and any(isinstance(i, str) and adapters.is_url(i) for i in items) else [])
     dataset, records = build(raw, Path(root), name)
     if indicators:
         dataset = _extract(dataset, Path(root).resolve(), records)
-    return IngestResult(dataset=dataset, captures=records, seconds=time.perf_counter() - t0)
+    return IngestResult(dataset=dataset, captures=records, seconds=time.perf_counter() - t0, root=Path(root).resolve(),
+                        unopened=_unopened(dataset, Path(root).resolve()))
+
+
+def _unopened(dataset: Dataset, root: Path) -> list[str]:
+    """Artefact paths that extractors cannot open as ``root / path``."""
+    return [a.path for i in dataset.incidents for c in i.captures for a in c.artefacts
+            if a.path is not None and not (root / a.path).is_file()]
 
 
 def _extract(dataset: Dataset, root: Path, records: list[CaptureRecord]) -> Dataset:

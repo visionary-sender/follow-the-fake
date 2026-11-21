@@ -36,6 +36,7 @@ class RawCapture:
     notes: list[str] = field(default_factory=list)
     fixed_id: str | None = None
     seconds: float = 0.0  # extra load time not attributed to an artefact
+    dedup_salt: str = ""  # joins the exact-duplicate key (a fetch's profile: our visit, not content)
 
     def types(self) -> set[ArtefactType]:
         return {a.type for a in self.artefacts}
@@ -68,3 +69,7 @@ class RawIncident:
     ref: str | None = None  # organiser case folder; None for ad-hoc inputs (id from content)
     fixed_id: str | None = None
     notes: list[str] = field(default_factory=list)
+    # fetcher captures only (see ftf.ingest.manifests.merge_fetches)
+    fetch_url: str | None = None  # requested URL
+    fetch_rank: tuple = ()  # default profile first, then start time, then folder name
+    origin: str | None = None  # resolved capture folder
