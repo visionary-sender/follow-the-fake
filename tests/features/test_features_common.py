@@ -78,20 +78,49 @@ def test_writer_ids_vectors_and_roundtrip(raw, tmp_path):
     b = w.add(inc, cap, art, Feature(kind="ocr_text", value="World", locator="line=2"))
     v = w.add(inc, cap, art, Feature(kind="text_embedding", vector=np.array([3.0, 4.0]), model="org/m 1"))
     assert [a.id, b.id] == [f"{cap.id}/ocr_text/0", f"{cap.id}/ocr_text/1"]
-    assert v.value is None and v.vector_ref.store == "vectors/org_m_1" and v.vector_ref.dim == 2
+    assert v.value is None and v.vector_ref.store.startswith("vectors/org_m_1-") and v.vector_ref.dim == 2
     assert b.provenance.locator == "line=2" and b.provenance.artefact_id == art.id
     w.save()
     doc = read_dataset(write_dataset(ds, out))
     assert len(doc.incidents[0].indicators) == 3
-    keys, mat = load_vectors(out, "vectors/org_m_1")
+    keys, mat = load_vectors(out, v.vector_ref.store)
     assert keys == [v.id]
     assert np.allclose(mat, [[0.6, 0.8]])
 
-    # a second writer on the same dataset continues the numbering
-    w2 = IndicatorWriter(ds, out, "test@0")
+    # another extractor continues the numbering; the same extractor replaces its earlier output
+    w2 = IndicatorWriter(ds, out, "other@0")
     assert w2.add(inc, cap, art, Feature(kind="ocr_text", value="!")).id == f"{cap.id}/ocr_text/2"
+    w3 = IndicatorWriter(ds, out, "test@1")
+    assert [i.extractor for i in inc.indicators] == ["other@0"]
+    assert w3.add(inc, cap, art, Feature(kind="ocr_text", value="again")).id == f"{cap.id}/ocr_text/0"
     with pytest.raises(ValueError, match="needs a model"):
-        w2.add(inc, cap, art, Feature(kind="x", vector=np.ones(2)))
+        w3.add(inc, cap, art, Feature(kind="x", vector=np.ones(2)))
+    with pytest.raises(ValueError, match="exactly one"):
+        w3.add(inc, cap, art, Feature(kind="x"))
+
+
+def test_invalid_indicator_stores_no_vector(raw, tmp_path):
+    ds = dataset_from_files([raw / "case 1" / "Zrzut ekranu.png"], raw)
+    inc, cap = ds.incidents[0], ds.incidents[0].captures[0]
+    w = IndicatorWriter(ds, tmp_path, "t@0")
+    with pytest.raises(ValueError):
+        # a collector kind outside the collector layer is rejected by the contract
+        w.add(inc, cap, None, Feature(kind="viewport", vector=np.ones(2), model="m"))
+    assert w.stores["m"].keys == [] and inc.indicators == []
+    ok = w.add(inc, cap, None, Feature(kind="viewport_like", vector=np.ones(2), model="m"))
+    assert w.stores["m"].keys == [ok.id]
+
+
+def test_vector_store_slugs_and_model_check(tmp_path):
+    a, b = VectorStore(tmp_path, "a/b"), VectorStore(tmp_path, "a_b")
+    assert a.slug != b.slug
+    a.add("k", np.ones(2))
+    a.save()
+    clash = VectorStore(tmp_path, "a/b")
+    clash.model = "other"
+    clash.add("k2", np.ones(2))
+    with pytest.raises(ValueError, match="holds"):
+        clash.save()
 
 
 def test_vector_store_merges_and_replaces(tmp_path):
@@ -103,7 +132,7 @@ def test_vector_store_merges_and_replaces(tmp_path):
     s2.add("k2", np.array([1.0, 1.0]))
     s2.add("k3", np.array([2.0, 0.0]))
     s2.save()
-    keys, mat = load_vectors(tmp_path, "vectors/m")
+    keys, mat = load_vectors(tmp_path, s2.store)
     assert keys == ["k1", "k2", "k3"]
     assert np.allclose(mat[1], [2**-0.5, 2**-0.5])
     with pytest.raises(ValueError, match="dim"):
@@ -133,6 +162,43 @@ def test_pipeline_with_stub_family(raw, tmp_path, stub_family):
     assert [i.value for i in inc.indicators] == ["Zrzut ekranu.png"]
     with pytest.raises(ValueError, match="unknown"):
         pipeline.apply_all(ds, raw, tmp_path, families=["nope"])
+    assert pipeline.apply_all(ds, raw, tmp_path, families=[]) is ds  # empty list runs nothing
+
+
+def test_pipeline_skips_family_with_missing_dependency(monkeypatch, capsys):
+    real = pipeline.importlib.import_module
+
+    def fake(name):
+        if name == "ftf.features.image":
+            raise ModuleNotFoundError("No module named 'torch'", name="torch")
+        return real(name)
+
+    monkeypatch.setattr(pipeline.importlib, "import_module", fake)
+    assert "image" not in pipeline.available_families()
+    assert "torch" in capsys.readouterr().err
+
+
+def test_extract_accepts_cross_incident_duplicate(raw, tmp_path, stub_family):
+    art = Artefact(id="a", type=ArtefactType.screenshot, path="case 1/Zrzut ekranu.png")
+    inc = Incident(
+        id="i2",
+        source="t",
+        captures=[
+            Capture(id="c1", stage=Stage.ad, artefacts=[art]),
+            Capture(id="c2", stage=Stage.ad, duplicate_of="other-incident-capture"),
+        ],
+    )
+    out = pipeline.extract(inc, raw, tmp_path, families=["text"])
+    assert [i.capture_id for i in out.indicators] == ["c1"]
+
+
+def test_dataset_from_files_rejects_outside_and_dedups(raw, tmp_path):
+    f = raw / "case 1" / "Zrzut ekranu.png"
+    assert len(dataset_from_files([f, f], raw).incidents) == 1
+    outside = tmp_path / "x.png"
+    outside.write_bytes(b"x")
+    with pytest.raises(SystemExit):
+        dataset_from_files([outside], raw)
 
 
 def test_cli_features(raw, tmp_path, stub_family, capsys):
@@ -155,3 +221,6 @@ def test_cli_features(raw, tmp_path, stub_family, capsys):
     assert doc["incidents"][0]["indicators"][0]["kind"] == "stub"
     with pytest.raises(SystemExit):
         main(["features", "--out", str(out)])
+    with pytest.raises(SystemExit):
+        main(["features", "--files", str(raw / "case 1" / "Zrzut ekranu.png"), "--raw-root", str(raw),
+              "--out", str(out), "--families", " , "])

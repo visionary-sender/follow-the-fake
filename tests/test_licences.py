@@ -40,7 +40,7 @@ def test_certifi_exception_is_exact_and_narrow():
     "licence",
     ["UNLICENSED", "UNKNOWN", "GPL-3.0-only", "MIT AND CC-BY-NC-4.0", "LGPLv3+",
      "MIT License AND GNU General Public License v3 (GPLv3)", "MPL-2.0", "Permitted use only",
-     "CC-BY-SA-4.0", "MIT AND CC-BY-4.0"],
+     "CC-BY-SA-4.0", "MIT AND CC-BY-4.0", "CC0 docs, GPL-3.0 code"],
 )
 def test_not_permissive(licence):
     assert not licences.is_permissive(licence)

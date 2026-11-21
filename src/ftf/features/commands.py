@@ -23,7 +23,11 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
 def run(args: argparse.Namespace) -> int:
     ds = load_input(args)
-    families = args.families.split(",") if args.families else None
+    families = None
+    if args.families is not None:
+        families = [f.strip() for f in args.families.split(",") if f.strip()]
+        if not families:
+            raise SystemExit("--families is empty")
     ds = apply_all(ds, args.raw_root, args.out, families)
     print(write_dataset(ds, args.out))
     return 0

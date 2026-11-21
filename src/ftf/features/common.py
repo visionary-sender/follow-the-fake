@@ -101,6 +101,8 @@ def iter_artefacts(
 class VectorStore:
     """Float32 vectors of one model: ``<out>/vectors/<slug>.npy`` plus ``<slug>.keys.json``.
 
+    ``<slug>`` is the model name made filename-safe plus a short hash of the exact name.
+
     ``VectorRef.store`` is ``vectors/<slug>`` relative to the output directory and ``key`` is the
     indicator id. Embeddings are stored L2-normalised, so a dot product is the cosine.
     """
@@ -108,7 +110,8 @@ class VectorStore:
     def __init__(self, out_dir: Path, model: str):
         self.out_dir = Path(out_dir)
         self.model = model
-        self.slug = "".join(c if c.isalnum() or c in "._-" else "_" for c in model)
+        safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in model)
+        self.slug = f"{safe}-{hashlib.sha1(model.encode()).hexdigest()[:8]}"  # distinct per model
         self.keys: list[str] = []
         self.rows: list[np.ndarray] = []
 
@@ -134,14 +137,22 @@ class VectorStore:
         d.mkdir(parents=True, exist_ok=True)
         keys, rows = list(self.keys), np.stack(self.rows)
         if (d / f"{self.slug}.npy").exists():
+            old_model = json.loads((d / f"{self.slug}.keys.json").read_text())["model"]
+            if old_model != self.model:
+                raise ValueError(f"vector store {self.slug} holds {old_model!r}, not {self.model!r}")
             old_keys, old_rows = load_vectors(self.out_dir, self.store)
             new = set(keys)
             keep = [i for i, k in enumerate(old_keys) if k not in new]
             if keep:
                 keys = [old_keys[i] for i in keep] + keys
                 rows = np.concatenate([old_rows[keep], rows])
-        np.save(d / f"{self.slug}.npy", rows)
-        (d / f"{self.slug}.keys.json").write_text(json.dumps({"model": self.model, "keys": keys}))
+        # Write both files under temporary names, then swap them in, so rows and keys stay aligned.
+        tmp_npy, tmp_keys = d / f".{self.slug}.npy.tmp", d / f".{self.slug}.keys.json.tmp"
+        with open(tmp_npy, "wb") as f:
+            np.save(f, rows)
+        tmp_keys.write_text(json.dumps({"model": self.model, "keys": keys}))
+        os.replace(tmp_npy, d / f"{self.slug}.npy")
+        os.replace(tmp_keys, d / f"{self.slug}.keys.json")
 
 
 def load_vectors(out_dir: Path, store: str) -> tuple[list[str], np.ndarray]:
@@ -152,13 +163,21 @@ def load_vectors(out_dir: Path, store: str) -> tuple[list[str], np.ndarray]:
 
 
 class IndicatorWriter:
-    """Turns Features into Indicators with ids ``<capture_id>/<kind>/<n>`` (as in the fixture)."""
+    """Turns Features into Indicators with ids ``<capture_id>/<kind>/<n>`` (as in the fixture).
+
+    Creating a writer removes indicators an earlier run of the same extractor (same name, any
+    version) left in the dataset, so re-running a family replaces its output instead of
+    duplicating it. Their vector rows are overwritten when the same ids are written again.
+    """
 
     def __init__(self, ds: Dataset, out_dir: Path, extractor: str):
         self.ds = ds
         self.out_dir = Path(out_dir)
         self.extractor = extractor
         self.stores: dict[str, VectorStore] = {}
+        name = extractor.split("@", 1)[0]
+        for inc in ds.incidents:
+            inc.indicators = [i for i in inc.indicators if i.extractor.split("@", 1)[0] != name]
         self.ids = {ind.id for inc in ds.incidents for ind in inc.indicators}
 
     def _next_id(self, capture_id: str, kind: str) -> str:
@@ -177,14 +196,36 @@ class IndicatorWriter:
         feature: Feature,
         observed: Observed = Observed.static,
     ) -> Indicator:
-        ind_id = self._next_id(cap.id, feature.kind)
-        vector_ref = None
+        if (feature.value is None) == (feature.vector is None):
+            raise ValueError(f"{feature.kind}: set exactly one of value / vector")
+        store = None
+        vector = None
         if feature.vector is not None:
             if not feature.model:
                 raise ValueError(f"{feature.kind}: a vector feature needs a model")
+            vector = np.asarray(feature.vector, dtype=np.float32).ravel()
             store = self.stores.setdefault(feature.model, VectorStore(self.out_dir, feature.model))
-            vector_ref = store.add(ind_id, feature.vector)
-        ind = Indicator(
+            if store.rows and vector.shape != store.rows[0].shape:
+                raise ValueError(f"{feature.model}: dim {vector.shape[0]} != {store.rows[0].shape[0]}")
+        ind_id = self._next_id(cap.id, feature.kind)
+        vector_ref = (
+            VectorRef(store=store.store, key=ind_id, model=feature.model, dim=int(vector.shape[0]))
+            if store is not None
+            else None
+        )
+        # Build (and so validate) the indicator before its vector is stored.
+        try:
+            ind = self._indicator(ind_id, cap, art, feature, vector_ref, observed)
+        except Exception:
+            self.ids.discard(ind_id)
+            raise
+        if store is not None:
+            store.add(ind_id, vector)
+        inc.indicators.append(ind)
+        return ind
+
+    def _indicator(self, ind_id, cap, art, feature, vector_ref, observed) -> Indicator:
+        return Indicator(
             id=ind_id,
             capture_id=cap.id,
             layer=feature.layer,
@@ -198,8 +239,6 @@ class IndicatorWriter:
             ),
             extractor=self.extractor,
         )
-        inc.indicators.append(ind)
-        return ind
 
     def save(self) -> None:
         for store in self.stores.values():
@@ -244,7 +283,11 @@ def dataset_from_files(paths: Iterable[Path], raw_root: Path, name: str = "dev-f
     """
     root = raw_root.resolve()
     incidents = []
-    for p in sorted(Path(x).resolve() for x in paths):
+    for p in sorted({Path(x).resolve() for x in paths}):
+        if not p.is_file():
+            raise SystemExit(f"not a file: {p}")
+        if not p.is_relative_to(root):
+            raise SystemExit(f"{p} is outside the raw root {root}")
         rel = p.relative_to(root).as_posix()
         h = hashlib.sha1(rel.encode()).hexdigest()[:12]
         art = Artefact(id=f"dev/{h}/a0", type=_artefact_type(p), path=rel, size=p.stat().st_size)
