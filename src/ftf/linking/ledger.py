@@ -322,8 +322,12 @@ def verdict(score: PairScore, ctx: ScoringContext) -> str:
     return "review" if score.bits > 0 and score.bits >= tau - REVIEW_BAND else "no link"
 
 
-def _private_conflict(score: PairScore) -> bool:
+def has_private_conflict(score: PairScore) -> bool:
+    """A tenant or owner conflict: the two captures belong to different operators (cannot-link)."""
     return any(r.status is EvidenceStatus.conflict and r.layer in (Layer.tenant, Layer.owner) for r in score.rows)
+
+
+_private_conflict = has_private_conflict
 
 
 def level_of(score: PairScore) -> LinkLevel:
