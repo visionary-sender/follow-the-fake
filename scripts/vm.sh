@@ -61,7 +61,7 @@ if [ ! -x "$w/venv/bin/python" ] || [ "$(cat "$w/venv/.pyproject-hash" 2>/dev/nu
   python3 -m venv "$w/venv"
   /opt/venv-base/bin/pip freeze --exclude-editable > "$w/base-constraints.txt"
   "$w/venv/bin/pip" install -q --disable-pip-version-check \
-    -c "$w/base-constraints.txt" -e "$w/src[app,dev]" >&2
+    -c "$w/base-constraints.txt" -e "$w/src[app,dev,fetch]" >&2
   echo "$hash" > "$w/venv/.pyproject-hash"
 fi
 cd "$w/src"
