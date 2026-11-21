@@ -12,12 +12,22 @@ from collections.abc import Callable, Sequence
 from ftf import __version__
 from ftf.enrich.commands import register as register_enrich_domain
 from ftf.features.commands import register as register_features
+from ftf.ingest.commands import register as register_ingest
+from ftf.linking.commands import register_assign
+from ftf.linking.commands import register_link
 from ftf.linking.commands import register_score
+from ftf.pipeline.commands import register_analyze
+from ftf.pipeline.commands import register_serve
 
 COMMANDS: list[Callable[[argparse._SubParsersAction], None]] = [
+    register_analyze,
+    register_assign,
     register_enrich_domain,
     register_features,
+    register_ingest,
+    register_link,
     register_score,
+    register_serve,
 ]
 
 

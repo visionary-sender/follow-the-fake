@@ -10,6 +10,8 @@ license = "LicenseRef-Proprietary"
 requires-python = ">=3.11"
 dynamic = ["version"]
 dependencies = [
+    "datasketch>=1.6,<3",
+    "lxml>=5,<7",
     "numpy>=2,<3",
     "pydantic>=2,<3",
     "tldextract>=5.4,<6",
@@ -40,3 +42,8 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+
+[tool.setuptools.package-data]
+
+"ftf.indicators" = ["stoplist.json"]
