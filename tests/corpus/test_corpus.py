@@ -526,3 +526,20 @@ def test_tag_ingested_scanner_items_and_check(corpus, tmp_path):
     empty = {"incidents": [{"id": "fetch:x", "captures": [{"id": "fetch:x:c1", "observed": "live"}], "indicators": []}]}
     with pytest.raises(SystemExit):
         check_indicators({"indicators_by_layer": {}}, empty)
+
+
+def test_tag_ingested_merged_refetch(corpus, tmp_path):
+    from ftf.corpus.ingested import tag_ingested
+
+    root, picked = corpus
+    build_corpus(root, "scanner", [RUN], ["fetch-1", "fetch-2"], None, [], "t")
+    # The reader merged the failed first fetch of a URL with the later one: the incident id names
+    # the first folder only; the second folder appears in the artefact paths.
+    ing = {"incidents": [{"id": "fetch:cap-lp-old", "captures": [
+        {"id": "fetch:cap-lp-old:c1", "artefacts": [{"path": "fetch-1/cap-lp-old/url.txt"}]},
+        {"id": "fetch:cap-lp-old:c2", "artefacts": [{"path": "fetch-2/cap-lp/page.html"}]}], "indicators": []}]}
+    (tmp_path / "ing.json").write_text(json.dumps(ing))
+    out = tmp_path / "k.jsonl"
+    s = tag_ingested(tmp_path / "ing.json", root / "manifest.jsonl", out)
+    (row,) = map(json.loads, out.read_text().splitlines())
+    assert s["untagged"] == 0 and row["corpus_kind"] == "fetched_landing" and "cap-lp" in row["fetch_folders"]

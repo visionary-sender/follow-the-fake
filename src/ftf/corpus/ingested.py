@@ -54,6 +54,13 @@ def tag_ingested(dataset_path: Path, manifest_path: Path, out_path: Path) -> dic
     with open(out_path, "w", encoding="utf-8") as fh:
         for inc in ds.get("incidents", []):
             folders = {f for f in (fetch_id(inc["id"]), *(fetch_id(c["id"]) for c in inc["captures"])) if f}
+            # A merged incident (re-fetches of one URL) names only its first fetch in its ids; the
+            # other fetch folders show up in the artefact paths (<fetch dir>/<folder>/<file>).
+            for c in inc["captures"]:
+                for a in c.get("artefacts", []):
+                    parts = (a.get("path") or "").split("/")
+                    if len(parts) >= 3 and parts[-2] in by_fetch:
+                        folders.add(parts[-2])
             hits = [(r, prof, f) for f in sorted(folders) for r, prof in by_fetch.get(f, [])]
             item_rows = by_item.get(inc["id"], [])
             if item_rows:  # a scanner item itself (ad or CERT listing), ingested from scanner-v1
