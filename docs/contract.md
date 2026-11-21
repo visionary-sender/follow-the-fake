@@ -54,8 +54,8 @@ Enums:
 3. `missing` and `hub_subsumed` rows carry 0 bits. A missing modality is never a penalty.
 4. A capture cannot list a modality as both present and missing.
 5. All references resolve: indicator → capture and artefact of the same incident, link → captures,
-   evidence → indicators (with the same layer), campaign → captures and links, assignment →
-   incident and candidate campaigns. Ids are unique per entity type. Unknown fields are rejected.
+   evidence → indicators (same layer and kind, from one of the two linked incidents), campaign → captures and links, assignment →
+   incident and candidate campaigns. `duplicate_of` points at a canonical capture in any incident. Ids are unique per entity type. Unknown fields are rejected.
 6. A link's two endpoints differ. `decision = assign` requires a `campaign_id` among the
    candidates; `new` and `review` must not set one.
 
@@ -63,9 +63,10 @@ Enums:
 
 `CONTRACT_VERSION = "0.1.0"` is written into every `Dataset` and checked on load. While the
 major version is 0, a **minor** bump is breaking: renamed or removed fields, changed enum
-members, tighter invariants. A **patch** bump is additive and backwards compatible, such as a new
-optional field or a new indicator `kind` (kinds are free snake_case strings). Documents with the
-same `0.MINOR` load. Anything else fails validation. v0.1 is frozen. Propose changes on Linear
+members, tighter invariants. A **patch** bump is additive, such as a new optional field or a new indicator `kind` (kinds are
+free snake_case strings). New code reads older documents of the same `0.MINOR`. Unknown fields
+are rejected, so read a newer-patch document with code at least that new. Any other version
+fails validation. v0.1 is frozen. Propose changes on Linear
 before editing the models.
 
 ## Fixture v0 (private; not in git)

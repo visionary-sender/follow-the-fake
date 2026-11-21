@@ -117,9 +117,9 @@ def sha256(p: Path) -> str:
 def art_type(p: Path, stage: str) -> str:
     if any(part.endswith("_files") for part in p.parts[:-1]):
         return "asset"
-    name = p.name.lower()
+    name = p.name.lower().removesuffix(".pobrane")
     ext = "." + name.rsplit(".", 1)[-1] if "." in name else ""
-    if ext in (".png", ".jpg", ".jpeg", ".webp"):
+    if ext in IMAGE_EXT:
         return "ad_screenshot" if stage == "ad" else "screenshot"
     return {".har": "har", ".html": "html", ".htm": "html", ".mhtml": "mhtml", ".mp4": "video",
             ".webm": "video", ".txt": "text"}.get(ext, "other")
@@ -128,11 +128,11 @@ def art_type(p: Path, stage: str) -> str:
 def select(folder: Path, selector: str) -> list[Path]:
     top = sorted(p for p in folder.iterdir())
     if selector == "top-image":
-        return [p for p in top if p.is_file() and p.suffix.lower() in (".png", ".jpg", ".jpeg")]
+        return [p for p in top if p.is_file() and p.suffix.lower() in IMAGE_EXT]
     if selector == "top-page":
         out = []
         for p in top:
-            if p.is_file() and p.suffix.lower() not in (".png", ".jpg", ".jpeg"):
+            if p.is_file() and p.suffix.lower() not in IMAGE_EXT:
                 out.append(p)
             elif p.is_dir() and p.name.endswith("_files"):
                 out.extend(sorted(q for q in p.rglob("*") if q.is_file()))
@@ -147,6 +147,8 @@ def find_folder(raw: Path, source: str, folder: str) -> Path:
     (do_dir,) = [p for p in raw.iterdir() if unicodedata.normalize("NFC", p.name) == "do_udostępnienia"]
     return do_dir / folder
 
+
+IMAGE_EXT = (".png", ".jpg", ".jpeg", ".webp")
 
 EXPECTED = {"ad": ["ad_screenshot", "video", "ad_library"], "lander": ["html", "har"], "decoy": ["html", "har"]}
 
@@ -169,7 +171,7 @@ def build(raw: Path, derived: Path) -> Dataset:
             for i, p in enumerate(select(root, selector)):
                 t = art_type(p.relative_to(root), stage)
                 aid = f"{cap_id}/a{i:02d}"
-                artefacts.append({"id": aid, "type": t, "path": f"{source}/{folder}/{p.relative_to(root).as_posix()}",
+                artefacts.append({"id": aid, "type": t, "path": p.relative_to(raw).as_posix(),
                                   "sha256": sha256(p), "size": p.stat().st_size})
                 if t in ("har", "html"):
                     cap_blobs.append((aid, t, p.read_bytes()))
@@ -181,14 +183,14 @@ def build(raw: Path, derived: Path) -> Dataset:
             blobs[cap_id] = cap_blobs
             seen = set()
 
-            def add(layer, level, kind, value, prov_note=None, cap_id=cap_id, cap_blobs=cap_blobs, seen=seen):
+            def add(layer, level, kind, value, prov_note=None, search=True, cap_id=cap_id, cap_blobs=cap_blobs, seen=seen):
                 key = (kind, value)
                 if key in seen:
                     return
                 seen.add(key)
                 observed, aid = "static", None
                 needle = value.encode()
-                for a_id, t, data in sorted(cap_blobs, key=lambda b: b[1] != "har"):
+                for a_id, t, data in (sorted(cap_blobs, key=lambda b: b[1] != "har") if search else []):
                     if needle in data:
                         observed, aid = ("live" if t == "har" else "static"), a_id
                         break
@@ -204,7 +206,8 @@ def build(raw: Path, derived: Path) -> Dataset:
             for sub, (layer, level, kind, n) in SIG_MAP.items():
                 vals = [v for v in node_sig.get(sub, []) if not (sub == "landing_cdn_account" and v in platform_ids)]
                 for v in vals[:n]:
-                    add(layer, level, kind, "present" if sub == "hue_rotate" else str(v), "prototype signals.json")
+                    add(layer, level, kind, "present" if sub == "hue_rotate" else str(v), "prototype signals.json",
+                        search=sub != "hue_rotate")
             for a_id, t, data in cap_blobs:
                 if t != "har":
                     continue
@@ -217,7 +220,7 @@ def build(raw: Path, derived: Path) -> Dataset:
                 if page:
                     add("distribution_account", "operator", "advertiser_page_name", page, "read from ad screenshot")
                 if day:
-                    add("collector", "capture", "screenshot_date", day, "screenshot file name")
+                    add("collector", "capture", "screenshot_date", day, "case card capture date", search=False)
             if stage in ("lander", "decoy") and "html" in present:
                 indicators.append({
                     "id": f"{cap_id}/text_embedding/0", "capture_id": cap_id, "layer": "creative",
@@ -279,10 +282,11 @@ def build(raw: Path, derived: Path) -> Dataset:
                     rows.append({"layer": layer, "kind": kind, "status": "shared" if count_platform else "hub_subsumed",
                                  "value": val, "bits": bits, "indicator_ids": ids})
                     score += bits
-                elif kind in WEIGHTS:
+                else:
+                    bits = WEIGHTS.get(kind, 0.0)
                     rows.append({"layer": layer, "kind": kind, "status": "shared", "value": val,
-                                 "bits": WEIGHTS[kind], "indicator_ids": ids})
-                    score += WEIGHTS[kind]
+                                 "bits": bits, "indicator_ids": ids})
+                    score += bits
             elif ia and ib and kind in SINGLE_VALUED and not count_platform:
                 rows.append({"layer": layer, "kind": kind, "status": "conflict",
                              "value": f"{ia[0]['value'][:12]} vs {ib[0]['value'][:12]}",
@@ -294,7 +298,7 @@ def build(raw: Path, derived: Path) -> Dataset:
         return rows, round(score, 2)
 
     def level(score: float, rows: list[dict]) -> str:
-        layers = {r["layer"] for r in rows if r["status"] == "shared"}
+        layers = {r["layer"] for r in rows if r["status"] == "shared" and r["bits"] > 0}
         if score >= 10 and len(layers) >= 2:
             return "strict"
         return "medium" if score >= 4 else "loose"
@@ -302,6 +306,9 @@ def build(raw: Path, derived: Path) -> Dataset:
     links = []
     for lid, a, b, rel, count_platform in LINKS:
         rows, score = ledger(a, b, count_platform)
+        if not rows:
+            print(f"  skip {lid}: empty ledger")
+            continue
         links.append({"id": lid, "a": a, "b": b, "relation": rel, "level": level(score, rows),
                       "score_bits": score, "method": f"{EXTRACTOR} D1 priors (illustrative)", "evidence": rows})
 

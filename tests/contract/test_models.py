@@ -163,6 +163,9 @@ def test_collector_indicator_cannot_back_shared_row():
         (lambda d: d["assignments"][0].update(decision="review"), "only allowed with 'assign'"),
         (lambda d: d["incidents"][1].update(id="inc1"), "duplicate incident"),
         (lambda d: d.update(surprise=1), "surprise"),
+        (lambda d: d["incidents"][0]["captures"][0].update(duplicate_of="ghost"), "duplicate_of unknown"),
+        (lambda d: d["links"][0]["evidence"][0].update(kind="google_ads_id"), "row kind"),
+        (lambda d: d["links"][0].update(b="inc1/ad"), "not from either linked incident"),
     ],
 )
 def test_invalid_documents(mutate, match):
@@ -170,3 +173,17 @@ def test_invalid_documents(mutate, match):
     mutate(doc)
     with pytest.raises(ValidationError, match=match):
         Dataset.model_validate(doc)
+
+
+def test_duplicate_of_may_cross_incidents_but_not_chain():
+    doc = _doc()
+    doc["incidents"][1]["captures"][1]["duplicate_of"] = "inc1/lander"
+    Dataset.model_validate(doc)
+    doc["incidents"][0]["captures"][1]["duplicate_of"] = "inc1/ad"
+    with pytest.raises(ValidationError, match="canonical"):
+        Dataset.model_validate(doc)
+
+
+@pytest.mark.parametrize("version", ["00.1.0", "0.01.3"])
+def test_version_compares_numerically(version):
+    Dataset.model_validate({**_doc(), "contract_version": version})

@@ -6,6 +6,7 @@ Links and campaigns therefore point at capture ids; incidents group captures.
 
 from __future__ import annotations
 
+import re
 from enum import Enum
 from typing import Optional
 
@@ -132,12 +133,12 @@ def linkable(indicator: "Indicator") -> bool:
 
 
 def _check_version(v: str) -> str:
-    parts = v.split(".")
-    if len(parts) != 3 or not all(p.isdigit() for p in parts):
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", v):
         raise ValueError(f"contract_version {v!r} is not MAJOR.MINOR.PATCH")
-    ours = CONTRACT_VERSION.split(".")
+    parts = [int(p) for p in v.split(".")]
+    ours = [int(p) for p in CONTRACT_VERSION.split(".")]
     # 0.x: a minor bump is breaking. From 1.0 on only the major must match.
-    want = 2 if ours[0] == "0" else 1
+    want = 2 if ours[0] == 0 else 1
     if parts[:want] != ours[:want]:
         raise ValueError(f"contract_version {v} is incompatible with {CONTRACT_VERSION}")
     return v
@@ -146,7 +147,7 @@ def _check_version(v: str) -> str:
 class Artefact(_Model):
     id: str = Field(pattern=_ID)
     type: ArtefactType
-    path: Optional[str] = None  # relative to the source dataset root
+    path: Optional[str] = None  # relative to the raw data root, as stored on disk
     sha256: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     size: Optional[int] = Field(default=None, ge=0)
 
@@ -229,9 +230,6 @@ class Incident(_Model):
     def _refs(self) -> "Incident":
         cap_ids = {c.id for c in self.captures}
         art_ids = {a.id for c in self.captures for a in c.artefacts}
-        for c in self.captures:
-            if c.duplicate_of is not None and c.duplicate_of not in cap_ids:
-                raise ValueError(f"capture {c.id}: duplicate_of {c.duplicate_of} not in incident {self.id}")
         for ind in self.indicators:
             if ind.capture_id not in cap_ids:
                 raise ValueError(f"indicator {ind.id}: capture {ind.capture_id} not in incident {self.id}")
@@ -349,17 +347,32 @@ class Dataset(_Model):
         link_ids = unique([l.id for l in self.links], "link")
         camp_ids = unique([c.id for c in self.campaigns], "campaign")
 
+        captures = {c.id: c for i in self.incidents for c in i.captures}
+        incident_of = {c.id: i.id for i in self.incidents for c in i.captures}
+        for c in captures.values():
+            dup = c.duplicate_of
+            if dup is not None:
+                if dup not in captures:
+                    raise ValueError(f"capture {c.id}: duplicate_of unknown capture {dup}")
+                if captures[dup].duplicate_of is not None:
+                    raise ValueError(f"capture {c.id}: duplicate_of must point at a canonical capture, not {dup}")
+
         for l in self.links:
             for end in (l.a, l.b):
                 if end not in cap_ids:
                     raise ValueError(f"link {l.id}: unknown capture {end}")
+            ends = {incident_of[l.a], incident_of[l.b]}
             for row in l.evidence:
                 for iid in row.indicator_ids:
                     ind = indicators.get(iid)
                     if ind is None:
                         raise ValueError(f"link {l.id}: unknown indicator {iid}")
+                    if incident_of[ind.capture_id] not in ends:
+                        raise ValueError(f"link {l.id}: indicator {iid} is not from either linked incident")
                     if not linkable(ind) and row.status is not EvidenceStatus.collector_excluded:
                         raise ValueError(f"link {l.id}: collector indicator {iid} used as evidence")
+                    if ind.kind != row.kind:
+                        raise ValueError(f"link {l.id}: indicator {iid} kind {ind.kind} != row kind {row.kind}")
                     if ind.layer is not row.layer:
                         raise ValueError(f"link {l.id}: indicator {iid} layer {ind.layer.value} != row layer {row.layer.value}")
         for c in self.campaigns:
