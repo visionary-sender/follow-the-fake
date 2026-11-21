@@ -350,7 +350,8 @@ def apply(ds: Dataset, raw_root: Path, out_dir: Path) -> Dataset:
                 value=f"{info.width}x{info.height}", note="screen recording",
             ))
         else:
-            if info.duration > 0:
+            # an HLS segment's duration is the segment's, not the video's
+            if info.duration > 0 and Path(art.path).suffix.lower() not in TS_SUFFIXES:
                 writer.add(inc, cap, art, Feature(kind="video_meta", value=f"duration_s={info.duration:.1f}"))
             writer.add(inc, cap, art, Feature(kind="video_meta", value=f"resolution={info.width}x{info.height}"))
 
