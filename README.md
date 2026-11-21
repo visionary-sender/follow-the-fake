@@ -226,7 +226,9 @@ scripts/vm.sh test tests/fetch
 Ad libraries and cloaked scam pages rate-limit or block a single cloud IP. While building the
 corpus we spread collection over a few short-lived Google Cloud VMs (`scripts/egress.sh`), each a
 clone of the sandbox's safety model (no service account, IAP-only SSH, no firewall rule of its own,
-deleted automatically after 2 h), each with its own ephemeral IP, at low volume per IP. This was
+deleted automatically after 2 h), each with its own ephemeral IP, at low volume per IP. Workers are
+sandbox VMs in the sense of the project rule: live scam pages are fetched there and nowhere else
+besides `ftf-sandbox`, and captures go straight to the workbench. This was
 used only to build the corpus during the hackathon. It is opt-in: the container and the demo never
 use it, and nothing changes when it is absent.
 

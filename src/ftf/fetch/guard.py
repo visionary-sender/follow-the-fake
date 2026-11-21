@@ -323,6 +323,14 @@ class GuardProxy:
     async def _via_upstream(self, ip: IPAddress, port: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
         up = self.upstream
         r, w = await asyncio.open_connection(up.host, up.port)
+        try:
+            return await self._connect_handshake(r, w, ip, port)
+        except BaseException:  # refusal, reset or the caller's timeout: never leak the socket
+            w.close()
+            raise
+
+    async def _connect_handshake(self, r, w, ip: IPAddress, port: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+        up = self.upstream
         target = f"[{ip}]:{port}" if ip.version == 6 else f"{ip}:{port}"
         lines = [f"CONNECT {target} HTTP/1.1", f"Host: {target}"]
         auth = up.authorization()
@@ -333,12 +341,10 @@ class GuardProxy:
         try:
             head = await r.readuntil(b"\r\n\r\n")
         except (asyncio.IncompleteReadError, asyncio.LimitOverrunError):
-            w.close()
             raise _UpstreamRefused(f"upstream proxy {up.label}: no valid reply to CONNECT") from None
         status = head.split(b"\r\n", 1)[0].decode("latin-1", "replace")
         parts = status.split()
         if len(parts) < 2 or not parts[0].startswith("HTTP/1.") or parts[1] != "200":
-            w.close()
             raise _UpstreamRefused(f"upstream proxy {up.label} refused CONNECT: {status[:80]}")
         return r, w
 

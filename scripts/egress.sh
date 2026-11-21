@@ -15,6 +15,7 @@
 #   scripts/egress.sh pull <run>               copy /srv/ftf/captures/<run> from every worker to the workbench
 #                                              /data/derived/egress/, then rsync it to the bucket
 #   scripts/egress.sh down                     delete every worker and confirm none is left
+#   scripts/egress.sh flags                    dry run: print the create command (no cloud call)
 #
 # Workers are named ftf-egress-<n>; worker n goes to zone n of $EGRESS_ZONES (cycled; default: the
 # three Warsaw zones, then Frankfurt, Eemshaven, Hamina). Each one has ftf-sandbox's safety model:
@@ -43,7 +44,7 @@ WB_DEST=/data/derived/egress
 BUCKET_DEST=gs://follow-the-fake-data/outputs/egress/
 MAX_WORKERS=12
 
-usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 die() { echo "egress.sh: $*" >&2; exit 1; }
 [ $# -ge 1 ] || usage
 mode=$1; shift
@@ -88,11 +89,10 @@ each() {
   return $rc
 }
 
-create_vm() {  # create_vm <name> <zone> <salt>
-  gcloud compute instances create "$1" --project "$PROJECT" --zone "$2" \
+create_args() {  # create_args <name> <zone> <salt>: the full create command, one place for every flag
+  printf '%s\0' gcloud compute instances create "$1" --project "$PROJECT" --zone "$2" \
     --machine-type "$MACHINE" \
-    --image-family debian-12 --image-project debian-cloud \
-    --boot-disk-size 15GB --boot-disk-type pd-balanced \
+    --create-disk "boot=yes,auto-delete=yes,image-family=debian-12,image-project=debian-cloud,size=15GB,type=pd-balanced" \
     --provisioning-model STANDARD \
     --no-service-account --no-scopes \
     --labels "$ISSUE_LABEL,purpose=egress" \
@@ -100,6 +100,11 @@ create_vm() {  # create_vm <name> <zone> <salt>
     --metadata "ftf-egress-salt=$3" \
     --max-run-duration "$MAX_RUN" --instance-termination-action DELETE \
     --shielded-secure-boot --shielded-vtpm --shielded-integrity-monitoring
+}
+create_vm() {
+  local args=()
+  while IFS= read -r -d '' a; do args+=("$a"); done < <(create_args "$@")
+  "${args[@]}"
 }
 
 # Provisioning, run as root on a worker. Idempotent. Same users and transfer command as ftf-sandbox.
@@ -131,7 +136,9 @@ case "${1:-}" in
     exec tar -C /srv/ftf/captures -czf - "$2" ;;
   put-list)
     [ $# -eq 2 ] && name_ok "$2" || { echo "usage: put-list <name>" >&2; exit 2; }
-    head -c 10000000 > "/srv/ftf/inbox/.$2.tmp"; mv "/srv/ftf/inbox/.$2.tmp" "/srv/ftf/inbox/$2" ;;
+    head -c 10000001 > "/srv/ftf/inbox/.$2.tmp"
+    if [ "$(wc -c < "/srv/ftf/inbox/.$2.tmp")" -gt 10000000 ]; then rm -f "/srv/ftf/inbox/.$2.tmp"; echo "list larger than 10 MB" >&2; exit 2; fi
+    mv "/srv/ftf/inbox/.$2.tmp" "/srv/ftf/inbox/$2" ;;
   *) echo "allowed: pull <run> | put-list <name>" >&2; exit 2 ;;
 esac
 XFER
@@ -225,6 +232,9 @@ show='cd /srv/ftf/jobs || exit 0; for p in *.pid; do [ -e "$p" ] || continue; j=
 running_jobs='for p in /srv/ftf/jobs/*.pid; do [ -e "$p" ] || continue; kill -0 "$(cat "$p")" 2>/dev/null && basename "$p" .pid; done; true'
 
 case "$mode" in
+  flags)  # dry run: print the create command for worker 1 (no cloud call)
+    create_args "${PREFIX}1" "${ZONES[0]}" "<salt>" | tr '\0' ' '; echo
+    ;;
   up)
     [ $# -eq 1 ] && [ "$1" -ge 1 ] 2>/dev/null && [ "$1" -le $MAX_WORKERS ] || die "usage: up <N>, 1 <= N <= $MAX_WORKERS"
     existing=$(workers)
@@ -232,8 +242,9 @@ case "$mode" in
     salt=""
     first=$(echo "$existing" | awk 'NF {print $1" "$2; exit}')
     if [ -n "$first" ]; then
-      salt=$(gcloud compute instances describe ${first% *} --project "$PROJECT" --zone ${first#* } \
-        --format='value(metadata.items.ftf-egress-salt)')
+      salt=$(gcloud compute instances describe "${first% *}" --project "$PROJECT" --zone "${first#* }" --format=json \
+        | python3 -I -c 'import json,sys; print(next((i["value"] for i in json.load(sys.stdin).get("metadata",{}).get("items",[]) if i.get("key")=="ftf-egress-salt"),""))')
+      [ -n "$salt" ] || die "${first% *} has no ftf-egress-salt; run down first"
     fi
     [ -n "$salt" ] || salt=$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')
     new=()
@@ -244,6 +255,8 @@ case "$mode" in
       else
         echo "egress.sh: creating $vm in $z ($MACHINE, no service account, deleted after $MAX_RUN)" >&2
         create_vm "$vm" "$z" "$salt" >/dev/null
+        # Disks do not inherit instance labels: label the boot disk too, for cost attribution.
+        gcloud compute disks add-labels "$vm" --project "$PROJECT" --zone "$z" --labels "$ISSUE_LABEL,purpose=egress" >/dev/null
       fi
       new+=("$vm")
     done

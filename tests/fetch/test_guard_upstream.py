@@ -167,3 +167,10 @@ def test_scanner_client_uses_the_proxy(tmp_path, monkeypatch):
     handlers = [h for h in Client()._opener.handlers if isinstance(h, urllib.request.ProxyHandler)]
     assert handlers[0].proxies["https"] == "http://u:p@pl.proxy.example:7000"
     assert meta._proxy_option() == {"proxy": {"server": "http://pl.proxy.example:7000", "username": "u", "password": "p"}}
+
+
+def test_unreadable_proxy_file_is_an_error_not_direct(tmp_path):
+    d = tmp_path / "proxy.env"
+    d.mkdir()  # exists but cannot be read as a file
+    with pytest.raises(ValueError):
+        egress.upstream_proxy(d)

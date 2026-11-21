@@ -123,8 +123,10 @@ def upstream_proxy(path: str | Path | None = None) -> Upstream | None:
     p = Path(path) if path is not None else Path(os.environ.get("FTF_PROXY_FILE") or DEFAULT_PROXY_FILE)
     try:
         text = p.read_text(encoding="utf-8")
-    except OSError:
+    except FileNotFoundError:
         return None
+    except OSError as e:  # present but unreadable: fail, never fall back to a direct connection
+        raise ValueError(f"{p}: cannot read the proxy file ({type(e).__name__})") from None
     for line in text.splitlines():
         key, sep, value = line.strip().partition("=")
         if sep and key.strip() == "FTF_PROXY_URL":
