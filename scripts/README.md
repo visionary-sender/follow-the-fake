@@ -30,6 +30,7 @@ What it does, in order:
    that the gcloud configuration `follow-the-fake` points at `follow-the-fake` (reads the
    local config file).
 8. Linear API key for `linear_api.py` is in the keychain (existence only).
+8b. In a worktree, symlinks the gitignored `CLAUDE.md` and `.claude/settings.json` from the main checkout.
 9. Fails if challenge data (BACKUP/, do_udostępnienia/, data/, PDFs, HARs) is tracked in git.
 10. Prints three working rules.
 

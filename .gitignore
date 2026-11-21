@@ -36,7 +36,6 @@ __pycache__/
 .ipynb_checkpoints/
 .DS_Store
 .env
-.claude/settings.local.json
 .playwright-mcp/
 
 # model weights
@@ -45,3 +44,20 @@ __pycache__/
 *.onnx
 *.safetensors
 *.ckpt
+
+# Agent/Claude material stays local: only human-facing README.md goes into the repo.
+# (worktrees get CLAUDE.md and .claude/settings.json symlinked by scripts/orca-setup.sh)
+CLAUDE.md
+CLAUDE.local.md
+AGENTS.md
+GEMINI.md
+.claude/
+.agents/
+.codex/
+.cursor/
+tasks/
+decisions/
+plans/
+notes/
+*.plan.md
+*.local.md

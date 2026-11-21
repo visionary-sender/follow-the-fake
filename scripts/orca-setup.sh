@@ -282,6 +282,21 @@ else
   warn "linear key: missing in keychain (service linear-api-giraffes, account $GH_USER); linear_api.py will not work"
 fi
 
+# ---- 8b. Local agent files (gitignored, linked from the main checkout) -----------------
+if [ "$wt" != "$main" ]; then
+  for f in CLAUDE.md .claude/settings.json; do
+    if [ -e "$wt/$f" ] || [ -L "$wt/$f" ]; then
+      ok "agent file: $f present"
+    elif [ ! -f "$main/$f" ]; then
+      warn "agent file: $f missing in main checkout; nothing to link"
+    elif [ $mutate -eq 1 ] && mkdir -p "$(dirname "$wt/$f")" && ln -s "$main/$f" "$wt/$f"; then
+      ok "agent file: linked $f from main checkout"
+    else
+      warn "agent file: $f not linked (run: ln -s $(q "$main/$f") $(q "$wt/$f"))"
+    fi
+  done
+fi
+
 # ---- 9. Data guard ---------------------------------------------------------------------
 tracked="$(git ls-files -- BACKUP 'do_udostępnienia' data '*.pdf' '*.har' 2>/dev/null | head -3)"
 if [ -n "$tracked" ]; then
