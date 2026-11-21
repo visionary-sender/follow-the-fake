@@ -54,6 +54,7 @@ ATTIC_NAME_PATTERN = re.compile(r"(?<!\d)8\d{7}(?!\d)")
 START_METHODS = {"insert", "start", "resume"}
 STOP_METHODS = {"stop", "suspend", "delete", "preempted", "guestTerminate"}
 RUNNING_STATES = {"PROVISIONING", "STAGING", "RUNNING"}
+LOG_LIMIT = 20000  # audit-log entries read per project (newest first); hitting it is reported
 
 
 @dataclass(frozen=True)
@@ -137,7 +138,8 @@ def parse_events(entries: list[dict]) -> list[Event]:
             failed.add(op)
             continue
         parts = (pp.get("methodName") or "").split(".")
-        m = re.search(r"/zones/([^/]+)/(instances|disks)/([^/]+)$", pp.get("resourceName") or "")
+        m = re.search(r"/(?:zones|regions)/([^/]+)/(instances|disks)/([^/]+)$",
+                      pp.get("resourceName") or "")
         if len(parts) < 2 or not m:
             continue
         ev = Event(parse_time(e["timestamp"]), m.group(2), m.group(1), m.group(3), parts[-1],
@@ -159,36 +161,46 @@ def run_intervals(events: list[Event], current: dict | None, now: datetime,
     events: that instance's lifecycle events, sorted. current: its `instances list` record,
     or None if it no longer exists. An interval still open after the last event is closed by
     the current state: now if running, else lastStopTimestamp, else the automatic stop
-    (lastStart + maxRunDuration) if that is earlier than now, else now (over-estimate).
+    (start + maxRunDuration, from the current record or the insert request) if that is earlier
+    than now, else now (over-estimate). A first stop/delete with no start before it means the
+    instance was already running at `since` (the log is only read from `since`), so it counts
+    from `since`; for a delete of an already stopped instance this over-estimates.
     """
     out, start = [], None
-    for ev in events:
+    insert = next((ev.request for ev in events if ev.method == "insert"), {})
+    for i, ev in enumerate(events):
         if ev.method in START_METHODS and start is None:
             start = ev.time
-        elif ev.method in STOP_METHODS and start is not None:
-            out.append((start, ev.time))
+        elif ev.method in STOP_METHODS:
+            if start is not None:
+                out.append((start, ev.time))
+            elif i == 0:
+                out.append((since, ev.time))
             start = None
+    sched = (current if current is not None else insert).get("scheduling") or {}
+    max_run = (sched.get("maxRunDuration") or {}).get("seconds")
+    auto_end = (lambda s: min(now, s + timedelta(seconds=int(max_run)))) if max_run else \
+        (lambda s: now)
     if current is not None:
         status = current.get("status")
         last_start = parse_time(current.get("lastStartTimestamp"))
         last_stop = parse_time(current.get("lastStopTimestamp"))
-        max_run = (current.get("scheduling") or {}).get("maxRunDuration") or {}
-        if start is None and status in RUNNING_STATES and last_start:
-            # started outside the logged window, or by a path the log missed
-            if not out or last_start > out[-1][1]:
+        if start is None and last_start and (not out or last_start > out[-1][1]):
+            if status in RUNNING_STATES:
+                # started outside the logged window, or by a path the log missed
                 start = last_start
+            elif not events and last_stop and last_stop > since >= last_start:
+                out.append((since, last_stop))  # running at `since`, stopped by GCP itself
         if start is not None:
             if status in RUNNING_STATES:
                 end = now
             elif last_stop and last_stop >= start:
                 end = last_stop
-            elif max_run.get("seconds"):
-                end = min(now, start + timedelta(seconds=int(max_run["seconds"])))
             else:
-                end = now
+                end = auto_end(start)
             out.append((start, end))
     elif start is not None:
-        out.append((start, now))  # gone without a logged stop: count up to now
+        out.append((start, auto_end(start)))  # gone without a logged stop
     clipped = [(max(a, since), min(b, now)) for a, b in out]
     return [(a, b) for a, b in clipped if b > a]
 
@@ -204,9 +216,9 @@ def vm_usd_per_hour(machine_type: str, external_ip: bool) -> float | None:
     return price + (EXTERNAL_IP_USD_PER_HOUR if external_ip else 0.0)
 
 
-def disk_usd(disk_type: str, size_gb: float, alive_hours: float) -> float | None:
+def disk_usd(disk_type: str, size_gb: float | None, alive_hours: float) -> float | None:
     price = DISK_USD_PER_GB_MONTH.get(disk_type)
-    if price is None:
+    if price is None or size_gb is None:
         return None
     return price * size_gb * alive_hours / HOURS_PER_MONTH
 
@@ -244,10 +256,14 @@ def _has_external_ip(rec: dict) -> bool:
 def build_lines(project: Project, events: list[Event], instances: list[dict],
                 disks: list[dict], now: datetime) -> list[Line]:
     """Combine current resources and audit events into priced report lines (ours only)."""
+    # Unknown size/type (e.g. a boot disk sized by its image) stays unknown and is flagged.
+    def gb(v):
+        return float(v) if v else None
+
     cur_vm = {(basename(i["zone"]), i["name"]): i for i in instances}
-    cur_disk = {(basename(d["zone"]), d["name"]): d for d in disks}
+    cur_disk = {(basename(d.get("zone") or d.get("region")), d["name"]): d for d in disks}
     vm_events: dict = {}
-    disk_rec: dict = {}  # (zone, name) -> dict(type, size, start, end, labels, owner)
+    disk_rec: dict = {}  # (zone, name) -> dict(type, size, start, end, labels, owner, auto)
     for ev in events:
         key = (ev.zone, ev.name)
         if ev.kind == "instances":
@@ -258,17 +274,19 @@ def build_lines(project: Project, events: list[Event], instances: list[dict],
                     name = ip.get("diskName") or (ev.name if d.get("boot") else None)
                     if name and ip:
                         disk_rec[(ev.zone, name)] = dict(
-                            type=basename(ip.get("diskType")) or "pd-standard",
-                            size=float(ip.get("diskSizeGb") or 10), start=ev.time, end=None,
-                            labels=labels_dict(ip.get("labels")), owner=key)
+                            type=basename(ip.get("diskType")) or "unknown-type",
+                            size=gb(ip.get("diskSizeGb")), start=ev.time, end=None,
+                            labels=labels_dict(ip.get("labels")), owner=key,
+                            auto=bool(d.get("autoDelete")))
             elif ev.method == "delete":
                 for rec in disk_rec.values():  # auto-delete disks go with their instance
-                    if rec["owner"] == key and rec["end"] is None:
+                    if rec["owner"] == key and rec["auto"] and rec["end"] is None:
                         rec["end"] = ev.time
         elif ev.method == "insert":
             disk_rec[key] = dict(type=basename(ev.request.get("type")) or "pd-standard",
-                                 size=float(ev.request.get("sizeGb") or 10), start=ev.time,
-                                 end=None, labels=labels_dict(ev.request.get("labels")), owner=None)
+                                 size=gb(ev.request.get("sizeGb")), start=ev.time, end=None,
+                                 labels=labels_dict(ev.request.get("labels")), owner=None,
+                                 auto=False)
         elif ev.method == "delete" and key in disk_rec:
             disk_rec[key]["end"] = ev.time
 
@@ -280,7 +298,7 @@ def build_lines(project: Project, events: list[Event], instances: list[dict],
         labels = labels_dict(cur["labels"] if cur and cur.get("labels") else insert.get("labels"))
         if not project.is_ours(name, labels):
             continue
-        mt = basename((cur or insert).get("machineType"))
+        mt = basename((cur or insert).get("machineType")) or "unknown-machine-type"
         ivs = run_intervals(vm_events.get(key, []), cur, now)
         rate = vm_usd_per_hour(mt, _has_external_ip(cur or insert))
         h = hours(ivs)
@@ -292,9 +310,9 @@ def build_lines(project: Project, events: list[Event], instances: list[dict],
         users = [re.search(r"/zones/([^/]+)/instances/([^/]+)$", u) for u in d.get("users") or []]
         owner = next((m.groups() for m in users if m), None)
         start = parse_time(d["creationTimestamp"])
-        disk_rec[key] = dict(type=basename(d.get("type")), size=float(d.get("sizeGb") or 0),
+        disk_rec[key] = dict(type=basename(d.get("type")), size=gb(d.get("sizeGb")),
                              start=start, end=None, labels=labels_dict(d.get("labels")),
-                             owner=owner or (disk_rec.get(key) or {}).get("owner"))
+                             owner=owner or (disk_rec.get(key) or {}).get("owner"), auto=False)
     for key in sorted(disk_rec):
         zone, name = key
         rec = disk_rec[key]
@@ -305,7 +323,8 @@ def build_lines(project: Project, events: list[Event], instances: list[dict],
         ivs = [(max(rec["start"], SINCE), min(end, now))]
         ivs = [(a, b) for a, b in ivs if b > a]
         h = hours(ivs)
-        lines.append(Line("disk", name, zone, f"{rec['type']} {rec['size']:g}GB", issue, ivs, h,
+        size = "?" if rec["size"] is None else f"{rec['size']:g}"
+        lines.append(Line("disk", name, zone, f"{rec['type']} {size}GB", issue, ivs, h,
                           disk_usd(rec["type"], rec["size"], h), key in cur_disk))
     return lines
 
@@ -314,8 +333,9 @@ def fmt_t(t: datetime | None) -> str:
     return t.strftime("%Y-%m-%d %H:%M UTC") if t else "-"
 
 
-def render_project(project: Project, lines: list[Line], running: list[dict], now: datetime,
-                   errors: list[str]) -> str:
+def render_project(project: Project, lines: list[Line], running: list[dict] | None,
+                   now: datetime, errors: list[str]) -> str:
+    """running=None means the instance list could not be read."""
     out = [f"== {project.id}  (cap {project.cap_pln:.0f} PLN)"]
     out += [f"   ! {e}" for e in errors]
     if not lines:
@@ -344,6 +364,9 @@ def render_project(project: Project, lines: list[Line], running: list[dict], now
     unpriced = sorted({ln.spec for ln in lines if ln.usd is None})
     if unpriced:
         out.append(f"   WARNING no pinned price for: {', '.join(unpriced)} (cost counted as 0)")
+    if running is None:
+        out.append("   running now: UNKNOWN (instance list not readable)")
+        return "\n".join(out)
     out.append("   running now:" + ("" if running else " nothing"))
     for inst in running:
         when, action = auto_stop(inst)
@@ -369,7 +392,10 @@ def gcloud_json(config: str, *args: str):
     if res.returncode != 0:
         msg = [ln for ln in res.stderr.strip().splitlines() if ln.strip()]
         raise GcloudError(f"gcloud {' '.join(args[:3])}: {msg[0] if msg else 'failed'}")
-    return json.loads(res.stdout or "null")
+    try:
+        return json.loads(res.stdout or "null")
+    except json.JSONDecodeError as exc:
+        raise GcloudError(f"gcloud {' '.join(args[:3])}: output is not JSON") from exc
 
 
 def audit_filter(project_id: str) -> str:
@@ -387,18 +413,23 @@ def report_project(project: Project, now: datetime) -> tuple[str, float]:
     queries = {"instances": ("compute", "instances", "list", f"--project={p}"),
                "disks": ("compute", "disks", "list", f"--project={p}"),
                "audit log": ("logging", "read", audit_filter(p), f"--project={p}",
-                             "--limit=5000")}
-    got = {}
+                             f"--limit={LOG_LIMIT}")}
+    got, failed = {}, set()
     for target, args in queries.items():
         try:
             got[target] = gcloud_json(c, *args) or []
         except GcloudError as exc:
             got[target] = []
+            failed.add(target)
             errors.append(f"cannot read {target} with gcloud config '{c}': {exc}")
+    if len(got["audit log"]) >= LOG_LIMIT:
+        errors.append(f"audit log hit the {LOG_LIMIT}-entry limit: the oldest events are missing "
+                      "and the total is too LOW; raise LOG_LIMIT")
     instances = got["instances"]
     lines = build_lines(project, parse_events(got["audit log"]), instances, got["disks"], now)
-    running = [i for i in instances if i.get("status") in RUNNING_STATES
-               and project.is_ours(i["name"], labels_dict(i.get("labels")))]
+    running = None if "instances" in failed else [
+        i for i in instances if i.get("status") in RUNNING_STATES
+        and project.is_ours(i["name"], labels_dict(i.get("labels")))]
     total_pln = sum(ln.usd or 0 for ln in lines) * USD_TO_PLN
     return render_project(project, lines, running, now, errors), total_pln
 

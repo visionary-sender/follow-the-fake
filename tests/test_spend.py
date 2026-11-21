@@ -117,7 +117,7 @@ def test_build_lines_prices_vm_and_disks_and_attributes_issue():
     insert = {"labels": [{"key": "ftf-issue", "value": "hack-9"}],
               "machineType": f"{ZONE}/machineTypes/e2-standard-4",
               "networkInterfaces": [{"accessConfigs": [{}]}],
-              "disks": [{"boot": True, "initializeParams": {
+              "disks": [{"boot": True, "autoDelete": True, "initializeParams": {
                   "diskSizeGb": "100", "diskType": f"{ZONE}/diskTypes/pd-balanced"}}]}
     evs = spend.parse_events([
         entry("2026-11-21T10:00:00Z", "insert", "gone", op="a", request=insert),
@@ -164,3 +164,45 @@ def test_render_totals_against_cap():
     assert f"= {pln:.2f} PLN = {pln:.1f}% of the 100 PLN cap" in text
     assert "hack-1:" in text and "auto-STOP at 2026-11-22 16:00 UTC" in text
     assert "! cannot read disks" in text
+
+
+def test_vm_running_at_since_with_only_a_stop_event():
+    evs = spend.parse_events([entry("2026-11-21T05:00:00Z", "stop", "vm", op="a")])
+    cur = instance("vm", "TERMINATED", "2026-11-20T22:00:00Z", stop="2026-11-21T05:00:00Z")
+    assert spend.hours(spend.run_intervals(evs, cur, NOW)) == 6  # from SINCE 23:00Z
+    assert spend.hours(spend.run_intervals(evs, None, NOW)) == 6
+
+
+def test_vm_stopped_by_gcp_without_any_logged_event():
+    cur = instance("vm", "TERMINATED", "2026-11-20T22:00:00Z", stop="2026-11-21T02:00:00Z")
+    assert spend.hours(spend.run_intervals([], cur, NOW)) == 3
+
+
+def test_deleted_vm_without_logged_stop_is_capped_by_its_max_run_duration():
+    evs = spend.parse_events([entry("2026-11-21T10:00:00Z", "insert", "vm", op="a", request={
+        "scheduling": {"maxRunDuration": {"seconds": "7200"}}})])
+    assert spend.hours(spend.run_intervals(evs, None, NOW)) == 2
+
+
+def test_disk_kept_after_instance_delete_and_unknown_size_flagged():
+    insert = {"machineType": "x/e2-standard-4", "disks": [
+        {"boot": True, "initializeParams": {"diskType": "x/pd-ssd"}},  # size from image: unknown
+        {"autoDelete": False, "initializeParams": {"diskName": "keep", "diskSizeGb": "10",
+                                                   "diskType": "x/pd-standard"}}]}
+    evs = spend.parse_events([
+        entry("2026-11-22T00:00:00Z", "insert", "vm", op="a", request=insert),
+        entry("2026-11-22T01:00:00Z", "delete", "vm", op="b"),
+        entry("2026-11-22T05:00:00Z", "delete", "keep", op="c", kind="disks"),
+    ])
+    lines = {(ln.kind, ln.name): ln for ln in spend.build_lines(FTF, evs, [], [], NOW)}
+    assert lines[("disk", "keep")].hours == 5
+    boot = lines[("disk", "vm")]
+    assert boot.usd is None and boot.spec == "pd-ssd ?GB" and boot.hours == 1
+
+
+def test_regional_disk_and_unreadable_instances():
+    disk = {"name": "r", "region": "https://x/regions/europe-west4", "type": "x/pd-balanced",
+            "sizeGb": "10", "creationTimestamp": "2026-11-22T09:00:00Z"}
+    (line,) = spend.build_lines(FTF, [], [], [disk], NOW)
+    assert line.zone == "europe-west4" and line.hours == 1
+    assert "running now: UNKNOWN" in spend.render_project(FTF, [line], None, NOW, [])
