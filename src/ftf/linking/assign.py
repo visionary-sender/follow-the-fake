@@ -6,10 +6,12 @@ Method (07 §2.4, D1/D2 "Assignment"):
   has nothing else). The scoring context is built over the collection plus the incident, so
   rarity counts include it.
 * Score against a campaign = the best pairwise ledger between a probe capture and a campaign
-  member (D1: max over members; a variant only needs to match *some* member).
+  member (D1: max over members; a variant only needs to match *some* member). Pairs with an
+  informative ledger rank above pairs that share nothing, so a conflict on a lander is not
+  hidden behind a 0-bit ad-to-ad pair.
 * With tau = `threshold()` (it scales with the collection size) and K campaigns of the relation:
-  `assign` if the best score >= tau + log2 K and that pair qualifies as an edge (>= 2 positive
-  layers or a live private id); `new` if it is <= tau - 3; `review` otherwise. An item whose
+  `assign` if the best score >= tau + log2 K and that pair qualifies as an edge (enough positive
+  layers for the relation, or a live private id; see `grouping.MIN_LAYERS`); `new` if it is <= tau - 3; `review` otherwise. An item whose
   evidence capacity is below tau cannot reach the bar at all, so it goes to `review`, never `new`
   (a screenshot-only item is not proof of a new campaign).
 * Evidence capacity = sum, over the layers the item can still show, of the most bits the weight
@@ -42,7 +44,7 @@ from ftf.contract.models import (
     linkable,
 )
 from ftf.linking.backend import Backend
-from ftf.linking.grouping import SINGLE_VALUED_LAYERS, canonical_map, link_id, qualifies
+from ftf.linking.grouping import MIN_LAYERS, SINGLE_VALUED_LAYERS, canonical_map, link_id, qualifies
 from ftf.linking.types import METHOD, PairScore
 
 NEW_MARGIN = 3.0  # bits below tau at which an item is declared new
@@ -100,11 +102,11 @@ def link_incident(
             best_m: Optional[PairScore] = None
             for x in probe:
                 ps = be.score(x, m, relation)
-                if best_m is None or ps.bits > best_m.bits:
+                if best_m is None or _rank(ps) > _rank(best_m):
                     best_m = ps
             if best_m is not None:
                 per_member[m] = best_m
-        top = max(per_member.values(), key=lambda p: p.bits, default=None)
+        top = max(per_member.values(), key=_rank, default=None)
         scored.append((camp, top, per_member))
     scored.sort(key=lambda t: (-(t[1].bits if t[1] else -math.inf), t[0].id))
 
@@ -118,7 +120,7 @@ def link_incident(
     best_camp, best_ps = (scored[0][0], scored[0][1]) if scored and scored[0][1] is not None else (None, None)
     best = best_ps.bits if best_ps is not None else 0.0
 
-    if best_ps is not None and best >= bar and qualifies(best_ps, tau):
+    if best_ps is not None and best >= bar and qualifies(best_ps, tau, MIN_LAYERS[relation]):
         decision, campaign_id = Decision.assign, best_camp.id
     elif best <= tau - NEW_MARGIN and capacity >= tau:
         decision, campaign_id = Decision.new, None
@@ -152,6 +154,14 @@ def link_incident(
                 seen.add(lid)
                 links.append(link)
     return IncidentResult(assignment=assignment, links=links)
+
+
+def _rank(ps: PairScore) -> tuple[bool, float]:
+    """Order pairs by bits, but an informative ledger (any non-zero row) beats an empty one.
+
+    Otherwise an ad screenshot that shares nothing (0 bits) would hide a lander's conflict.
+    """
+    return (any(r.bits != 0 for r in ps.rows), ps.bits)
 
 
 def combine(base: Dataset, incidents: list[Incident]) -> Dataset:
@@ -250,7 +260,7 @@ def _note(
         f"{relation.value}: best {best:.1f} bits vs assign bar {bar:.1f} (tau {tau:.1f} + log2 K, K={k}), new at <= {tau - NEW_MARGIN:.1f}",
         f"evidence capacity {capacity:.1f} bits",
     ]
-    if best_ps is not None and best >= bar and not qualifies(best_ps, tau):
+    if best_ps is not None and best >= bar and not qualifies(best_ps, tau, MIN_LAYERS[relation]):
         parts.append("best match rests on one layer only")
     if capacity < tau:
         parts.append("capacity below tau: the inputs present cannot prove a new campaign")

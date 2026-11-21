@@ -155,3 +155,17 @@ def test_collector_values_do_not_create_pairs():
     be = stub_backend(ds)
     group(be, Relation.campaign)
     assert be.score.calls == 0
+
+
+def test_one_kit_layer_is_enough_for_template_not_for_campaign():
+    x = simple("x", (L.kit, "K1"), (L.tenant, "T1"))
+    y = simple("y", (L.kit, "K1"), (L.tenant, "T1"))
+    ds = dataset(x, y)
+    be = stub_backend(ds)
+    # template: kit 3 bits, one layer; lower tau so only the layer rule decides.
+    be.threshold = lambda relation: 3.0
+    assert _partition(group(be, Relation.template)[0]) == {frozenset({"x-c1", "y-c1"})}
+    be.threshold = lambda relation: 9.0  # campaign: kit + tenant = 8 < 9 -> apart
+    assert _partition(group(be, Relation.campaign)[0]) == {frozenset({"x-c1"}), frozenset({"y-c1"})}
+    one = cluster(["x", "y"], [ps("x", "y", 8, layers=1)], TAU, min_layers=1)
+    assert one == [{"x", "y"}]

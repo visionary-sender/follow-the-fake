@@ -5,7 +5,10 @@ Method (07 §1.8, D2 "Linking / clustering"):
 * Candidate pairs come from an inverted index over linkable indicator values: two captures are
   scored only if they share at least one value, or (operator / campaign relations) both carry a
   single-valued id (platform, tenant, owner) so the ledger can report a conflict.
-* An edge qualifies when bits >= tau and (>= 2 positive layers or a live operator-private id).
+* An edge qualifies when bits >= tau and (>= `MIN_LAYERS[relation]` positive layers or a live
+  operator-private id). Operator, campaign and tracking-account links need two layers, so one
+  copied static id cannot make them. Template and ecosystem need one: a kit is by itself the
+  evidence of a shared template, and the ledger gives them no private-id layers to agree with.
   The signed weight of a pair is `bits - tau` for qualifying edges, `min(bits - tau, 0)`
   otherwise, and `-tau` for a pair that shares nothing (0 bits).
 * Clustering is greedy average linkage on those signed weights (GAEC-style correlation
@@ -47,12 +50,19 @@ from ftf.linking.types import PairScore
 ALL_RELATIONS: tuple[Relation, ...] = tuple(Relation)
 SINGLE_VALUED_LAYERS = frozenset({Layer.platform, Layer.tenant, Layer.owner})
 CANNOT_LINK_RELATIONS = frozenset({Relation.operator, Relation.campaign})
+MIN_LAYERS: dict[Relation, int] = {
+    Relation.template: 1,
+    Relation.tracking_account: 2,
+    Relation.operator: 2,
+    Relation.campaign: 2,
+    Relation.ecosystem: 1,
+}
 # A value carried by more captures than this is a hub: it carries ~0 bits, so it never proposes pairs.
 HUB_POSTINGS = 500
 
 
-def qualifies(ps: PairScore, tau: float) -> bool:
-    return ps.bits >= tau and (ps.layers_positive >= 2 or ps.live_private)
+def qualifies(ps: PairScore, tau: float, min_layers: int = 2) -> bool:
+    return ps.bits >= tau and ps.layers_positive >= 1 and (ps.layers_positive >= min_layers or ps.live_private)
 
 
 def has_conflict(ps: PairScore) -> bool:
@@ -69,6 +79,7 @@ def cluster(
     tau: float,
     cannot_link: set[frozenset[str]] | frozenset[frozenset[str]] = frozenset(),
     must_link: Iterable[Iterable[str]] = (),
+    min_layers: int = 2,
 ) -> list[set[str]]:
     """Partition `nodes` by greedy average linkage on signed weights `bits - tau` (see module doc).
 
@@ -111,7 +122,7 @@ def cluster(
     # Unit-to-unit weight: the best capture pair between them (D1: max over members).
     def weight(ps: PairScore) -> float:
         w = ps.bits - tau
-        return w if qualifies(ps, tau) else min(w, 0.0)
+        return w if qualifies(ps, tau, min_layers) else min(w, 0.0)
 
     uw: dict[tuple[int, int], float] = {}
     uq: set[tuple[int, int]] = set()
@@ -122,7 +133,7 @@ def cluster(
             continue
         k = (min(ua, ub), max(ua, ub))
         uw[k] = max(uw.get(k, -math.inf), weight(ps))
-        if qualifies(ps, tau):
+        if qualifies(ps, tau, min_layers):
             uq.add(k)
     for p in cannot:
         a, b = tuple(p)
@@ -152,7 +163,7 @@ def cluster(
         linked = {(min(cluster_of[x], cluster_of[y]), max(cluster_of[x], cluster_of[y])) for x, y in uq if cluster_of[x] != cluster_of[y]}
         for c1, c2 in sorted(linked):
             mean, qual, blocked = cross(clusters[c1], clusters[c2])
-            if blocked or not qual or mean <= 0:
+            if blocked or not qual or mean < 0:
                 continue
             tie = min(min(units[u]) for u in clusters[c1] | clusters[c2])
             key = (-mean, tie, c1, c2)
@@ -233,7 +244,8 @@ def group(ctx: Any, relation: Relation = Relation.campaign) -> tuple[list[Campai
         cannot = {_pair(ps.a, ps.b) for ps in scores if has_conflict(ps)}
     must = [[c.id for c in i.captures if c.id in nodes and c.stage is not Stage.decoy] for i in ds.incidents]
 
-    clusters = cluster(nodes, scores, tau, cannot, must)
+    min_layers = MIN_LAYERS[relation]
+    clusters = cluster(nodes, scores, tau, cannot, must, min_layers)
 
     by_pair = {_pair(ps.a, ps.b): ps for ps in scores}
     dups: dict[str, list[str]] = defaultdict(list)
@@ -254,7 +266,7 @@ def group(ctx: Any, relation: Relation = Relation.campaign) -> tuple[list[Campai
         for i, a in enumerate(members):
             for b in members[i + 1 :]:
                 ps = by_pair.get(_pair(a, b))
-                if ps is None or not qualifies(ps, tau):
+                if ps is None or not qualifies(ps, tau, min_layers):
                     continue
                 link = be.link(ps, link_id(relation, a, b))
                 if link is None:

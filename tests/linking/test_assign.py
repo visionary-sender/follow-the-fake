@@ -117,3 +117,16 @@ def test_cli_link_and_assign(tmp_path, monkeypatch):
     out = Dataset.from_json((tmp_path / "out.json").read_bytes())
     decisions = {a.incident_id: a.decision for a in out.assignments}
     assert decisions == {"n": Decision.assign, "m": Decision.new}
+
+
+def test_conflict_on_a_lander_is_not_hidden_by_an_empty_ad_pair():
+    from linking_support import cap, incident
+
+    col = _collection()
+    caps = [cap("n-ad", "ad", arts=("ad_screenshot",)), cap("n-l", "lander")]
+    new = incident("n", caps, {"n-ad": [(L.creative, "CR-other")], "n-l": [(L.platform, "P1"), (L.tenant, "T9")]})
+    a = assign(col, new, backend=stub_backend)
+    by = {c.campaign_id: c.score_bits for c in a.candidates}
+    a_id = next(c.id for c in col.campaigns if c.relation is Relation.campaign and "a0-c1" in c.capture_ids)
+    assert by[a_id] < 0  # platform +1.5, tenant conflict -4
+    assert "conflict: tenant" in next(c.note for c in a.candidates if c.campaign_id == a_id)
