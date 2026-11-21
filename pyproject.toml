@@ -26,6 +26,7 @@ app = [
 # Models and native libraries for ftf.features (OCR, embeddings, faces, video); heavy, so opt-in.
 features = [
     "beautifulsoup4>=4.12,<5",
+    "faster-whisper>=1.2,<2",
     "huggingface_hub>=0.24,<2",
     "imagehash>=4.3,<5",
     "lxml>=5,<7",
