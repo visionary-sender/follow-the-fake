@@ -1,0 +1,216 @@
+"""Candidate index (HACK-25): same results as the linear scan, no re-clustering, JSON round trip."""
+
+from __future__ import annotations
+
+import sys
+
+import numpy as np
+import pytest
+
+from ftf import cli
+from ftf.contract.models import Dataset, Decision, Layer, Relation
+from ftf.linking import assign, grouping, ledger, link_dataset, link_incident
+from ftf.linking.assign import combine
+from ftf.linking.index import CandidateIndex, cached_index, clear_cache, extend_context
+from ftf.linking.ledger import ScoringContext
+
+import synthetic_corpus as sc
+from linking_support import simple, stub_backend
+
+L = Layer
+
+
+def _split(n: int = 60, seed: int = 7, cut: float = 0.7) -> tuple[Dataset, list]:
+    incs = sc.corpus(n, seed=seed)
+    k = int(len(incs) * cut)
+    base = link_dataset(sc.dataset(incs[:k]))
+    known = {c.id for i in incs[:k] for c in i.captures}
+    # single-incident tests: only new incidents whose duplicates point into the base
+    new = [i for i in incs[k:] if all(c.duplicate_of is None or c.duplicate_of in known for c in i.captures)]
+    return base, new
+
+
+def _ctx_view(ctx: ScoringContext) -> dict:
+    vals = {
+        c: {k: (dict(v.ids), dict(v.display), set(v.live)) for k, v in ctx.values[c].items()}
+        for c in set(ctx.values)
+    }
+    return {
+        "canonical": dict(ctx.canonical),
+        "incident_of": dict(ctx.incident_of),
+        "indicator_incident": dict(ctx.indicator_incident),
+        "values": vals,
+        "layers": {c: set(ctx.layers[c]) for c in set(ctx.layers)},
+        "index": {k: set(ctx.index[k]) for k in set(ctx.index)},
+        "group_of": dict(ctx.group_of),
+        "n_groups": ctx.n_groups,
+        "n": ctx.n,
+        "n_incidents": ctx.n_incidents,
+    }
+
+
+@pytest.mark.parametrize("seed", [7, 8, 9])
+def test_extended_context_equals_a_rebuild(seed):
+    base, new = _split(seed=seed)
+    idx = CandidateIndex.build(base, cache=False)
+    for inc in new:
+        ext = idx.extend(inc)
+        full = ScoringContext.from_dataset(combine(base, [inc]))
+        assert _ctx_view(ext) == _ctx_view(full), inc.id
+
+
+@pytest.mark.parametrize("relation", list(Relation))
+@pytest.mark.parametrize("seed", [7, 8])
+def test_index_equals_linear_scan_with_the_real_ledger(seed, relation):
+    incs = sc.corpus(60, seed=seed)
+    k = 42
+    base = link_dataset(sc.dataset(incs[:k]), [relation])
+    known = {c.id for i in incs[:k] for c in i.captures}
+    new = [i for i in incs[k:] if all(c.duplicate_of is None or c.duplicate_of in known for c in i.captures)]
+    idx = CandidateIndex.build(base, cache=False)
+    decisions = set()
+    for inc in new:
+        lin = link_incident(base, inc, relation)
+        fast = link_incident(base, inc, relation, index=idx)
+        assert fast.assignment.model_dump() == lin.assignment.model_dump(), inc.id
+        assert [l.model_dump() for l in fast.links] == [l.model_dump() for l in lin.links], inc.id
+        decisions.add(lin.assignment.decision)
+    if relation is Relation.campaign:
+        assert Decision.assign in decisions and Decision.new in decisions
+
+
+def test_index_equals_linear_scan_with_a_stub_scorer():
+    a = [simple(f"a{i}", (L.platform, "P1"), (L.tenant, "T1"), (L.landing, "LA"), (L.kit, "K1"), (L.tracking_account, "PXA", True)) for i in range(3)]
+    b = [simple(f"b{i}", (L.platform, "P1"), (L.tenant, "T2"), (L.landing, "LB"), (L.kit, "K2")) for i in range(2)]
+    c = [simple(f"c{i}", (L.platform, "P2"), (L.offer, "OC"), (L.creative, "CRC")) for i in range(9)]
+    ds = Dataset(name="s", incidents=a + b + c)
+    col = link_dataset(ds, backend=stub_backend(ds))
+    idx = CandidateIndex.build(col, cache=False)
+    for new in [
+        simple("n1", (L.platform, "P1"), (L.tenant, "T1"), (L.landing, "LA"), (L.kit, "K-new")),
+        simple("n2", (L.kit, "K-other"), (L.tenant, "T8")),
+        simple("n3", (L.tenant, "T2"), (L.landing, "LA")),
+        simple("n4", (L.creative, "CRC")),
+    ]:
+        lin = link_incident(col, new, backend=stub_backend)
+        fast = link_incident(col, new, backend=stub_backend, index=idx)
+        assert fast.assignment.model_dump() == lin.assignment.model_dump(), new.id
+        assert [l.model_dump() for l in fast.links] == [l.model_dump() for l in lin.links]
+
+
+def test_single_capture_is_assigned_without_reclustering_or_rescanning(monkeypatch):
+    base, new = _split()
+    idx = CandidateIndex.build(base, cache=False)
+    expected = {i.id: link_incident(base, i).assignment.model_dump() for i in new}
+
+    def boom(*a, **k):
+        raise AssertionError("the collection was re-clustered or rescanned")
+
+    monkeypatch.setattr(grouping, "group", boom)
+    monkeypatch.setattr(grouping, "cluster", boom)
+    monkeypatch.setattr(grouping, "link_dataset", boom)
+    monkeypatch.setattr(ledger.ScoringContext, "from_dataset", classmethod(boom))
+    assign_mod = sys.modules["ftf.linking.assign"]
+
+    monkeypatch.setattr(assign_mod, "combine", boom)
+    monkeypatch.setattr(assign_mod, "layer_modalities", boom)
+    before = [c.model_dump() for c in base.campaigns]
+    for inc in new:
+        assert link_incident(base, inc, index=idx).assignment.model_dump() == expected[inc.id]
+    assert [c.model_dump() for c in base.campaigns] == before
+
+
+def test_cached_index_is_used_for_that_base_only():
+    clear_cache()
+    base, new = _split()
+    assert cached_index(base) is None
+    idx = CandidateIndex.build(base)
+    assert cached_index(base) is idx
+    other = Dataset.model_validate(base.model_dump(mode="json"))
+    assert cached_index(other) is None
+    assert assign(base, new[0]).model_dump() == link_incident(other, new[0]).assignment.model_dump()
+    clear_cache()
+
+
+def test_json_round_trip(tmp_path):
+    base, new = _split()
+    idx = CandidateIndex.build(base, cache=False)
+    rng = np.random.default_rng(0)
+    caps = sorted(idx.stage)[:12]
+    idx.add_vector_view("ad_image", caps, rng.normal(size=(12, 8)).astype(np.float32))
+    path = tmp_path / "index.json"
+    idx.save(path)
+    assert (tmp_path / "index.ad_image.npy").exists()
+    back = CandidateIndex.load(path)
+    assert back.postings == idx.postings and back.counts == idx.counts
+    assert back.campaigns == idx.campaigns and back.campaign_of == idx.campaign_of
+    assert back.stage == idx.stage and back.canonical == idx.canonical
+    assert back.modalities == idx.modalities and back.incidents == idx.incidents
+    assert back.vectors["ad_image"].capture_ids == caps
+    assert np.array_equal(back.vectors["ad_image"].matrix, idx.vectors["ad_image"].matrix)
+    assert not back.ready
+    for inc in new[:3]:
+        assert back.candidates(inc) == idx.candidates(inc)
+    with pytest.raises(ValueError):
+        back.extend(new[0])
+    loaded = CandidateIndex.load(path, base)
+    for inc in new[:5]:
+        assert link_incident(base, inc, index=loaded).assignment == link_incident(base, inc).assignment
+    altered = link_dataset(sc.dataset(sc.corpus(30, seed=99)))
+    with pytest.raises(ValueError, match="digest"):
+        CandidateIndex.load(path, altered)
+
+
+def test_candidates_come_from_shared_values_and_vector_neighbours():
+    base, new = _split()
+    idx = CandidateIndex.build(base, cache=False)
+    inc = next(i for i in new if link_incident(base, i).assignment.decision is Decision.assign)
+    target = link_incident(base, inc).assignment.campaign_id
+    assert target in idx.candidates(inc, k=None)
+    # A capture that shares nothing reaches no campaign through values...
+    lonely = simple("lonely", (L.landing, "nothing-shared.example"))
+    assert idx.candidates(lonely) == []
+    # ...but the vector hook adds the campaign of its nearest neighbour (exact top-k by dot product).
+    caps = sorted(c for c in idx.campaign_of[Relation.campaign])[:5]
+    m = np.eye(5, dtype=np.float32)
+    idx.add_vector_view("ad_image", caps, m)
+    got = idx.candidates(lonely, vectors={"ad_image": m[3]}, neighbours=1)
+    assert got == list(idx.campaign_of[Relation.campaign][caps[3]])
+    assert idx.nearest("ad_image", m[3], k=2)[0] == (caps[3], 1.0)
+    assert idx.nearest("missing_view", m[0]) == []
+
+
+def test_cli_assign_with_index_equals_linear(tmp_path):
+    incs = sc.corpus(60, seed=8)
+    base = link_dataset(sc.dataset(incs[:40]))
+    (tmp_path / "linked.json").write_text(base.to_json())
+    # NEW.json must validate on its own: keep incidents whose duplicates point inside it
+    inside = {c.id for i in incs[40:] for c in i.captures}
+    new = [i for i in incs[40:] if all(c.duplicate_of is None or c.duplicate_of in inside for c in i.captures)]
+    (tmp_path / "new.json").write_text(sc.dataset(new).to_json())
+    assert cli.main(["index", str(tmp_path / "linked.json"), "-o", str(tmp_path / "index.json")]) == 0
+    common = ["assign", str(tmp_path / "linked.json"), str(tmp_path / "new.json")]
+    assert cli.main(common + ["-o", str(tmp_path / "lin.json"), "--linear"]) == 0
+    assert cli.main(common + ["-o", str(tmp_path / "idx.json"), "--index", str(tmp_path / "index.json")]) == 0
+    assert cli.main(common + ["-o", str(tmp_path / "mem.json")]) == 0
+    lin = Dataset.from_json((tmp_path / "lin.json").read_bytes())
+    for name in ("idx.json", "mem.json"):
+        got = Dataset.from_json((tmp_path / name).read_bytes())
+        assert got.model_dump() == lin.model_dump(), name
+    assert len(lin.assignments) == len(new) >= 15
+
+
+def test_index_refuses_an_incident_already_in_the_base():
+    base, _ = _split()
+    idx = CandidateIndex.build(base, cache=False)
+    with pytest.raises(ValueError, match="already"):
+        link_incident(base, base.incidents[0], index=idx)
+
+
+def test_extend_context_leaves_the_base_context_unchanged():
+    base, new = _split()
+    idx = CandidateIndex.build(base, cache=False)
+    before = _ctx_view(idx._ctx)
+    for inc in new:
+        extend_context(idx._ctx, idx._extras, inc)
+    assert _ctx_view(idx._ctx) == before

@@ -27,12 +27,13 @@ Method (07 §2.4, D1/D2 "Assignment"):
 
 from __future__ import annotations
 
+import bisect
 import math
-from collections import defaultdict
-from collections.abc import Callable
-from dataclasses import dataclass, field
+from collections import ChainMap, defaultdict
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from ftf.contract.models import (
     ArtefactType,
@@ -51,7 +52,10 @@ from ftf.contract.models import (
 )
 from ftf.linking.backend import Backend
 from ftf.linking.grouping import CANNOT_LINK_RELATIONS, MIN_LAYERS, SINGLE_VALUED_LAYERS, canonical_map, has_conflict, link_id, qualifies
+from ftf.linking.index import CandidateIndex, cached_index, modalities_of
+from ftf.linking.ledger import ScoringContext
 from ftf.linking.types import METHOD, PairScore
+from ftf.linking.weights import WeightTable
 
 NEW_MARGIN = 3.0  # bits below tau at which an item is declared new
 TOP_CANDIDATES = 5
@@ -73,9 +77,12 @@ def assign(
     backend: Optional[BackendFactory] = None,
     base_dir: Optional[Path] = None,
     incident_dir: Optional[Path] = None,
+    index: Optional[CandidateIndex] = None,
 ) -> Assignment:
     """Assign `incident` to a campaign of `relation` in `collection`, or declare it new, or send it to review."""
-    return link_incident(collection, incident, relation, backend=backend, base_dir=base_dir, incident_dir=incident_dir).assignment
+    return link_incident(
+        collection, incident, relation, backend=backend, base_dir=base_dir, incident_dir=incident_dir, index=index
+    ).assignment
 
 
 def link_incident(
@@ -85,6 +92,8 @@ def link_incident(
     backend: Optional[BackendFactory] = None,
     base_dir: Optional[Path] = None,
     incident_dir: Optional[Path] = None,
+    index: Optional["CandidateIndex"] = None,
+    weights: Optional[WeightTable] = None,
 ) -> IncidentResult:
     """The assignment plus ledgers from the incident's captures to members of its top candidate campaigns.
 
@@ -92,14 +101,90 @@ def link_incident(
     the incident. `base_dir` / `incident_dir` are where the base's and the incident's vector
     stores live (content views, HACK-24); while they are None, content views are skipped. They
     are accepted but not used yet.
+
+    With a `CandidateIndex` of `base` (given, or built earlier for this very object and cached),
+    only the campaigns reachable through the incident's informative values are scored and the
+    scoring context is extended instead of rebuilt; the result is identical to the linear scan.
+    `weights` replaces the weight table (sensitivity analysis; needs the hand-table ledger).
     """
+    if index is None:
+        index = cached_index(base)
+    if index is not None:
+        return _decide(_indexed_setup(index, incident, relation, backend, weights), incident, relation)
     if any(i.id == incident.id for i in base.incidents):
         raise ValueError(f"incident {incident.id} is already in the collection")
     combined = combine(base, [incident])
     be = (backend or Backend.from_dataset)(combined)
-    canon = canonical_map(combined)
-    stage = {c.id: c.stage for i in combined.incidents for c in i.captures}
+    if weights is not None:
+        be = _reweighted(be, weights)
+    setup = _Setup(
+        be=be,
+        canon=canonical_map(combined),
+        stage={c.id: c.stage for i in combined.incidents for c in i.captures},
+        modalities=layer_modalities(combined),
+        campaigns=[c for c in base.campaigns if c.relation is relation],
+    )
+    return _decide(setup, incident, relation)
 
+
+@dataclass
+class _Setup:
+    be: Backend
+    canon: Mapping[str, str]
+    stage: Mapping[str, Stage]
+    modalities: dict[Layer, set[ArtefactType]]
+    campaigns: Sequence[Any]  # `Campaign` or `CampaignRef` (both have .id and .capture_ids)
+    # Indexed mode: the campaigns to score first, the campaigns of a capture, and sorted ids.
+    reachable: Optional[Callable[[list[str]], set[str]]] = None
+    campaigns_of: Optional[Callable[[str], Sequence[str]]] = None
+
+
+def _reweighted(be: Backend, weights: WeightTable) -> Backend:
+    if not isinstance(be.context, ScoringContext):
+        raise ValueError("weights= needs the hand-table ledger backend")
+    return Backend.from_context(replace(be.context, weights=weights))
+
+
+def _indexed_setup(
+    index: "CandidateIndex", incident: Incident, relation: Relation, backend: Optional[BackendFactory], weights: Optional[WeightTable]
+) -> _Setup:
+    ctx = index.extend(incident)
+    if weights is not None:
+        ctx = replace(ctx, weights=weights)
+    if backend is not None:
+        # A custom scorer (tests) needs its own view of base + incident; candidate search still
+        # comes from the index, and every shared value proposes campaigns.
+        if index._base is None:
+            raise ValueError("a custom backend with an index needs the index built from the base dataset")
+        be = backend(combine(index._base, [*index._added, incident]))
+        informative = None
+    else:
+        be = Backend.from_context(ctx)
+        hub = ctx.weights.hub_bits
+
+        def informative(key) -> bool:
+            # The most bits this value can earn in base + incident (live prior, combined rarity).
+            prior = ctx.weights.weight(key[1], key[0]).bits * ctx.weights.scale(key[1], key[0], relation)
+            return prior - math.log2(max(ctx.groups(key), 1)) >= hub
+
+    keys = index.probe_keys(incident)
+    modalities = {layer: set(mods) for layer, mods in index.modalities.items()}
+    for layer, mods in modalities_of([incident]).items():
+        modalities.setdefault(layer, set()).update(mods)
+    of = index.campaign_of.get(relation, {})
+    return _Setup(
+        be=be,
+        canon=ctx.canonical,
+        stage=ChainMap({c.id: c.stage for c in incident.captures}, index.stage),
+        modalities=modalities,
+        campaigns=index.campaigns.get(relation, []),
+        reachable=lambda extra: index.reachable(keys, relation, informative=informative or (lambda key: True), captures=extra),
+        campaigns_of=lambda cap: of.get(cap, ()),
+    )
+
+
+def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentResult:
+    be, canon, stage = setup.be, setup.canon, setup.stage
     own = {c.id for c in incident.captures}
     probe = _probe(incident, canon, stage)
     # Exact duplicates of a collection capture: the incident is that capture again. Decoys do
@@ -107,15 +192,15 @@ def link_incident(
     dup_src = [c for c in incident.captures if stage[canon[c.id]] is not Stage.decoy and c.stage is not Stage.decoy] or list(incident.captures)
     dup_of = sorted({canon[c.id] for c in dup_src if canon[c.id] not in own})
     blocks_on_conflict = relation in CANNOT_LINK_RELATIONS
-    campaigns = [c for c in base.campaigns if c.relation is relation]
+    campaigns = setup.campaigns
     tau = be.threshold(relation)
     k = len(campaigns)
     bar = tau + (math.log2(k) if k > 1 else 0.0)
     min_layers = MIN_LAYERS[relation]
 
-    scored: list[tuple[Campaign, Optional[PairScore], dict[str, PairScore]]] = []
     conflicted: set[str] = set()  # campaigns with a tenant/owner conflict against the incident
-    for camp in campaigns:
+
+    def score(camp: Any) -> tuple[Any, Optional[PairScore], dict[str, PairScore]]:
         members = _members(camp, canon, stage)
         per_member: dict[str, PairScore] = {}
         for m in sorted(members):
@@ -128,13 +213,20 @@ def link_incident(
                     best_m = ps
             if best_m is not None:
                 per_member[m] = best_m
-        top = max(per_member.values(), key=_rank, default=None)
-        scored.append((camp, top, per_member))
-    scored.sort(key=lambda t: (-(t[1].bits if t[1] else -math.inf), t[0].id))
+        return camp, max(per_member.values(), key=_rank, default=None), per_member
 
-    capacity, gains = evidence_capacity(combined, incident, probe or dup_of, be.layer_caps(relation))
+    if setup.reachable is None:
+        scored = [score(camp) for camp in campaigns]
+        dup_camps = [camp for camp in campaigns if set(dup_of) & {canon.get(m, m) for m in camp.capture_ids}]
+    else:
+        assert setup.campaigns_of is not None
+        dup_ids = {cid for d in dup_of for cid in setup.campaigns_of(d)}
+        scored = _select(campaigns, setup.reachable(dup_of) | dup_ids, score)
+        dup_camps = [camp for camp in campaigns if camp.id in dup_ids]
+    scored.sort(key=_order)
 
-    dup_camps = [camp for camp in campaigns if set(dup_of) & {canon.get(m, m) for m in camp.capture_ids}]
+    capacity, gains = evidence_capacity(None, incident, probe or dup_of, be.layer_caps(relation), lm=setup.modalities)
+
     dup_camp = dup_camps[0] if len(dup_camps) == 1 else None
     candidates = [
         Candidate(campaign_id=camp.id, score_bits=round(ps.bits, 3), note=_candidate_note(ps))
@@ -211,6 +303,43 @@ def link_incident(
     return IncidentResult(assignment=assignment, links=links)
 
 
+def _order(t: tuple[Any, Optional[PairScore], dict]) -> tuple[float, str]:
+    """The linear scan's ranking: bits descending (no score last), then campaign id."""
+    return (-(t[1].bits if t[1] is not None else -math.inf), t[0].id)
+
+
+def _select(
+    campaigns: Sequence[Any], reachable: set[str], score: Callable[[Any], tuple[Any, Optional[PairScore], dict]]
+) -> list[tuple[Any, Optional[PairScore], dict]]:
+    """Score the reachable campaigns, then just enough others to rank the top as the linear scan does.
+
+    `campaigns` must be sorted by id. Unreachable campaigns share no informative value with the
+    incident, so they score 0 bits (or less, on a conflict). Only when fewer than
+    `TOP_CANDIDATES` campaigns score above 0 does the candidate list reach into them: they are
+    then walked in id order (the scan's tie order) until the zero-bit places are settled, or
+    all of them are scored. Everything that decides assign / new / review is reachable.
+    """
+    by_id = {c.id: c for c in campaigns}
+    out = [score(by_id[cid]) for cid in sorted(reachable) if cid in by_id]
+    positive = sum(1 for _, ps, _ in out if ps is not None and ps.bits > 0)
+    need = TOP_CANDIDATES - positive
+    if need <= 0 or all(ps is None for _, ps, _ in out) and out:
+        return out  # top settled, or no probe capture (nothing gets a score)
+    zero_r = sorted(c.id for c, ps, _ in out if ps is not None and ps.bits == 0)
+    zero_walked = 0
+    for camp in campaigns:
+        if camp.id in reachable:
+            continue
+        t = score(camp)
+        out.append(t)
+        if t[1] is None:
+            return out  # no probe capture: nothing gets a score
+        zero_walked += t[1].bits == 0
+        if bisect.bisect_right(zero_r, camp.id) + zero_walked >= need:
+            break
+    return out
+
+
 def _rank(ps: PairScore) -> tuple[bool, float]:
     """Order pairs by bits, but an informative ledger (any non-zero row) beats an empty one.
 
@@ -245,24 +374,21 @@ def _members(camp: Campaign, canon: dict[str, str], stage: dict[str, Stage]) -> 
 
 def layer_modalities(ds: Dataset) -> dict[Layer, set[ArtefactType]]:
     """Which artefact types each layer's indicators were extracted from, across the collection."""
-    art_type = {a.id: a.type for i in ds.incidents for c in i.captures for a in c.artefacts}
-    out: dict[Layer, set[ArtefactType]] = defaultdict(set)
-    for ind in ds.indicators():
-        if not linkable(ind):
-            continue
-        t = art_type.get(ind.provenance.artefact_id or "")
-        if t is not None:
-            out[ind.layer].add(t)
-    return out
+    return modalities_of(ds.incidents)
 
 
 def evidence_capacity(
-    ds: Dataset, incident: Incident, probe: list[str], caps: dict[Layer, float]
+    ds: Optional[Dataset],
+    incident: Incident,
+    probe: list[str],
+    caps: dict[Layer, float],
+    lm: Optional[dict[Layer, set[ArtefactType]]] = None,
 ) -> tuple[float, list[tuple[ArtefactType, Optional[str], float, list[Layer]]]]:
     """Most bits the item could earn given its modalities, and what each absent modality could add.
 
     Returns (capacity, gains) where gains are (modality, missing reason or None, extra bits,
     layers) for every absent modality that would open a layer the item cannot show now.
+    `lm` (layer -> modalities of the collection plus the incident) replaces the scan of `ds`.
     """
     probe_set = set(probe)
     captures = [c for c in incident.captures if c.id in probe_set or c.duplicate_of in probe_set]
@@ -272,7 +398,10 @@ def evidence_capacity(
         for m in c.missing:
             reasons.setdefault(m.modality, m.reason)
     own_layers = {ind.layer for ind in incident.indicators if linkable(ind) and ind.capture_id in {c.id for c in captures}}
-    lm = layer_modalities(ds)
+    if lm is None:
+        if ds is None:
+            raise ValueError("evidence_capacity needs the collection or its layer modalities")
+        lm = layer_modalities(ds)
     reachable = own_layers | {layer for layer, mods in lm.items() if mods & has}
     capacity = sum(max(caps.get(layer, 0.0), 0.0) for layer in reachable)
 

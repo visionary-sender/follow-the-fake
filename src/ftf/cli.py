@@ -14,8 +14,10 @@ from ftf.enrich.commands import register as register_enrich_domain
 from ftf.features.commands import register as register_features
 from ftf.ingest.commands import register as register_ingest
 from ftf.linking.commands import register_assign
+from ftf.linking.commands import register_index
 from ftf.linking.commands import register_link
 from ftf.linking.commands import register_score
+from ftf.linking.commands import register_sensitivity
 from ftf.pipeline.commands import register_analyze
 from ftf.pipeline.commands import register_serve
 
@@ -24,9 +26,11 @@ COMMANDS: list[Callable[[argparse._SubParsersAction], None]] = [
     register_assign,
     register_enrich_domain,
     register_features,
+    register_index,
     register_ingest,
     register_link,
     register_score,
+    register_sensitivity,
     register_serve,
 ]
 
