@@ -10,6 +10,7 @@ import argparse
 from collections.abc import Callable, Sequence
 
 from ftf import __version__
+from ftf.corpus.commands import register as register_corpus
 from ftf.enrich.commands import register as register_enrich_domain
 from ftf.evaluate.commands import register as register_eval
 from ftf.features.commands import register as register_features
@@ -29,6 +30,7 @@ from ftf.scanner.run import register as register_scan
 
 COMMANDS: list[Callable[[argparse._SubParsersAction], None]] = [
     register_analyze,
+    register_corpus,
     register_assign,
     register_build_base,
     register_enrich_domain,
