@@ -20,6 +20,7 @@ Challenge data lives in a private bucket and never in this repository.
 | `scripts/spend.py` | read-only cloud spend report (see Cloud spend) |
 | `scripts/vm.sh` | cloud dev loop (sync to the workbench VM, run tests or commands there) |
 | `scripts/sandbox.sh` | sandbox VM for live fetching (create, sync, run, move captures) |
+| `scripts/egress.sh`, `scripts/egress_measure.py` | short-lived egress workers with fresh Google Cloud IPs (corpus building only) and the HACK-45 measurement |
 | `src/ftf/fetch/` | safe URL fetcher (`ftf fetch`) |
 | `docker/seccomp-chromium.json` | seccomp profile that lets Chromium's sandbox run inside the container |
 | `scripts/licences.py` | generates and checks `LICENSES-THIRD-PARTY.md` |
@@ -219,6 +220,30 @@ your worktree's venv once (and Chromium for your user, `playwright install --onl
 scripts/vm.sh run -- pip install -c /work/<slug>/base-constraints.txt -e '.[fetch]'
 scripts/vm.sh test tests/fetch
 ```
+
+### Egress workers (team only, corpus building during the hackathon)
+
+Ad libraries and cloaked scam pages rate-limit or block a single cloud IP. While building the
+corpus we spread collection over a few short-lived Google Cloud VMs (`scripts/egress.sh`), each a
+clone of the sandbox's safety model (no service account, IAP-only SSH, no firewall rule of its own,
+deleted automatically after 2 h), each with its own ephemeral IP, at low volume per IP. This was
+used only to build the corpus during the hackathon. It is opt-in: the container and the demo never
+use it, and nothing changes when it is absent.
+
+```bash
+scripts/egress.sh up 6                    # workers 1..6 (Warsaw x3, Frankfurt, Eemshaven, Hamina)
+scripts/egress.sh sync                    # code -> /opt/ftf on every worker
+scripts/egress.sh push-list <wb-file> urls.txt ftf-egress-1
+scripts/egress.sh job ftf-egress-1 r1 -- ftf fetch --list /srv/ftf/inbox/urls.txt --out /srv/ftf/captures/run1/ftf-egress-1
+scripts/egress.sh rotate ftf-egress-1     # new IP between jobs
+scripts/egress.sh pull run1               # workers -> workbench /data/derived/egress/ -> bucket
+scripts/egress.sh down                    # delete all workers, confirm none is left
+```
+
+Each capture made on a worker records which egress it used, in the manifest (`egress`: worker,
+region, zone, salted SHA-256 of the IP) and as a collector-layer `analyst_ip` indicator, so it can
+never link two captures. The raw IP is never written; the salt lives only in the workers' metadata
+and disappears with them.
 
 ### Running it in the container
 
