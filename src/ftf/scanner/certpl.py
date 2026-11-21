@@ -22,7 +22,7 @@ LIST_URL = "https://hole.cert.pl/domains/v2/domains.json"
 
 
 def _fold(text: str) -> str:
-    """Lower-case ASCII without spaces, so "Pasywny Dochód" matches `pasywnydochod.shop`."""
+    """Lower-case ASCII without spaces, so "Pasywny Dochód" matches `pasywnydochod.example`."""
     norm = unicodedata.normalize("NFKD", text.replace("ł", "l").replace("Ł", "L"))
     return "".join(ch for ch in norm if ch.isalnum() and ord(ch) < 128).lower()
 

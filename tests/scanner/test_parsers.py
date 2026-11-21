@@ -151,7 +151,7 @@ def test_certpl_filters_since_deleted_and_keywords():
 
 @pytest.mark.parametrize(
     "value,expected",
-    [("WWW.Example.TEST.", "example.test"), ("https://Sub.Example.test:8443/x", "sub.example.test"), ("żółw.pl", "żółw.pl".encode("idna").decode()), ("nodot", None), ("", None), (None, None)],
+    [("WWW.Example.TEST.", "example.test"), ("https://Sub.Example.test:8443/x", "sub.example.test"), ("żółw.example", "żółw.example".encode("idna").decode()), ("nodot", None), ("", None), (None, None)],
 )
 def test_normalise_domain(value, expected):
     assert normalise_domain(value) == expected
@@ -189,16 +189,18 @@ def test_meta_graphql_rate_limit_error_is_read():
     assert meta.graphql_errors((FX / "meta_graphql.txt").read_text()) == []
 
 
-def test_certpl_keys_by_registrable_domain_newest_listing():
+def test_certpl_keys_by_registrable_domain_newest_listing(monkeypatch):
+    # Pretend ".example" behaves like a public suffix so that no real domain is needed.
+    monkeypatch.setattr(certpl, "registrable_domain", lambda d: ".".join(d.split(".")[-2:]))
     doc = [
-        {"RegisterPositionId": 1, "DomainAddress": "a.scam-example.com", "InsertDate": "2026-11-19T10:00:00", "DeleteDate": None},
-        {"RegisterPositionId": 2, "DomainAddress": "b.scam-example.com", "InsertDate": "2026-11-20T10:00:00", "DeleteDate": None},
-        {"RegisterPositionId": 3, "DomainAddress": "shop.example.co.uk", "InsertDate": "2026-11-18T10:00:00", "DeleteDate": None},
+        {"RegisterPositionId": 1, "DomainAddress": "a.scam.example", "InsertDate": "2026-11-19T10:00:00", "DeleteDate": None},
+        {"RegisterPositionId": 2, "DomainAddress": "b.scam.example", "InsertDate": "2026-11-20T10:00:00", "DeleteDate": None},
+        {"RegisterPositionId": 3, "DomainAddress": "shop.other.example", "InsertDate": "2026-11-18T10:00:00", "DeleteDate": None},
     ]
     recs = certpl.parse_list(doc, since=None)
     assert [(r.ad_id, r.register_id, r.landing_domain) for r in recs] == [
-        ("scam-example.com", "2", "b.scam-example.com"),
-        ("example.co.uk", "3", "shop.example.co.uk"),
+        ("scam.example", "2", "b.scam.example"),
+        ("other.example", "3", "shop.other.example"),
     ]
 
 
