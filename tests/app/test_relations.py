@@ -119,9 +119,10 @@ def test_fixture_tracking_account_link_and_no_collector_edges():
     for rel in R.RELATIONS:
         for e in R.edges(fx, rel):
             assert all(s.layer != Layer.collector.value for s in e.shared)
-    # The shared Meta pixel joins two cases under the tracking-account relation.
+    # A shared tracking-account indicator (the Meta pixel) joins two cases; the fixture files
+    # that link under whichever relation the linker chose, so only the evidence layer is fixed.
     tracked = [
-        l for l in fx.links if l.relation is Relation.tracking_account and any(
+        l for l in fx.links if any(
             r.layer is Layer.tracking_account and r.status is EvidenceStatus.shared
             and all(i in ok for i in r.indicator_ids) for r in l.evidence)
     ]
@@ -129,7 +130,9 @@ def test_fixture_tracking_account_link_and_no_collector_edges():
     l = tracked[0]
     assert fx.incident_of(l.a).id != fx.incident_of(l.b).id
     answers = R.explain_pair(fx, l.a, l.b)
-    assert any(a.relation is Relation.tracking_account and a.direct for a in answers)
+    ans = next(a for a in answers if a.relation is l.relation)
+    assert ans.direct
+    assert any(s.layer == Layer.tracking_account.value for e in ans.edges for s in e.shared)
     for c in fx.campaigns:
         R.indicator_view(fx, c.id)
     assert len(R.campaign_summary(fx)) == len(fx.campaigns)

@@ -29,7 +29,7 @@ def _evidence(edge: R.Edge) -> None:
         f"{R.defang(edge.link_id)} ·{R.RELATION_LABEL[edge.relation]} · {edge.tier} · "
         f"evidence in bits: {edge.score_bits:.1f}"
     )
-    st.dataframe(pd.DataFrame(R.evidence_rows(edge)), hide_index=True, use_container_width=True)
+    st.dataframe(pd.DataFrame(R.evidence_rows(edge)), hide_index=True, width="stretch")
 
 
 st.title("Campaigns")
@@ -67,7 +67,7 @@ if summary:
             f"{t.kind}={R.defang(t.value)}" for t in s.top_indicators[:3]),
         "first seen": s.first_seen or "",
         "last seen": s.last_seen or "",
-    } for s in summary]), hide_index=True, use_container_width=True)
+    } for s in summary]), hide_index=True, width="stretch")
 else:
     st.info(f"No labelled campaigns under “{R.RELATION_LABEL[relation]}”.")
 
@@ -78,7 +78,7 @@ choice = st.selectbox(
     key="group",
 )
 highlight = set(choice.capture_ids) if choice else set()
-st.plotly_chart(network_figure(graph, highlight), use_container_width=True)
+st.plotly_chart(network_figure(graph, highlight), width="stretch")
 st.caption(f"Review threshold: {threshold:.1f} bits; a single link below it is “Insufficient alone”.")
 
 if choice is not None:
@@ -94,7 +94,7 @@ if choice is not None:
         piv = R.indicator_view(ds, choice.id)
         if any(d["side"] == "indicator" for _, d in piv.nodes(data=True)):
             st.markdown("**Pivots joining this campaign** (indicators shared by two or more of its captures)")
-            st.plotly_chart(indicator_figure(piv), use_container_width=True)
+            st.plotly_chart(indicator_figure(piv), width="stretch")
 
 st.subheader("Why are these two linked?")
 captures = sorted(c.id for i in ds.incidents for c in i.captures)
