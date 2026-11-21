@@ -30,7 +30,7 @@ def test_ingest_features_link_adapters(tmp_path, monkeypatch):
                         level=Level.campaign, value="Title", observed=Observed.static, extractor="fake@0")
         return incident.model_copy(update={"indicators": [ind]})
 
-    def link_incident(base, incident, relation=None):
+    def link_incident(base, incident, relation=None, backend=None, base_dir=None, incident_dir=None):
         calls["link"] = (base.name, incident.id)
         a = Assignment(incident_id=incident.id, decision=Decision.new, evidence_capacity_bits=5.0, method="fake@0")
         return types.SimpleNamespace(assignment=a, links=[])
@@ -52,7 +52,7 @@ def test_ingest_features_link_adapters(tmp_path, monkeypatch):
 
 
 def test_stage_exception_is_reported_not_raised(tmp_path, monkeypatch):
-    def link_incident(base, incident, relation=None):
+    def link_incident(base, incident, relation=None, backend=None, base_dir=None, incident_dir=None):
         raise RuntimeError("boom")
 
     _module(monkeypatch, "ftf.linking", link_incident=link_incident)

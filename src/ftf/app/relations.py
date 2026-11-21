@@ -82,15 +82,30 @@ def tier(level: LinkLevel, score_bits: float | None, threshold: float) -> str:
 
 
 _SCHEME = re.compile(r"(?i)\bhttp(s?)(?=:|\b)")
-_HOSTISH = re.compile(r"(?i)\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}\b")
+# IDNA treats these as label separators too (a browser reads `a。b` as `a.b`).
+_DOTS = "\u002e\u3002\uff0e\uff61"
+# Non-ASCII punctuation and symbols that never sit inside a host label: Latin-1 signs, general
+# punctuation (quotes, `…`; the IDNA joiners U+200C/U+200D stay allowed), arrows and symbols,
+# CJK punctuation, specials and emoji. Over-defanging prose is harmless; this keeps quotes out.
+_NOT_HOST = "\u00a0-\u00bf\u00d7\u00f7\u2000-\u200b\u200e-\u2bff\u3000-\u303f\ufe30-\ufe4f\ufff0-\uffff\U0001f000-\U0001faff"
+# A host character: ASCII letter or digit, or a non-ASCII letter or mark (IDN labels).
+# Punycode labels (`xn--…`) are plain ASCII.
+_HC = rf"(?:[a-z0-9]|[^\x00-\x7f\s{_DOTS}{_NOT_HOST}])"
+_LABEL = rf"{_HC}(?:(?:{_HC}|-){{0,61}}{_HC})?"  # bounded: no quadratic backtracking on long strings
+_TLD = rf"(?:[a-z]|[^\x00-\x7f\s{_DOTS}{_NOT_HOST}])(?:{_HC}|-){{1,62}}"
+_HOSTISH = re.compile(rf"(?i)(?<!{_HC})(?<!-)(?:{_LABEL}[{_DOTS}])+{_TLD}(?!{_HC}|-)")
+_DOT_RE = re.compile(f"[{_DOTS}]")
 
 
 def defang(text: str | None) -> str:
-    """Make URLs and domains non-clickable: `http` → `hxxp`, dots in host names → `[.]`."""
+    """Make URLs and domains non-clickable: `http` → `hxxp`, dots in host names → `[.]`.
+
+    Covers IDN hosts written in Unicode (any script) and their full-width / ideographic dots.
+    """
     if text is None:
         return ""
     text = _SCHEME.sub(lambda m: "hxxp" + m.group(1), text)
-    return _HOSTISH.sub(lambda m: m.group(0).replace(".", "[.]"), text)
+    return _HOSTISH.sub(lambda m: _DOT_RE.sub("[.]", m.group(0)), text)
 
 
 @dataclass(frozen=True)

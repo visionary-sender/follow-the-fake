@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from ftf.contract import Dataset
-from ftf.contract.fixture import load_fixture
+from ftf.contract.fixture import fixture_dir, load_fixture
 
 
 def load_base(path: str | os.PathLike | None = None) -> Dataset:
@@ -15,3 +16,9 @@ def load_base(path: str | os.PathLike | None = None) -> Dataset:
         with open(chosen, "rb") as f:
             return Dataset.from_json(f.read())
     return load_fixture()
+
+
+def base_dir(path: str | os.PathLike | None = None) -> Path:
+    """Folder of the campaign base chosen as in `load_base` (where its vector stores live)."""
+    chosen = path if path is not None else os.environ.get("FTF_BASE")
+    return Path(chosen).resolve().parent if chosen else fixture_dir()
