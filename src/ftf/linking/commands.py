@@ -110,6 +110,10 @@ def register_assign(subparsers: argparse._SubParsersAction) -> None:
     parser.set_defaults(func=run_assign)
 
 
+def _backend_factory(args: argparse.Namespace):
+    return lambda ds: Backend.from_context(context_from_args(ds, args))
+
+
 def _load(path: Path) -> Dataset:
     return Dataset.from_json(path.read_bytes())
 
@@ -122,7 +126,7 @@ def _write(ds: Dataset, path: Path) -> None:
 def run_link(args: argparse.Namespace) -> int:
     ds = _load(args.input)
     relations = list(dict.fromkeys(Relation(r) for r in args.relation)) if args.relation else list(ALL_RELATIONS)
-    out = link_dataset(ds, relations, backend=Backend.from_context(context_from_args(ds, args)))
+    out = link_dataset(ds, relations, backend=_backend_factory(args)(ds) if args.weights else None)
     _write(out, args.out)
     n_caps = sum(len(i.captures) for i in out.incidents)
     print(f"{len(out.incidents)} incidents, {n_caps} captures -> {args.out}")
@@ -156,7 +160,7 @@ def run_assign(args: argparse.Namespace) -> int:
             print(f"ftf assign: duplicate_of points at unknown captures: {', '.join(missing)}", file=sys.stderr)
             return 2
         for inc in ready:
-            res = link_incident(current, inc, relation, backend=lambda d: Backend.from_context(context_from_args(d, args)))
+            res = link_incident(current, inc, relation, backend=_backend_factory(args) if args.weights else None)
             results.append(res)
             data = combine(current, [inc]).model_dump(mode="json")
             data["links"] += [l.model_dump(mode="json") for l in res.links]

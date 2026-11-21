@@ -2,10 +2,11 @@
 
 The scammers' platform exposes a chain of ids: platform ⊃ tenant ⊃ owner ⊃ campaign ⊃ landing.
 The *anchor* kinds name those levels directly (`ANCHOR_KINDS`). Every other value is placed at the
-finest level whose anchor id is the same on all its carriers (cluster-level document frequency):
+level it is a *constant* of (cluster-level document frequency): its carriers share one id of that
+level and span at least two ids of the next finer level:
 
-- all carriers on one landing → landing level; one campaign → campaign; one owner → operator;
-  one tenant → tenant;
+- one campaign, several landings → campaign level; one owner, several campaigns → operator; one
+  tenant, several owners → tenant; a value inside one landing is no constant and keeps its weight;
 - spanning ≥2 tenants (or ≥2 owners where no tenant is visible) → platform level (a shared
   main.js spanning three owners is a platform constant, a tenant id spanning two owners is a
   reseller's tenant, not an operator id);
@@ -97,16 +98,15 @@ class Hierarchy:
 
 
 def _level(caps: set[str], anchor_ids: Mapping[str, Mapping[Level, set[str]]]) -> Level | None:
-    seen_any = False
-    for level in CHAIN:
-        ids = [anchor_ids[c].get(level) for c in caps]
-        ids = [s for s in ids if s]
-        if not ids:
-            continue
-        seen_any = True
-        if len(set().union(*ids)) == 1:
-            return level
-    return Level.platform if seen_any else None
+    """The level a value is a *constant* of: its carriers agree on one id of that level and span at least
+    two ids of the next finer level present. A value inside one landing (or one id of the finest level
+    its carriers show) is no constant: it stays its own evidence. No agreement at any level: platform."""
+    union = {lv: set().union(*(anchor_ids[c].get(lv, set()) for c in caps)) for lv in CHAIN}
+    present = [lv for lv in CHAIN if union[lv]]
+    for i, lv in enumerate(present):
+        if len(union[lv]) == 1:
+            return lv if i > 0 and len(union[present[i - 1]]) >= 2 else None
+    return Level.platform if present else None
 
 
 def _parents(anchor_ids: Mapping[str, Mapping[Level, set[str]]]) -> dict[Level, Level | None]:
