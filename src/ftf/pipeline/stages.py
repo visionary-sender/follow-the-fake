@@ -9,7 +9,7 @@ landed. Owners: edit your adapter here when your public call changes; keep it on
 | ingest | Ingestion (HACK-9), fetch (HACK-17) | `ftf.ingest.ingest(inputs, root=..., name=..., indicators=True) -> Dataset`; URLs first `ftf.fetch.fetch_url(url, out_dir)` (online only) |
 | content features | Features (HACK-13/14/15) | `ftf.features.pipeline.extract(incident, raw_root, out_dir) -> Incident` |
 | enrichment | Enrichment (HACK-19) | `ftf.enrich.Enricher(Cache(path), offline=...).enrich(domain)` |
-| link/assign | Linking (HACK-21/22) | `ftf.linking.link_incident(base, incident)` |
+| link/assign | Linking (HACK-21/22) | `ftf.linking.link_incident(base, incident, base_dir=..., incident_dir=...)` |
 
 Without a library the fallback keeps the result valid: the input becomes one capture of a new
 incident (ad-hoc ids from `ftf.ingest.ids`, see `adhoc_ids`), the modalities it lacks are listed as
@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import json
 import os
 import re
 import shutil
@@ -78,6 +79,7 @@ class RunContext:
     run_dir: Path
     fetch: bool = False  # live page fetching: sandbox only, never on the workbench or the jury's machine
     input_root: Optional[Path] = None  # artefact paths of the incident are relative to this
+    base_dir: Optional[Path] = None  # folder of the base dataset.json: the base's vector stores
     incident: Optional[Incident] = None
     links: list[Link] = field(default_factory=list)
     assignment: Optional[Assignment] = None
@@ -203,8 +205,15 @@ def _fallback_incident(ctx: RunContext) -> Incident:
     stored, key = _store_input(ctx)
     inc_id, cap_id = adhoc_ids(key)
     artefacts = []
+    seen: set[str] = set()
     for path, rel, typ in stored:
-        artefacts.append(Artefact(id=ids.artefact_id(cap_id, rel), type=typ, path=rel, sha256=sha256_file(path), size=path.stat().st_size))
+        art_id = ids.artefact_id(cap_id, rel)
+        n = 1
+        while art_id in seen:  # sanitising can map two file names to one id (`a b.png`, `a-b.png`)
+            n += 1
+            art_id = f"{ids.artefact_id(cap_id, rel)}-{n}"
+        seen.add(art_id)
+        artefacts.append(Artefact(id=art_id, type=typ, path=rel, sha256=sha256_file(path), size=path.stat().st_size))
     present = {a.type for a in artefacts}
     missing = []
     for modality in FULL_REPORT:
@@ -269,10 +278,25 @@ def ingest(ctx: RunContext) -> tuple[str, str]:
     if not incidents:
         ctx.incident = _fallback_incident(ctx)
         return "error", "ingestion returned no incident; the input is stored as one capture"
-    ctx.incident = incidents[0]
     ctx.input_root = root
     extra = f"; {len(incidents) - 1} further incident(s) ignored" if len(incidents) > 1 else ""
+    known = _in_base(ctx, incidents[0].id)
+    if known is not None:  # the base already holds this case: linking it again would compare it with itself
+        ctx.incident = known
+        ctx.from_base = True
+        same = _shas(known) == _shas(incidents[0])
+        warn = "" if same else "; WARNING: the submitted files differ from the base's copy, which was not re-analysed"
+        return "ok", f"ingested as {known.id}, which the base already holds: its precomputed indicators, links and assignment are used{warn}{extra}"
+    ctx.incident = incidents[0]
     return "ok", f"ingested by ftf.ingest: {len(ctx.incident.captures)} capture(s), {len(ctx.incident.indicators)} indicator(s){extra}"
+
+
+def _in_base(ctx: RunContext, incident_id: str) -> Optional[Incident]:
+    return next((inc for inc in ctx.base.incidents if inc.id == incident_id), None)
+
+
+def _shas(incident: Incident) -> list[str]:
+    return sorted(a.sha256 or "" for c in incident.captures for a in c.artefacts)
 
 
 def content_features(ctx: RunContext) -> tuple[str, str]:
@@ -296,10 +320,34 @@ def refang(text: str) -> str:
     return text.replace("[.]", ".").replace("[:]", ":")
 
 
-def _domains(ctx: RunContext) -> list[str]:
+MAX_HAR_BYTES = 100 * 1024 * 1024
+
+
+def _har_page_urls(path: Path) -> list[str]:
+    """http(s) page URLs a HAR names (`ftf.enrich.scope.page_urls`); the HAR is parsed as JSON data only."""
+    from ftf.enrich.scope import page_urls
+
+    try:
+        if path.stat().st_size > MAX_HAR_BYTES:
+            return []
+        har = json.loads(path.read_bytes().decode("utf-8", "replace"))
+    except (OSError, ValueError):
+        return []
+    return [u for u in page_urls(har) if u.lower().startswith(("http://", "https://"))]
+
+
+def _domains(ctx: RunContext) -> list[tuple[str, str]]:
+    """(capture id, URL or domain) pairs to enrich: a URL input, else the page URLs of the incident's HARs."""
+    if not ctx.incident.captures:
+        return []
     if ctx.inp.kind == "url":
-        return [refang(ctx.inp.text)]
-    return []
+        return [(ctx.incident.captures[0].id, refang(ctx.inp.text))]
+    out: list[tuple[str, str]] = []
+    for cap in ctx.incident.captures:
+        for art in cap.artefacts:
+            if art.type is ArtefactType.har and art.path and ctx.input_root is not None:
+                out += [(cap.id, u) for u in _har_page_urls(ctx.input_root / art.path)]
+    return list(dict.fromkeys(out))
 
 
 def enrichment(ctx: RunContext) -> tuple[str, str]:
@@ -307,7 +355,7 @@ def enrichment(ctx: RunContext) -> tuple[str, str]:
         return "skipped", "precomputed indicators from the base"
     domains = _domains(ctx)
     if not domains:
-        return "skipped", "no domain known for this input (URL inputs only until ingestion lands)"
+        return "skipped", "no domain known for this input (needs a URL or a HAR with an http(s) page URL)"
     try:
         from ftf.enrich import Cache, Enricher
         from ftf.enrich.commands import DEFAULT_CACHE
@@ -316,15 +364,21 @@ def enrichment(ctx: RunContext) -> tuple[str, str]:
     cache_path = Path(DEFAULT_CACHE)
     cache = Cache(cache_path if cache_path.is_file() else None)  # never create a cache file as a side effect
     enricher = Enricher(cache, offline=ctx.offline)
-    cap_id = ctx.incident.captures[0].id
     added: list[Indicator] = []
     origins: Counter[str] = Counter()
     unknown = 0
-    for dom in domains:
+    done: set[tuple[str, str]] = set()
+    failed = 0
+    for cap_id, dom in domains:
+        name = enricher.registrable(dom)
+        if name is None or (cap_id, name) in done:
+            continue
+        done.add((cap_id, name))
         try:
-            res = enricher.enrich(dom)
-        except ValueError as exc:
-            return "skipped", f"not a registrable domain: {exc}"
+            res = enricher.enrich(name)
+        except Exception:  # one bad domain must not drop what the others gave
+            failed += 1
+            continue
         origins.update(look.origin for look in res.lookups.values())
         for ind in res.incident.indicators:
             unknown += ind.value == "unknown"
@@ -333,13 +387,20 @@ def enrichment(ctx: RunContext) -> tuple[str, str]:
                 "capture_id": cap_id,
                 "provenance": ind.provenance.model_copy(update={"artefact_id": None}),
             }))
+    if not done:
+        return "skipped", "no registrable domain in this input"
     ctx.incident = _add_indicators(ctx.incident, added)
     mode = "offline (cache only)" if ctx.offline else "online"
     where = ", ".join(f"{k}: {v}" for k, v in sorted(origins.items()))
-    return "ok", f"{mode}; {len(added)} indicator(s), {unknown} unknown; lookups {where}"
+    fail = f"; {failed} domain(s) failed" if failed else ""
+    return "ok", f"{mode}; {len(added)} indicator(s), {unknown} unknown; lookups {where}{fail}"
 
 
 def link_assign(ctx: RunContext) -> tuple[str, str]:
+    known = None if ctx.from_base else _in_base(ctx, ctx.incident.id)
+    if known is not None:  # a fallback id the base already holds: never link an incident against itself
+        ctx.incident = known
+        ctx.from_base = True
     inc = ctx.incident
     if ctx.from_base:
         own = {c.id for c in inc.captures}
@@ -349,14 +410,16 @@ def link_assign(ctx: RunContext) -> tuple[str, str]:
             ctx.assignment = _review(inc, "the base holds no assignment for this incident")
         return "ok", f"precomputed in the base: {len(ctx.links)} link(s), decision {ctx.assignment.decision.value}"
     # Linking (HACK-21/22); Evaluation's baseline uses the same call shape.
+    # link_incident(base, incident, relation=campaign, backend=None, base_dir, incident_dir) -> IncidentResult
     link_incident = _optional("ftf.linking", "link_incident")
     if link_incident is None:
         ctx.assignment = _review(inc, "linking engine (HACK-21/22) not available: no link was scored, so this item needs review")
         return "not_available", "linking engine (HACK-21/22) not available yet; decision set to review"
-    result = link_incident(ctx.base, inc)
+    result = link_incident(ctx.base, inc, base_dir=ctx.base_dir, incident_dir=ctx.run_dir / "features")
     ctx.links = list(result.links)
     ctx.assignment = result.assignment
-    return "ok", f"{len(ctx.links)} link(s), decision {ctx.assignment.decision.value}"
+    extra = "" if ctx.base.campaigns else "; the base has no campaigns (build it with `ftf link`)"
+    return "ok", f"{len(ctx.links)} link(s), decision {ctx.assignment.decision.value}{extra}"
 
 
 def _review(incident: Incident, note: str) -> Assignment:
@@ -377,7 +440,9 @@ def finish(ctx: RunContext) -> None:
         try:
             ctx.incident = _fallback_incident(ctx)
         except Exception as exc:  # e.g. an unreadable input file: still return a valid result
-            inc_id, cap_id = adhoc_ids(f"{ctx.inp.kind}:{ctx.inp.label}")
+            # Own prefix: must not collide with a URL input or another unreadable upload.
+            inc_id = ids.incident_id("input-error", ids.digest12(f"{ctx.inp.kind}:{ctx.inp.label}:{ctx.run_dir}"))
+            cap_id = ids.capture_id(inc_id, ids.SINGLE_CAPTURE_KEY)
             ctx.incident = Incident(id=inc_id, source="submitted", source_ref=ctx.inp.label[:300],
                                     captures=[Capture(id=cap_id, stage=Stage.unknown)])
             ctx.notes.append(f"input could not be stored: {exc.__class__.__name__}: {exc}")

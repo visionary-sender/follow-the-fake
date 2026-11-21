@@ -52,7 +52,7 @@ def register_serve(subparsers: argparse._SubParsersAction) -> None:
 
 
 def run_analyze(args: argparse.Namespace) -> int:
-    from ftf.app.base import load_base
+    from ftf.app.base import base_dir, load_base
 
     try:
         base = load_base(args.base)
@@ -68,7 +68,7 @@ def run_analyze(args: argparse.Namespace) -> int:
         print(f"ftf analyze: {exc}", file=sys.stderr)
         return USAGE_EXIT
     offline = not args.online or _env_flag("FTF_OFFLINE")
-    result = analyze(inp, base, offline=offline, fetch=args.fetch)
+    result = analyze(inp, base, offline=offline, fetch=args.fetch, base_dir=base_dir(args.base))
     try:
         dataset = result.to_dataset()
     except ValueError as exc:

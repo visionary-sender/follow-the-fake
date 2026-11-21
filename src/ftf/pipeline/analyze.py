@@ -239,6 +239,7 @@ def analyze(
     fetch: bool = False,
     run_dir: str | os.PathLike | None = None,
     keep_run_dir: bool = True,
+    base_dir: str | os.PathLike | None = None,
 ) -> AnalysisResult:
     """Analyse one input against the campaign `base`. Never raises for stage failures.
 
@@ -247,13 +248,15 @@ def analyze(
     sandbox VM, never on the workbench or in the demo app.
     Input bytes are copied into a per-run directory (`run_dir`, else a fresh temp dir under
     $FTF_RUN_DIR or the system temp dir), hashed with sha256 and never executed or rendered.
+    `base_dir` is the folder of the base's dataset.json (its vector stores), passed to linking.
     """
     from ftf.pipeline import stages  # late import: stages imports this module's types
 
     own_dir = run_dir is None
     rdir = Path(run_dir) if run_dir is not None else Path(tempfile.mkdtemp(prefix="ftf-run-", dir=_run_root()))
     rdir.mkdir(parents=True, exist_ok=True)
-    ctx = stages.RunContext(inp=inp, base=base, offline=offline, run_dir=rdir, fetch=fetch)
+    ctx = stages.RunContext(inp=inp, base=base, offline=offline, run_dir=rdir, fetch=fetch,
+                            base_dir=Path(base_dir) if base_dir is not None else None)
     reports: list[StageReport] = []
     for name, fn in stages.STAGES:
         start = time.perf_counter()
