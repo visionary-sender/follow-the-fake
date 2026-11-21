@@ -20,8 +20,8 @@ Splitting a case folder into captures
    the HTML's ``saved from url`` comment, the HAR's page URL or the MHTML's
    ``Snapshot-Content-Location``. A saved HTML takes its ``<stem>_files/`` folder (files there
    are ``asset`` artefacts, ``.pobrane`` suffixes ignored for typing). A page that names no host
-   joins the only site in the folder. Folder 2 so yields two captures:
-   ``acrosscommunities.live`` (HAR + saved page) and ``healthlinkq.pro`` (case 3's HAR).
+   joins the only site in the folder. Folder 2 so yields two captures, one per site; case 3's
+   HAR becomes its own capture.
 3. Remaining top-level files (screenshots, videos, yt-dlp ``.info.json``, notes) are ad material:
    images are ``ad_screenshot``, ``.info.json`` is ``ad_library``. They join the site capture when
    the folder has exactly one, else they form their own capture (61's ``reklama_1``).
@@ -39,6 +39,9 @@ Stage heuristics
 - ``pre_lander``: never inferred from static folders (a saved page does not show which hop it
   was); kept when a source states it.
 - ``unknown``: anything else, e.g. a bare URL that was not fetched.
+
+Fetcher and scanner folders (``capture.json``) keep the stages, ids and missing modalities their
+manifest states; see :mod:`ftf.ingest.manifests`.
 
 ``observed`` is ``live`` when the capture holds a HAR of ``http(s)`` traffic, else ``static``. A HAR
 whose page is a ``file://`` URL (61 ``strona_1/.har``: the analyst reopened the saved page) is a

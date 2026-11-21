@@ -8,8 +8,10 @@ between runs. The separator is ``:``. Every part passes :func:`sanitise`.
 | Organiser incident | ``<source>:<case folder>`` | ``do_udostepnienia:61``, ``BACKUP:p15`` |
 | Organiser capture | ``<incident id>:<capture key>``; ``c1`` when the folder is one capture | ``do_udostepnienia:61:strona_1`` |
 | Artefact | ``<capture id>:<path relative to the case folder>`` (``/`` kept) | ``do_udostepnienia:61:strona_1:strona_1/page.html`` |
-| Fetched page | ``fetch:<fetcher capture_id>``, ``…:c1``, artefact ``…:<artefact type>`` | ``fetch:20261121T220000Z-example.test-1a2b3c4d:c1`` |
-| Ad-library record | ``adlib:<ad archive id>``, captures ``…:ad`` and ``…:lander`` | ``adlib:1234567890:ad`` |
+| Fetched page | ``fetch:<fetcher capture_id>``, ``…:c1`` (``…:c2`` for a re-fetch of the same URL in the run), artefact ``…:<artefact type>`` | ``fetch:20261121T220000Z-example.test-1a2b3c4d:c1`` |
+| Ad-library record | ``adlib:<ad archive id or creative id>``, capture ``…:ad`` (as written by the scanner) | ``adlib:1234567890:ad`` |
+| CERT Polska listing | ``certpl:<registrable domain>``, capture ``…:listing`` | ``certpl:example.test:listing`` |
+| Collector manifest | ``<capture id>:manifest`` (the folder's ``capture.json``) | ``adlib:1234567890:ad:manifest`` |
 | Ad-hoc input | ``input:<first 12 hex of sha256 over the sorted artefact sha256s, or of the URL>`` | ``input:3f9a0c1b2d4e:c1`` |
 
 Exact duplicates keep their own id and point ``duplicate_of`` at :func:`canonical` of the group.

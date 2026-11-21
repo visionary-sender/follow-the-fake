@@ -208,7 +208,8 @@ def test_bare_url_not_fetched():
 # -- fetcher folders -----------------------------------------------------------------------------
 
 
-def fetcher_capture(out: Path, cid: str, url: str = "https://lambda.example.test/", ad: dict | None = None) -> Path:
+def fetcher_capture(out: Path, cid: str, url: str = "https://lambda.example.test/", profile: str | None = None,
+                    started: str = "2026-11-21T22:00:00Z") -> Path:
     d = out / cid
     write(d / "url.txt", url + "\n")
     write(d / "page.har", har(url, "2026-11-21T22:00:00.000Z"))
@@ -224,10 +225,11 @@ def fetcher_capture(out: Path, cid: str, url: str = "https://lambda.example.test
                         "level": "capture", "value": "timeout", "observed": "live", "provenance": {"artefact_id": f"fetch:{cid}:url"}, "extractor": "ftf-fetch@0.1.0"}],
     }
     Incident.model_validate(inc)
-    write(d / "capture.json", json.dumps({"manifest_version": 1, "capture_id": cid, "incident": inc}))
-    if ad is not None:
-        write(d / "ad.json", json.dumps(ad))
-        write(d / "creative.png", b"\x89PNG creative")
+    manifest = {"manifest_version": 1, "contract_version": "0.1.0", "tool": "ftf-fetch@0.1.0", "capture_id": cid, "requested_url": url,
+                "outcome": "timeout", "reason": "slow", "started_at": started, "incident": inc}
+    if profile is not None:
+        manifest["profile"] = {"name": profile, "is_mobile": profile != "default"}
+    write(d / "capture.json", json.dumps(manifest))
     return d
 
 
@@ -239,24 +241,13 @@ def test_fetcher_folder_keeps_ids(tmp_path):
     assert inc.id == f"fetch:{cid}" and inc.source == "live_fetch" and not inc.indicators
     (cap,) = inc.captures
     assert cap.id == f"fetch:{cid}:c1" and cap.observed is Observed.live
-    assert {a.id for a in cap.artefacts} == {f"fetch:{cid}:url", f"fetch:{cid}:har", f"fetch:{cid}:html"}
+    assert {a.id for a in cap.artefacts} == {f"fetch:{cid}:url", f"fetch:{cid}:har", f"fetch:{cid}:html", f"fetch:{cid}:c1:manifest"}
     for a in cap.artefacts:
         assert a.path.startswith(f"{cid}/") and a.sha256 != "0" * 64  # re-hashed from the files
     assert [m.modality for m in cap.missing] == [ArtefactType.screenshot]
     # a fetcher output root with several captures
     fetcher_capture(tmp_path / "captures", "20261121T220100Z-mu.example.test-00000000", "https://mu.example.test/")
     assert len(load_inputs([tmp_path / "captures"]).incidents) == 2
-
-
-def test_fetcher_folder_with_ad_record_hook(tmp_path):
-    cid = "20261121T220000Z-lambda.example.test-1a2b3c4d"
-    d = fetcher_capture(tmp_path / "captures", cid, ad={"ad_archive_id": "1234567890"})
-    (inc,) = load_inputs([d]).incidents
-    assert inc.id == "adlib:1234567890" and inc.source == "ad_library"
-    c = {x.id: x for x in inc.captures}
-    assert set(c) == {"adlib:1234567890:ad", "adlib:1234567890:lander"}
-    assert {a.type for a in c["adlib:1234567890:ad"].artefacts} == {ArtefactType.ad_library, ArtefactType.ad_screenshot}
-    assert c["adlib:1234567890:lander"].stage is Stage.lander
 
 
 def test_fetch_option_uses_fetcher(tmp_path):
@@ -327,13 +318,6 @@ def test_fetcher_folder_given_twice_and_nested(tmp_path):
     d = fetcher_capture(out, "20261121T220000Z-lambda.example.test-1a2b3c4d")
     assert len(load_inputs([out, d]).incidents) == 1
     assert len(load_inputs([d, d]).incidents) == 1
-
-
-def test_same_ad_record_twice_keeps_first(tmp_path):
-    a = fetcher_capture(tmp_path / "x", "20261121T220000Z-a.example.test-00000001", ad={"ad_archive_id": "42"})
-    b = fetcher_capture(tmp_path / "y", "20261121T220000Z-b.example.test-00000002", ad={"ad_archive_id": "42"})
-    ds = load_inputs([a, b])
-    assert [i.id for i in ds.incidents] == ["adlib:42"]
 
 
 def test_har_title_that_is_not_a_url(tmp_path):

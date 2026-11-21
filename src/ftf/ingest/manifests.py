@@ -1,0 +1,303 @@
+"""Capture folders written by our own collectors: the URL fetcher (HACK-17) and the ad-library scanner (HACK-20).
+
+Both write ``<out>/<folder>/capture.json`` (a manifest with ``tool``, ``manifest_version`` and a
+contract ``Incident``) next to the captured files, and ``<out>/dataset.json`` for the run. The
+layout is detected from the manifest, never from file names:
+
+- ``tool = ftf-fetch@…``: ``url.txt``, ``page.har``, ``page.html``, ``screenshot.png``. Ids are
+  kept (``fetch:<capture_id>``, ``…:c1``, ``…:<type>``).
+- ``tool = ftf-scanner@…``: ``ad.json`` plus ``creative-<n>.<ext>``. Ids are kept
+  (``adlib:<id>`` / ``adlib:<id>:ad``, ``certpl:<domain>`` / ``certpl:<domain>:listing``).
+  ``ad.json`` becomes the ``ad_library`` artefact (the manifest lists it without a path);
+  creatives become ``ad_screenshot`` (images) or ``video``.
+
+Every capture also gets its folder's ``capture.json`` as an ``other`` artefact
+(``<capture id>:manifest``), so extractors can read collector facts such as the fetch profile.
+
+Run folders: every child folder holding a ``capture.json`` is read; ``queue.jsonl``, ``state/``,
+``runs/`` and ``dataset.json`` are ignored. Within one run,
+
+- fetches of the same requested URL (the default visit and an opt-in victim-profile re-fetch of a
+  cloaked page) form one incident under the first fetch's id (default profile first, then start
+  time), with captures ``…:c1``, ``…:c2``;
+- a stable scanner id seen in several scan folders keeps the newest folder.
+
+Manifests are untrusted: an artefact path that is absolute, contains ``..`` or a backslash, or
+resolves outside its capture folder (symlinks included) is ignored. Nothing is executed or rendered.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
+
+from ftf.contract import ArtefactType, Incident, Stage
+from ftf.ingest import files as F
+from ftf.ingest.model import RawArtefact, RawCapture, RawIncident
+
+log = logging.getLogger(__name__)
+
+MANIFEST = "capture.json"
+AD_RECORD = "ad.json"
+FETCH_TOOL = "ftf-fetch@"
+SCAN_TOOL = "ftf-scanner@"
+MANIFEST_VERSIONS = frozenset({1})
+MAX_MANIFEST_BYTES = 32 * 1024 * 1024
+DEFAULT_PROFILE = "default"
+
+
+@dataclass
+class Manifest:
+    folder: Path
+    data: dict
+    tool: str  # "fetch" or "scan"
+    incident: Incident
+
+    @property
+    def requested_url(self) -> str | None:
+        url = self.data.get("requested_url")
+        return url if isinstance(url, str) and url else None
+
+    @property
+    def profile(self) -> str:
+        return profile_name(self.data)
+
+    @property
+    def started(self) -> str:
+        s = self.data.get("started_at")
+        return s if isinstance(s, str) else ""
+
+
+def profile_name(data: dict) -> str:
+    """The fetch profile's name; ``default`` when the manifest predates profiles."""
+    p = data.get("profile")
+    if isinstance(p, dict):
+        p = p.get("name")
+    return p if isinstance(p, str) and p else DEFAULT_PROFILE
+
+
+def has_manifest(path: Path) -> bool:
+    m = path / MANIFEST
+    return path.is_dir() and not path.is_symlink() and m.is_file() and not m.is_symlink()
+
+
+def read_manifest(folder: Path) -> Manifest:
+    """Parse and check ``<folder>/capture.json``; ``ValueError`` if it is not one of ours."""
+    path = folder / MANIFEST
+    if path.stat().st_size > MAX_MANIFEST_BYTES:
+        raise ValueError(f"{path}: manifest larger than {MAX_MANIFEST_BYTES} bytes")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError) as e:
+        raise ValueError(f"{path}: unreadable manifest ({e.__class__.__name__})") from None
+    if not isinstance(data, dict):
+        raise ValueError(f"{path}: manifest is not a JSON object")
+    tool = data.get("tool")
+    if not isinstance(tool, str) or not tool.startswith((FETCH_TOOL, SCAN_TOOL)):
+        raise ValueError(f"{path}: unknown capture tool {str(tool)[:40]!r} (expected {FETCH_TOOL}… or {SCAN_TOOL}…)")
+    if data.get("manifest_version") not in MANIFEST_VERSIONS:
+        raise ValueError(f"{path}: unsupported manifest_version {data.get('manifest_version')!r}")
+    try:
+        incident = Incident.model_validate(data.get("incident"))
+    except ValueError as e:
+        raise ValueError(f"{path}: invalid incident ({e.__class__.__name__})") from None
+    return Manifest(folder=folder, data=data, tool="fetch" if tool.startswith(FETCH_TOOL) else "scan", incident=incident)
+
+
+# -- untrusted artefact paths -------------------------------------------------------------------
+
+
+def safe_parts(path: object) -> tuple[str, ...] | None:
+    """Relative POSIX path parts, or None for anything absolute, escaping or odd."""
+    if not isinstance(path, str) or not path or "\\" in path or "\x00" in path:
+        return None
+    p = PurePosixPath(path)
+    if p.is_absolute() or any(part == ".." for part in p.parts):
+        return None
+    parts = tuple(part for part in p.parts if part != ".")
+    return parts or None
+
+
+def _inside(folder: Path, parts: tuple[str, ...]) -> Path | None:
+    cand = folder
+    for part in parts:
+        cand = cand / part
+        if cand.is_symlink():
+            return None
+    try:
+        if not cand.is_file() or not cand.resolve().is_relative_to(folder.resolve()):
+            return None
+    except OSError:
+        return None
+    return cand
+
+
+def artefact_file(folder: Path, path: object) -> Path | None:
+    """A manifest path (relative to the run folder, ``<folder>/<file>``, or to the folder) as a file inside ``folder``."""
+    parts = safe_parts(path)
+    if parts is None:
+        return None
+    tries = [parts[1:]] if len(parts) > 1 else []
+    tries.append(parts)
+    for t in tries:
+        found = _inside(folder, t)
+        if found is not None:
+            return found
+    return None
+
+
+# -- one capture folder -------------------------------------------------------------------------
+
+
+def _load(path: Path, folder: Path, atype: ArtefactType, fixed_id: str) -> RawArtefact:
+    from ftf.ingest.adapters import load_file  # adapters imports this module
+
+    art = load_file(path, folder, ad_side=False, in_assets=False)
+    art.type, art.fixed_id = atype, fixed_id
+    return art
+
+
+def _scan_type(path: Path, declared: ArtefactType) -> ArtefactType:
+    t = F.artefact_type(path, in_assets=False, ad_side=True)
+    return t if t in (ArtefactType.ad_screenshot, ArtefactType.video, ArtefactType.ad_library) else declared
+
+
+def to_raw(m: Manifest) -> RawIncident:
+    """The manifest's incident with files re-read from disk (sha256 and size recomputed)."""
+    folder, inc = m.folder, m.incident
+    captures: list[RawCapture] = []
+    used: set[Path] = set()
+    for n, c in enumerate(inc.captures):
+        arts: list[RawArtefact] = []
+        notes: list[str] = []
+        for a in c.artefacts:
+            if m.tool == "scan" and a.path is None and a.type in (ArtefactType.ad_library, ArtefactType.url):
+                p = artefact_file(folder, AD_RECORD)  # the listed ad-library record has no path
+                atype = ArtefactType.ad_library
+            elif a.path is None:
+                continue
+            else:
+                p = artefact_file(folder, a.path)
+                atype = _scan_type(p, a.type) if (m.tool == "scan" and p is not None) else a.type
+            if p is None or p in used:
+                if a.path is not None or m.tool == "scan":
+                    notes.append(f"{a.id}: artefact file missing or outside the capture folder; skipped")
+                continue
+            used.add(p)
+            arts.append(_load(p, folder, atype, a.id))
+        if m.tool == "scan" and n == 0:
+            arts.extend(_unlisted_scan_files(folder, c.id, used))
+        if n == 0:
+            arts.append(_load(folder / MANIFEST, folder, ArtefactType.other, f"{c.id}:manifest"))
+        present = {a.type for a in arts}
+        missing = [x for x in c.missing if x.modality not in present]
+        stage = c.stage
+        if m.tool == "scan" and stage is Stage.unknown and present & {ArtefactType.ad_screenshot, ArtefactType.video}:
+            stage = Stage.ad
+        captures.append(RawCapture(key=c.id.rsplit(":", 1)[-1], artefacts=arts, stage=stage, observed=c.observed,
+                                   captured_on=c.captured_on, missing=missing, notes=notes, fixed_id=c.id))
+    return RawIncident(source=inc.source, source_ref=inc.source_ref, captures=captures, fixed_id=inc.id)
+
+
+def _unlisted_scan_files(folder: Path, capture_id: str, used: set[Path]) -> list[RawArtefact]:
+    """``ad.json`` and ``creative-*`` files the manifest does not list (an older or newer scanner)."""
+    out = []
+    for p in sorted(folder.iterdir(), key=lambda x: x.name):
+        if p in used or p.is_symlink() or not p.is_file():
+            continue
+        if p.name == AD_RECORD:
+            out.append(_load(p, folder, ArtefactType.ad_library, f"{capture_id}:library"))
+        elif p.name.startswith("creative-"):
+            t = _scan_type(p, ArtefactType.other)
+            if t is not ArtefactType.other:
+                out.append(_load(p, folder, t, f"{capture_id}:{p.name.rsplit('.', 1)[0]}"))
+        else:
+            continue
+        used.add(p)
+    return out
+
+
+def load_folder(folder: Path) -> RawIncident:
+    return to_raw(read_manifest(folder))
+
+
+# -- a run folder -------------------------------------------------------------------------------
+
+
+def capture_folders(run: Path) -> list[Path]:
+    from ftf.ingest.adapters import _listdir
+
+    return [p for p in _listdir(run) if has_manifest(p)]
+
+
+def is_run(path: Path) -> bool:
+    return path.is_dir() and not path.is_symlink() and bool(capture_folders(path))
+
+
+def _group_fetches(manifests: list[Manifest]) -> list[list[Manifest]]:
+    """Fetches sharing a requested URL or an incident id, in first-seen order."""
+    groups: list[list[Manifest]] = []
+    by_key: dict[tuple[str, str], int] = {}
+    for m in manifests:
+        keys = [("id", m.incident.id)] + ([("url", m.requested_url)] if m.requested_url else [])
+        hits = sorted({by_key[k] for k in keys if k in by_key})
+        if not hits:
+            groups.append([m])
+            idx = len(groups) - 1
+        else:
+            idx = hits[0]
+            groups[idx].append(m)
+            for other in hits[1:]:  # m bridges two groups
+                groups[idx].extend(groups[other])
+                for k, v in by_key.items():
+                    if v == other:
+                        by_key[k] = idx
+                groups[other] = []
+        for k in keys:
+            by_key[k] = idx
+    return [g for g in groups if g]
+
+
+def _merge_fetches(group: list[Manifest]) -> RawIncident:
+    group = sorted(group, key=lambda m: (m.profile != DEFAULT_PROFILE, m.started, m.folder.name))
+    raws = [to_raw(m) for m in group]
+    if len(raws) == 1:
+        return raws[0]
+    first = raws[0]
+    caps = [c for r in raws for c in r.captures]
+    cap_ids = [c.fixed_id for c in caps]
+    if not (all(r.fixed_id == first.fixed_id for r in raws) and len(set(cap_ids)) == len(cap_ids)):
+        for n, c in enumerate(caps, start=1):
+            c.notes.append(f"fetch {c.fixed_id} merged into {first.fixed_id} (same requested URL)")
+            c.key = f"c{n}"
+            c.fixed_id = f"{first.fixed_id}:c{n}"
+    return RawIncident(source=first.source, source_ref=first.source_ref, captures=caps, fixed_id=first.fixed_id)
+
+
+def _newest_scans(manifests: list[Manifest]) -> list[Manifest]:
+    best: dict[str, Manifest] = {}
+    for m in manifests:
+        key = (m.data.get("finished_at") if isinstance(m.data.get("finished_at"), str) else "", m.folder.name)
+        cur = best.get(m.incident.id)
+        if cur is None or key > (cur.data.get("finished_at") if isinstance(cur.data.get("finished_at"), str) else "", cur.folder.name):
+            best[m.incident.id] = m
+    keep = {id(m) for m in best.values()}
+    return [m for m in manifests if id(m) in keep]
+
+
+def load_run(run: Path) -> list[RawIncident]:
+    """Every capture folder in a fetcher or scanner run folder (bad manifests are skipped with a warning)."""
+    fetches: list[Manifest] = []
+    scans: list[Manifest] = []
+    for folder in capture_folders(run):
+        try:
+            m = read_manifest(folder)
+        except ValueError as e:
+            log.warning("ftf ingest: skipping %s", e)
+            continue
+        (fetches if m.tool == "fetch" else scans).append(m)
+    out = [_merge_fetches(g) for g in _group_fetches(fetches)]
+    out.extend(to_raw(m) for m in _newest_scans(scans))
+    return out
