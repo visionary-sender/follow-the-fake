@@ -1,0 +1,14 @@
+# Every 6 hours while the sandbox VM runs; first run 2 minutes after the timer starts
+# (installation or boot), so one unattended run is visible soon after a start.
+[Unit]
+Description=Follow the Fake ad-library scan every 6 hours
+
+[Timer]
+OnActiveSec=2min
+OnBootSec=10min
+OnUnitActiveSec=6h
+RandomizedDelaySec=60
+Persistent=false
+
+[Install]
+WantedBy=timers.target
