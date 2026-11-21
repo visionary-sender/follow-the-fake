@@ -50,18 +50,21 @@ sets, with a standard error of about 0.044.
   `aria-hidden="true"` or `<input type=hidden>`, and those with inline `display:none` or
   `visibility:hidden`. Comments are dropped too.
   - MHTML: the first `text/html` part.
-  - HAR: the `text/html` response body with the most visible text.
-  - Size caps: only the first 64 MB of HTML or MHTML is read; HARs over 512 MB are skipped.
+  - Every saved HTML or MHTML page of a capture gives a `page_text` (pre-lander and lander).
+    The HAR is used only when a capture has neither, taking the `text/html` response body with
+    the most visible text.
+  - Size caps: only the first 64 MB of HTML or MHTML is read; HARs over 64 MB are skipped.
   - Ingestion (HACK-9) owns these formats. This module keeps to what text extraction needs.
 - **Masking** (`mask.py`) replaces, in this order:
-  1. URLs and emails become `<URL>`.
+  1. Emails become `<URL>`.
   2. Names of real news outlets and programmes (a fixed public list in `mask.py`) become
      `<OUTLET>`. This runs before URL masking, so "Onet.pl" and "Onet" mask alike.
-  3. Gazetteer people become `<PERSON>`. The match is on surname stems plus Polish case endings,
-     so "Roberta Lewandowskiego" matches. A surname alone counts as a person only when no other
+  3. URLs become `<URL>`.
+  4. Gazetteer people become `<PERSON>`. The match is on surname stems plus Polish case endings,
+     so "Roberta Lewandowskiego" (and "ROBERT LEWANDOWSKI") matches. A surname alone counts as a person only when no other
      gazetteer entry shares its stem.
-  4. Prices, dates and times, and then any other number, become `<PRICE>`, `<DATE>` and `<NUM>`.
-  5. Every remaining pair of capitalised words becomes `<PERSON>`. This catches invented
+  5. Prices, dates and times, and then any other number, become `<PRICE>`, `<DATE>` and `<NUM>`.
+  6. Every remaining pair of capitalised words becomes `<PERSON>`. This catches invented
      commenter names and invented platform brand names. A pair that starts with a
      common Polish first name is also reported as a `person_mention`.
 
@@ -111,8 +114,8 @@ screenshots and 28 page captures. The e2-standard-8 VM was shared with other wor
 | e5-small embedding | 63 | 0.35–0.48 |
 | whole run (wall clock) | | 68–97 s |
 
-Output counts: `ocr_text` 36 (one of 37 images had no confident text), `page_text` 27,
-`text_template` 62, `text_embedding` 63, `person_mention` 230, `keyword` 176, `topic` 25
+Output counts: `ocr_text` 36 (one of 37 images had no confident text), `page_text` 28,
+`text_template` 63, `text_embedding` 64, `person_mention` 230, `keyword` 174, `topic` 25
 (investment 19, health 6). No errors.
 
 Outputs are in `gs://follow-the-fake-data/outputs/visual/hack-13/organiser/`, with the pair reports
@@ -128,7 +131,8 @@ in `text/report-*-p3p4.json`.
   names.** Each page gives a different gazetteer `person_mention` for the impersonated person,
   while the masked texts share most shingles.
 
-  The p3↔p4 pair compared with the other 350 `page_text` pairs:
+  The p3↔p4 pair compared with the other 377 `page_text` pairs (the latest run reads every saved
+  page of a capture, so one more page and one rank lower than the table):
 
   | measure | p3↔p4 | other pairs: median | p95 | max | rank of p3↔p4 |
   |---|---|---|---|---|---|
@@ -159,7 +163,11 @@ in `text/report-*-p3p4.json`.
   - The gazetteer covers about 45 people.
   - "Name pair" mentions include invented commenters, which is useful as a template signal.
   - A capitalised pair that is a brand name is masked as `<PERSON>`, but it is not reported unless its first word is a common first name.
-- **HAR pages.** The main document is taken as the largest HTML body. Ingestion's choice should
-  replace this once it exists.
+- **Not read yet.** `text` artefacts (ad copy pasted as text) give no indicators.
+- **Title Case over-masking.** Any capitalised word pair becomes `<PERSON>`, so Title Case
+  headlines and institution names ("Narodowy Bank Polski") collapse too. That trades some
+  over-masking for catching invented commenter and brand names.
+- **HAR main document.** The longest HTML body may be a consent wall or a cloaking decoy;
+  Ingestion's main-document choice should replace it.
 - **No language detection.** Masking and the lexicon assume Polish; other languages still get
   OCR (eng), templates and embeddings.

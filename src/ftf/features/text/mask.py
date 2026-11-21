@@ -49,10 +49,11 @@ def _stem(word: str) -> str:
 
 
 def _full_pattern(name: str) -> re.Pattern:
-    """First name and surname, both in any case form ("Krzysztofa Stanowskiego")."""
+    """First name and surname in any grammatical case ("Roberta Lewandowskiego") or letter case."""
     first, last = name.split()[0], name.split()[-1]
     return re.compile(
-        rf"(?<!\w){re.escape(_stem(first))}{_SUFFIX}\s+{re.escape(_stem(last))}{_SUFFIX}(?!\w)"
+        rf"(?<!\w){re.escape(_stem(first))}{_SUFFIX}\s+{re.escape(_stem(last))}{_SUFFIX}(?!\w)",
+        re.I,  # all-caps headlines; a bare surname stays case-sensitive ("Lis" vs "lis")
     )
 
 

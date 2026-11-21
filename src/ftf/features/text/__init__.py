@@ -29,7 +29,6 @@ from ftf.features.text.mask import mask, tokens
 
 EXTRACTOR = "text@0.1.0"
 OCR_TYPES = frozenset({ArtefactType.ad_screenshot, ArtefactType.screenshot})
-PAGE_PRIORITY = (ArtefactType.html, ArtefactType.mhtml, ArtefactType.har)
 MIN_CHARS = 20  # shorter texts carry no template or embedding signal
 
 log = logging.getLogger(__name__)
@@ -114,7 +113,11 @@ def features_for_image(path: Path) -> list[Feature]:
     """OCR one still image: ``ocr_text`` plus the derived text features (for video keyframes)."""
     from ftf.features.text.ocr import content_lines, ocr_lines
 
-    lines = ocr_lines(Path(path))
+    try:
+        lines = ocr_lines(Path(path))
+    except Exception as e:  # no tesseract, or an unreadable / hostile image
+        log.warning("OCR failed on %s: %s: %s", Path(path).name, type(e).__name__, e)
+        return []
     if not lines:
         return []
     content = "\n".join(content_lines(lines))
@@ -124,12 +127,10 @@ def features_for_image(path: Path) -> list[Feature]:
     return out
 
 
-def _page_artefact(cap):
-    for t in PAGE_PRIORITY:
-        for art in cap.artefacts:
-            if art.type == t and art.path:
-                return art
-    return None
+def _page_artefacts(cap) -> list:
+    """Every saved HTML / MHTML page of a capture (pre-lander and lander); the HAR only without one."""
+    pages = [a for a in cap.artefacts if a.type in (ArtefactType.html, ArtefactType.mhtml) and a.path]
+    return pages or [a for a in cap.artefacts if a.type == ArtefactType.har and a.path][:1]
 
 
 def apply(ds: Dataset, raw_root: Path, out_dir: Path) -> Dataset:
@@ -166,8 +167,7 @@ def apply(ds: Dataset, raw_root: Path, out_dir: Path) -> Dataset:
                     stats["ocr_s"].append(cpu_seconds() - t0)
                 if lines:
                     sources.append((art, "ocr_text", "\n".join(lines), "\n".join(content_lines(lines)), Observed.static))
-            art = _page_artefact(cap)
-            if art is not None:
+            for art in _page_artefacts(cap):
                 t0 = cpu_seconds()
                 try:
                     text = page_text(resolve(raw_root, art), art.type.value)

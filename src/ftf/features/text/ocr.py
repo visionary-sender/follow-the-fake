@@ -28,9 +28,19 @@ _CHROME_PHRASE = (
     r"|biblioteka reklam|ad library|ad details|library id|data zamieszczenia|łączny czas aktywności"
     r"|platformy|platforms|zamknij|close|aktywna|inactive|nieaktywna|started running)"
 )
-# A line is chrome only when it is made of chrome phrases plus OCR debris (symbols, digits, tokens
-# of at most 3 letters such as "Vv" or "x"); "Zarejestruj się teraz i odbierz 3000 zł" stays ad copy.
-_CHROME = re.compile(rf"(?:\s*(?:{_CHROME_PHRASE}|[\W\d_]+|\b\w{{1,3}}\b))+\s*", re.I)
+_CHROME = re.compile(rf"(?<!\w){_CHROME_PHRASE}(?!\w)", re.I)
+# OCR debris left around chrome: symbols, digits and at most 3 letters per token ("Vv", "x", "©").
+_DEBRIS = re.compile(r"[\W\d_]*(?:[^\W\d_]{1,3})?[\W\d_]*")
+
+
+def is_chrome(line: str) -> bool:
+    """True when a line holds at least one chrome phrase and nothing else but OCR debris.
+
+    Token-wise checks keep the work linear: OCR output of an ad is attacker-controlled, so no
+    pattern here may backtrack over a whole line. "Zarejestruj się teraz i odbierz 3000 zł" stays.
+    """
+    rest, n = _CHROME.subn(" ", line)
+    return n > 0 and all(_DEBRIS.fullmatch(tok) for tok in rest.split())
 
 
 class OcrUnavailable(RuntimeError):
@@ -44,12 +54,12 @@ def threads() -> int:
 def _prepare(src: Path, dst: Path) -> Path:
     """Greyscale, upscaled copy of the image; the original path if Pillow is not installed."""
     try:
-        from PIL import Image
+        from PIL import Image, ImageOps
     except ImportError:
         return src
     with Image.open(src) as im:
         im.seek(0)  # first frame of animated images
-        g = im.convert("L")
+        g = ImageOps.exif_transpose(im).convert("L")  # phone photos: honour EXIF rotation
     if g.width < MIN_WIDTH:
         f = min(3.0, MIN_WIDTH / max(g.width, 1))
         g = g.resize((round(g.width * f), round(g.height * f)), Image.LANCZOS)
@@ -90,4 +100,4 @@ def ocr_lines(path: Path, min_conf: float = MIN_LINE_CONF) -> list[str]:
 
 def content_lines(lines: list[str]) -> list[str]:
     """Lines minus platform UI chrome: the ad copy that templates and embeddings use."""
-    return [ln for ln in lines if not _CHROME.fullmatch(ln.strip())]
+    return [ln for ln in lines if not is_chrome(ln)]

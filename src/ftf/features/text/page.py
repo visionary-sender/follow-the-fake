@@ -16,7 +16,7 @@ import re
 from pathlib import Path
 
 MAX_BYTES = 64 * 1024 * 1024  # HTML / MHTML: only this much is read
-MAX_HAR_BYTES = 512 * 1024 * 1024  # larger HARs are skipped (they are parsed whole)
+MAX_HAR_BYTES = 64 * 1024 * 1024  # larger HARs are skipped (parsed whole; real ones are ~5 MB)
 MAX_CHARS = 50_000
 
 _DROP = ["script", "style", "noscript", "template", "svg", "iframe", "object", "embed", "head", "canvas"]
@@ -75,8 +75,11 @@ def htmls_from_har(data: bytes) -> list[str]:
         return []
     out = []
     entries = (har.get("log") or {}).get("entries") or [] if isinstance(har, dict) else []
-    for e in entries:
-        c = ((e or {}).get("response") or {}).get("content") or {}
+    for e in entries if isinstance(entries, list) else []:
+        r = e.get("response") if isinstance(e, dict) else None
+        c = r.get("content") if isinstance(r, dict) else None
+        if not isinstance(c, dict) or not isinstance(c.get("text"), str):
+            continue
         if not str(c.get("mimeType", "")).lower().startswith("text/html") or not c.get("text"):
             continue
         body = c["text"]
