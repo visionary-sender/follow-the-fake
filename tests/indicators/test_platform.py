@@ -27,7 +27,7 @@ XID = base64.b32hexencode(XID_BYTES).decode().lower().rstrip("=")
 
 def _aio_page() -> str:
     cfg = {
-        "campaign": {"uuid": CAMPAIGN, "owner_uuid": OWNER.upper(), "name": "OPER / XX / Camp9"},
+        "campaign": {"uuid": CAMPAIGN, "owner_uuid": OWNER.upper(), "name": "Team / XX / Camp9"},
         "landing": {"uuid": LANDING, "name": "Test landing 'quoted'", "lander_template_uuid": TEMPLATE},
         "source": {"uuid": "0a1b2c3d-0000-4000-8000-00000000000f", "name": "FB"},
         "handle": {"key": "00112233445566778899aabbccddeeff", "value": "x"},
@@ -35,19 +35,19 @@ def _aio_page() -> str:
             "ip_address": "198.51.100.7",
             "fingerprint": "ffffffffffffffffffffffffffffffff",
             "flow_uuid": "0a1b2c3d-0000-4000-8000-000000000010",
-            "query": {"ad_id": "120200000000000001", "ad_name": "FARM/XX/Dr Test/abc", "access_token": TOKEN},
+            "query": {"ad_id": "120200000000000001", "ad_name": "BUYER/XX/Dr Test/abc", "access_token": TOKEN},
         },
     }
     js = json.dumps(cfg).replace("'", "\\'").replace("/", "\\/")
     return f"""<!doctype html><html style="filter: hue-rotate(4deg)"><head>
 <script>window.aio = JSON.parse('{js}');</script>
-<script src="https://cdn.example.test/aio-static/sdk/main.js?v=1.0.28"></script>
+<script src="https://cdn.example.test/aio-static/sdk/main.js?v=9.9.9"></script>
 <link href="/_cdn/production/landing-cdn/{TENANT}/{LANDING}/style.css">
 <script>fbq('init', '{PIXEL}');</script>
 <script async src="https://www.googletagmanager.com/gtag/js?id=AW-123456789"></script>
 </head><body>
 <a href="https://land.example.test/?ad_id=120200000000000001&amp;adset_name=Adset%20One&amp;access_token={TOKEN}">x</a>
-<form action="/fb-order.php?x=1" method="post">
+<form action="/lead-submit.php?x=1" method="post">
   <input name="Name"><input name="phone" placeholder="+48 123 456 789"><input type="hidden" name="fbpx" value="{PIXEL}">
   <input type="submit" name="go">
 </form>
@@ -72,10 +72,10 @@ def _har_doc() -> dict:
 
     return {"log": {"entries": [
         entry(f"https://www.facebook.com/tr/?id={PIXEL}&ev=PageView"),
-        entry(f"https://{GATEWAY}/events?cee=no", "POST", json.dumps({"fb.pixel_id": PIXEL2}), "application/json"),
-        entry(f"https://post.example.test/click?upd_clickid={XID}&event13=1"),
+        entry(f"https://{GATEWAY}/events", "POST", json.dumps({"fb.pixel_id": PIXEL2}), "application/json"),
+        entry(f"https://post.example.test/click?upd_clickid={XID}&event1=1"),
         entry(f"https://land.example.test/p?access_token={TOKEN}&campaign_id=120200000000000002"),
-        entry("https://land.example.test/order.php", "POST", "name=a&phone=b&offer_id=12316", "application/x-www-form-urlencoded"),
+        entry("https://land.example.test/checkout.php", "POST", "name=a&phone=b&offer_id=77001", "application/x-www-form-urlencoded"),
         entry("https://land.example.test/", body=f"<script>fbq('init','{PIXEL2}')</script>"),
         entry("https://land.example.test/r", location="https://next.example.test/?ad_name=Moved%20Ad"),
         entry("data:image/png;base64,AAAA"),
@@ -116,12 +116,12 @@ def test_identifier_families_and_observed(tmp_path):
     live, static = {Observed.live}, {Observed.static}
     # platform / tenant / owner / landing (aio)
     assert got[("platform_name", "aio")] == static
-    assert got[("aio_sdk_asset", "main.js?v=1.0.28")] == static
+    assert got[("aio_sdk_asset", "main.js?v=9.9.9")] == static
     assert got[("aio_cdn_tenant", TENANT)] == static
     assert got[("aio_landing", LANDING)] == static
     assert got[("aio_owner", OWNER)] == static  # upper-case input normalised
     assert got[("aio_campaign", CAMPAIGN)] == static
-    assert got[("aio_campaign_name", "OPER / XX / Camp9")] == static
+    assert got[("aio_campaign_name", "Team / XX / Camp9")] == static
     assert got[("aio_landing_name", "Test landing 'quoted'")] == static
     assert got[("aio_lander_template", TEMPLATE)] == static
     assert got[("aio_handle_key", "00112233445566778899aabbccddeeff")] == static
@@ -136,16 +136,16 @@ def test_identifier_families_and_observed(tmp_path):
     assert got[("tracker_postback", "post.example.test/click")] == live
     # distribution / creative
     assert got[("meta_ad_id", "120200000000000001")] == static
-    assert got[("meta_ad_name", "FARM/XX/Dr Test/abc")] == static
+    assert got[("meta_ad_name", "BUYER/XX/Dr Test/abc")] == static
     assert got[("meta_adset_name", "Adset One")] == static
     assert got[("meta_campaign_id", "120200000000000002")] == live
     assert got[("meta_ad_name", "Moved Ad")] == live
     # offer: forms and contacts
-    assert got[("form_endpoint", "/fb-order.php")] == static
+    assert got[("form_endpoint", "/lead-submit.php")] == static
     assert got[("form_field_set", "fbpx,name,phone")] == static
-    assert got[("form_endpoint", "/order.php")] == live
+    assert got[("form_endpoint", "/checkout.php")] == live
     assert got[("form_field_set", "name,offer_id,phone")] == live
-    assert got[("offer_id", "12316")] == live
+    assert got[("offer_id", "77001")] == live
     assert got[("contact_phone", "+48601234567")] == static
     assert got[("contact_email", "sales@operator.example")] == static
     assert got[("contact_telegram", "operator_desk")] == static
@@ -222,7 +222,7 @@ def test_equal_identifiers_compare_equal():
 
 
 def test_mhtml_and_dead_inputs(tmp_path):
-    body = f"<html><script>fbq('init','{PIXEL}')</script><form action='https://x.example.test/api/send.php'><input name='a'></form></html>"
+    body = f"<html><script>fbq('init','{PIXEL}')</script><form action='https://x.example.test/api/lead.php'><input name='a'></form></html>"
     mht = (
         "MIME-Version: 1.0\r\nContent-Type: multipart/related; boundary=\"B\"\r\n\r\n--B\r\n"
         "Content-Type: text/html; charset=bogus-charset\r\nContent-Transfer-Encoding: quoted-printable\r\n"
@@ -238,14 +238,14 @@ def test_mhtml_and_dead_inputs(tmp_path):
     inc = Incident(id="m-1", source="synthetic", captures=[cap])
     got = _index(platform.extract(inc, cap, tmp_path))
     assert got[("meta_pixel", PIXEL)] == {Observed.static}
-    assert got[("form_endpoint", "/api/send.php")] == {Observed.static}
+    assert got[("form_endpoint", "/api/lead.php")] == {Observed.static}
 
 
 def test_endpoint_and_email_normalisation():
     from ftf.indicators._ids import norm_email, norm_path
 
-    assert norm_path("https://x.example.test/lander/../Order.php?a=1#f") == "/order.php"
-    assert norm_path("api//send.php") == "/api/send.php"
+    assert norm_path("https://x.example.test/lander/../Checkout.php?a=1#f") == "/checkout.php"
+    assert norm_path("api//lead.php") == "/api/lead.php"
     assert norm_path(f"/api/v1/trigger/field/{LANDING}/") == "/api/v1/trigger/field/{uuid}/"
     assert norm_path("#") is None and norm_path("javascript:void(0)") is None
     assert norm_email("css-0a1b2c3d@mhtml.blink") is None
@@ -357,4 +357,31 @@ def test_whatsapp_placeholders_and_encoded_query():
         'https://wa.me/447911123456 <input placeholder="+48 512 345 678"> <input placeholder="+48 603 111 222">')}
     assert ("contact_phone", "+447911123456") in hits
     assert not any(k == "contact_phone" and v in ("+48512345678", "+48603111222") for k, v in hits)
-    assert norm_path("/order.php%3Fsrc%3Dfb") == "/order.php"
+    assert norm_path("/checkout.php%3Fsrc%3Dfb") == "/checkout.php"
+
+
+def test_redact_catches_encoded_and_json_tokens():
+    from ftf.indicators import redact
+
+    tok = "EAAB" + "q9Wz" * 8
+    cases = [
+        f"https://a.example.test/?x=1&access_token={tok}&y=2",
+        f"https%3A%2F%2Fa.example.test%2F%3Faccess_token%3D{tok}%26y%3D2",
+        f"u=https%3A%2F%2Fa.example.test%2F%3Fk%3D{tok}",
+        f"u=a.example.test%2F%3Fx%3D1%26{tok}",
+        f'{{"access_token": "{tok}", "pixel_id": "{PIXEL}"}}',
+        f'{{"Access_Token":"{tok}"}}',
+        f"bare {tok} end",
+    ]
+    for s in cases:
+        r = redact(s)
+        assert "q9Wz" not in r, r
+        assert "REDACTED" in r
+    assert redact(f"x=1&y=2 {PIXEL}") == f"x=1&y=2 {PIXEL}"
+    assert "y%3D2" in redact(cases[1])
+
+
+def test_strip_tokens_encoded_forms():
+    tok = "EAAB" + "q9Wz" * 8
+    for s in (f"%3Faccess_token%3D{tok}%26a%3D1", f'{{"access_token":"{tok}"}}', f"x%3D{tok}", f"%26{tok}"):
+        assert "q9Wz" not in strip_tokens(s)

@@ -22,7 +22,10 @@ from types import ModuleType
 
 from ftf.contract import Capture, Dataset, Incident, Indicator
 
-_TOKEN = re.compile(r"(access_token=|\bEAA[A-Za-z0-9]{20,})[^&\s\"']*")
+# access_token as a URL parameter (plain or URL-encoded "=") or as a JSON key, and bare Meta
+# "EAA..." tokens, also right after an encoded "=", "&" or quote (%3D, %26, %22).
+_TOKEN_PARAM = re.compile(r"(access_token(?:=|%3D)|\"access_token\"\s*:\s*\")[^&\s\"'<>#,;}%]*", re.I)
+_TOKEN_EAA = re.compile(r"(?:(?<=%3D)|(?<=%3d)|(?<=%26)|(?<=%22)|(?<![A-Za-z0-9]))EAA[A-Za-z0-9]{20,}")
 
 
 def extractors() -> list[ModuleType]:
@@ -45,7 +48,8 @@ def _stopped():
 
 
 def redact(text: str) -> str:
-    return _TOKEN.sub(lambda m: m.group(1) + "REDACTED" if m.group(1) == "access_token=" else "REDACTED", text)
+    text = _TOKEN_PARAM.sub(lambda m: m.group(1) + "REDACTED", text)
+    return _TOKEN_EAA.sub("REDACTED", text)
 
 
 def extract_capture(incident: Incident, capture: Capture, root: Path, mods: Iterable[ModuleType]) -> list[Indicator]:

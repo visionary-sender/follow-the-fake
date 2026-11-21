@@ -69,8 +69,10 @@ class Hit:
 
 # --------------------------------------------------------------------------- access tokens
 
-_TOKEN_PARAM = re.compile(r"((?:^|[?&;\s\"'])(?:access_token|[a-z_]*token)=)[^&\s\"'<>#]*", re.I)
-_EAA = re.compile(r"\bEAA[A-Za-z0-9]{10,}")
+_TOKEN_PARAM = re.compile(
+    r"((?:^|[?&;\s\"']|%26|%3F)(?:access_token|[a-z_]*token)(?:=|%3D)|\"[a-z_]*token\"\s*:\s*\")[^&\s\"'<>#,;}%]*", re.I
+)
+_EAA = re.compile(r"(?:(?<=%3D)|(?<=%3d)|(?<=%26)|(?<=%22)|(?<![A-Za-z0-9]))EAA[A-Za-z0-9]{10,}")
 
 
 def strip_tokens(text: str) -> str:
