@@ -42,3 +42,11 @@ def test_organiser_domains_from_har_and_scam_list_only(tmp_path):
     assert scope.sources["lander.live"] == ["har_page"]
     assert scope.sources["caepertss.com"] == ["scam_link_list"]
     assert [s.endswith("broken.har") for s in scope.skipped] == [True]
+
+
+def test_page_urls_prefer_the_document_request_without_page_titles():
+    data = {"log": {"pages": [], "entries": [
+        {"request": {"url": "https://tracker.example/pixel"}, "_resourceType": "image"},
+        {"request": {"url": "https://landing.example/offer"}, "_resourceType": "document"},
+    ]}}
+    assert page_urls(data) == ["https://landing.example/offer"]

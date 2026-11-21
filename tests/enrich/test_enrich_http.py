@@ -87,3 +87,17 @@ def test_oversized_body_is_unavailable_and_not_retried():
     with pytest.raises(Unavailable, match="larger than"):
         PoliteClient(script, clock=Clock(), sleep=lambda s: None).get("https://hole.cert.pl/x", POLICY)
     assert len(script.calls) == 1
+
+
+def test_http_protocol_errors_become_unavailable(monkeypatch):
+    import http.client
+    import urllib.request
+
+    from ftf.enrich.http import urllib_fetch
+
+    def broken(*args, **kwargs):
+        raise http.client.BadStatusLine("garbage")
+
+    monkeypatch.setattr(urllib.request, "urlopen", broken)
+    with pytest.raises(Unavailable, match="network error"):
+        urllib_fetch("https://crt.sh/?q=x", {}, 1, 1024)

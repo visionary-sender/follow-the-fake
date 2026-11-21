@@ -236,6 +236,8 @@ def parse_crt(rows: list[dict[str, Any]], domain: str, registrable: Any) -> dict
         if seen and (first_seen is None or seen < first_seen):
             first_seen = seen
         for name in str(row.get("name_value") or "").split("\n"):
+            if "@" in name:  # e-mail subject entries, not hosts
+                continue
             other = registrable(name.strip())
             if other and other != domain:
                 siblings.add(other)

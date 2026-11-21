@@ -284,8 +284,9 @@ def _indicators(
             out.add("created_date", created, rdap, "events[eventAction=registration].eventDate")
             age = (captured_on - date.fromisoformat(created)).days
             basis = "given" if captured_given else "assumed: lookup date"
-            out.add("domain_age_days_at_capture", str(age), rdap, "derived: captured_on - created_date",
-                    note=f"captured_on={captured_on.isoformat()} ({basis})")
+            if age >= 0:  # a capture before registration gives no age; the date itself is still reported
+                out.add("domain_age_days_at_capture", str(age), rdap, "derived: captured_on - created_date",
+                        note=f"captured_on={captured_on.isoformat()} ({basis})")
 
     dns = lookups[SRC_DNS]
     if dns.status == UNAVAILABLE:

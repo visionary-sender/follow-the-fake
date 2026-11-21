@@ -53,17 +53,25 @@ class Cache:
                 raw = json.loads(path.read_text(encoding="utf-8"))
                 if not isinstance(raw, dict) or raw.get("schema") != SCHEMA:
                     raise ValueError(f"unsupported schema {raw.get('schema') if isinstance(raw, dict) else raw!r}")
-                self._entries = raw["entries"]
+                entries = raw["entries"]
+                if not isinstance(entries, dict):
+                    raise ValueError("entries is not an object")
+                for source, by_domain in entries.items():
+                    if isinstance(by_domain, dict):
+                        self._entries[source] = by_domain
+                    else:
+                        self.warnings.append(f"cache source {source!r} ignored: malformed")
             except (OSError, ValueError, KeyError, TypeError) as exc:
                 self.warnings.append(f"cache {path} ignored: {exc}")
                 self._entries = {}
 
     def __len__(self) -> int:
-        return sum(len(by_domain) for by_domain in self._entries.values())
+        return sum(len(by_domain) for by_domain in self._entries.values() if isinstance(by_domain, dict))
 
     def get(self, source: str, domain: str) -> Entry | None:
-        record = self._entries.get(source, {}).get(domain)
-        if record is None:
+        by_domain = self._entries.get(source)
+        record = by_domain.get(domain) if isinstance(by_domain, dict) else None
+        if not isinstance(record, dict):
             return None
         try:
             return Entry(

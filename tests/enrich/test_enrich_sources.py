@@ -112,3 +112,8 @@ def test_cert_pl_relisting_uses_active_rows_and_earliest_insert():
 def test_bad_bootstrap_shape_raises_so_the_caller_can_treat_it_as_unavailable():
     with pytest.raises((KeyError, TypeError, IndexError)):
         rdap_services({"nope": []})
+
+
+def test_crt_e_mail_entries_are_not_siblings():
+    rows = [{"issuer_name": "C=US, O=X", "name_value": "user@other-site.xyz\nvictim-one.top", "not_before": "2026-01-01T00:00:00"}]
+    assert parse_crt(rows, "victim-one.top", registrable)["san_siblings"] == []

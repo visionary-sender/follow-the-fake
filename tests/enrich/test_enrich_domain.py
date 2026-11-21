@@ -170,3 +170,10 @@ def test_cert_pl_listing_becomes_listed_true_with_date(tmp_path):
     kinds = by_kind(result)
     assert kinds["cert_pl_listed"][0].value == "true"
     assert kinds["cert_pl_listed_date"][0].value == "2026-11-21"
+
+
+def test_capture_before_registration_gives_no_negative_age():
+    result = Enricher(Cache(None), client=client_for(FakeNet()), clock=lambda: NOW).enrich("example.com", captured_on=date(1990, 1, 1))
+    kinds = by_kind(result)
+    assert kinds["created_date"][0].value == "1995-08-14"
+    assert "domain_age_days_at_capture" not in kinds

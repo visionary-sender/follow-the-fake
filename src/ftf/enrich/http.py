@@ -8,6 +8,7 @@ recorded answers without a network.
 
 from __future__ import annotations
 
+import http.client
 import time
 import urllib.error
 import urllib.request
@@ -58,9 +59,9 @@ def urllib_fetch(url: str, headers: Mapping[str, str], timeout: float, max_bytes
         status, raw_headers = exc.code, exc.headers
         try:
             body = exc.read(max_bytes + 1)
-        except OSError:
+        except (OSError, http.client.HTTPException):
             body = b""
-    except (urllib.error.URLError, OSError, ValueError) as exc:
+    except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as exc:
         raise Unavailable(f"network error ({exc.__class__.__name__})") from exc
     headers_out = {k.lower(): v for k, v in (raw_headers.items() if raw_headers else [])}
     truncated = len(body) > max_bytes

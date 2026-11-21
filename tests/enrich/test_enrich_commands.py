@@ -46,3 +46,19 @@ def test_from_raw_scope_feeds_the_run(tmp_path, capsys):
     report = json.loads(capsys.readouterr().out)
     assert report["scope"]["domains"] == 1
     assert [d["domain"] for d in report["domain_details"]] == ["scam-target.top"]
+
+
+def test_duplicate_registrable_domain_is_reported_not_enriched_twice(tmp_path, capsys):
+    summary = tmp_path / "s.json"
+    code = main(["enrich-domain", "https://example.com/a", "example.com", "--offline", "--cache", str(tmp_path / "c.json"),
+                 "--tld-cache", str(tmp_path), "--summary", str(summary)])
+    assert code == 0
+    report = json.loads(summary.read_text(encoding="utf-8"))
+    assert report["domains_enriched"] == 1
+    assert report["invalid_inputs"] == [{"input": "example.com", "error": "duplicate of example.com; already enriched"}]
+
+
+def test_missing_scope_directory_is_a_usage_error(tmp_path, capsys):
+    code = main(["enrich-domain", "--from-raw", str(tmp_path / "nope"), "--offline", "--cache", str(tmp_path / "c.json")])
+    assert code == 2
+    assert "not a directory" in capsys.readouterr().err

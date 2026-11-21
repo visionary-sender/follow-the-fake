@@ -60,6 +60,8 @@ def _collect(args: argparse.Namespace) -> tuple[list[str], dict[str, Any]]:
             if line.strip() and not line.lstrip().startswith("#"):
                 raw.append(line.strip())
     if args.from_raw:
+        if not args.from_raw.is_dir():
+            raise ValueError(f"--from-raw is not a directory: {args.from_raw}")
         scope = organiser_domains(args.from_raw, tld_cache=args.tld_cache)
         raw.extend(scope.domains)
         scope_info = {
@@ -107,7 +109,11 @@ def _summary(results: list[DomainResult], invalid: list[dict[str, str]], enriche
 
 
 def run(args: argparse.Namespace) -> int:
-    domains, scope_info = _collect(args)
+    try:
+        domains, scope_info = _collect(args)
+    except ValueError as exc:
+        print(f"ftf enrich-domain: {exc}", file=sys.stderr)
+        return 2
     if not domains:
         print("ftf enrich-domain: no domains given (see --help)", file=sys.stderr)
         return 2
@@ -118,11 +124,18 @@ def run(args: argparse.Namespace) -> int:
     )
     results: list[DomainResult] = []
     invalid: list[dict[str, str]] = []
+    seen: set[str] = set()
     for raw in domains:
         try:
-            results.append(enricher.enrich(raw, captured_on=args.captured_on))
+            result = enricher.enrich(raw, captured_on=args.captured_on)
         except ValueError as exc:
             invalid.append({"input": raw, "error": str(exc)})
+            continue
+        if result.domain in seen:  # two inputs with one registrable domain would duplicate incident ids
+            invalid.append({"input": raw, "error": f"duplicate of {result.domain}; already enriched"})
+            continue
+        seen.add(result.domain)
+        results.append(result)
 
     if args.out:
         dataset = build_dataset(results, description=f"{len(results)} domains, keyless lookups; see README for sources and limits")

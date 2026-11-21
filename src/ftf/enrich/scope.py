@@ -46,11 +46,12 @@ def page_urls(har: Any) -> list[str]:
     if urls:
         return urls
     entries = log.get("entries") if isinstance(log, dict) else None
-    if entries and isinstance(entries[0], dict):
-        first = (entries[0].get("request") or {}).get("url")
-        if isinstance(first, str):
-            return [first]
-    return []
+    if not isinstance(entries, list):
+        return []
+    documents = [e for e in entries if isinstance(e, dict) and e.get("_resourceType") == "document"]
+    chosen = documents[0] if documents else (entries[0] if entries and isinstance(entries[0], dict) else None)
+    url = ((chosen or {}).get("request") or {}).get("url") if isinstance(chosen, dict) else None
+    return [url] if isinstance(url, str) else []
 
 
 def _read_text(path: Path) -> str | None:

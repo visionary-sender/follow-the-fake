@@ -50,3 +50,12 @@ def test_in_memory_cache_saves_nothing():
     cache.put("dns_doh", "example.com", status="ok", data={}, fetched_at=T0, ttl=timedelta(days=1))
     cache.save()
     assert cache.get("dns_doh", "example.com") is not None
+
+
+def test_malformed_source_is_dropped_with_warning(tmp_path):
+    path = tmp_path / "c.json"
+    path.write_text(json.dumps({"schema": 1, "entries": {"rdap": "oops", "dns_doh": {"example.com": {"status": "ok"}}}}), encoding="utf-8")
+    cache = Cache(path)
+    assert cache.get("rdap", "example.com") is None
+    assert cache.warnings and "rdap" in cache.warnings[0]
+    assert cache.get("dns_doh", "example.com") is None  # record without timestamps is ignored, not fatal
