@@ -19,7 +19,8 @@ def test_licence_table_is_current_and_permissive():
 @pytest.mark.parametrize(
     "licence",
     ["MIT", "MIT License", "BSD-2-Clause", "Simplified BSD License", "Apache-2.0 OR BSD-2-Clause",
-     "PSF-2.0", "Python Software Foundation License", "Apache-2.0 WITH LLVM-exception"],
+     "PSF-2.0", "Python Software Foundation License", "Apache-2.0 WITH LLVM-exception",
+     "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0", "CC0-1.0"],
 )
 def test_permissive(licence):
     assert licences.is_permissive(licence)
@@ -38,7 +39,8 @@ def test_certifi_exception_is_exact_and_narrow():
 @pytest.mark.parametrize(
     "licence",
     ["UNLICENSED", "UNKNOWN", "GPL-3.0-only", "MIT AND CC-BY-NC-4.0", "LGPLv3+",
-     "MIT License AND GNU General Public License v3 (GPLv3)", "MPL-2.0", "Permitted use only"],
+     "MIT License AND GNU General Public License v3 (GPLv3)", "MPL-2.0", "Permitted use only",
+     "CC-BY-SA-4.0", "MIT AND CC-BY-4.0", "CC0 docs, GPL-3.0 code"],
 )
 def test_not_permissive(licence):
     assert not licences.is_permissive(licence)

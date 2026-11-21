@@ -11,8 +11,12 @@ from collections.abc import Callable, Sequence
 
 from ftf import __version__
 from ftf.enrich.commands import register as register_enrich_domain
+from ftf.features.commands import register as register_features
 
-COMMANDS: list[Callable[[argparse._SubParsersAction], None]] = [register_enrich_domain]
+COMMANDS: list[Callable[[argparse._SubParsersAction], None]] = [
+    register_enrich_domain,
+    register_features,
+]
 
 
 def build_parser() -> argparse.ArgumentParser:
