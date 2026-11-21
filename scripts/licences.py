@@ -29,6 +29,18 @@ ALLOWED_WORDS = {"MIT", "BSD", "0BSD", "APACHE", "PSF", "ISC", "HPND"}
 DENIED_PREFIXES = ("GPL", "LGPL", "AGPL", "MPL", "EUPL", "SSPL", "CDDL", "EPL", "CC", "GNU")
 DENIED_WORDS = {"MOZILLA", "PROPRIETARY", "COMMERCIAL", "UNLICENSED"}
 
+# Named exceptions to the allowlist, one package at a time. Owner decision (HACK-19, 2026-11-21):
+# certifi is the Mozilla CA bundle, MPL-2.0, used unmodified. MPL-2.0 is file-level copyleft and
+# puts no obligation on our code. Other MPL packages stay denied. Add a package only if it is an
+# unmodified MPL-2.0 data or CA bundle, and record the decision in the PR that adds it.
+# Keys are canonical package names; a value must match the metadata licence exactly.
+EXCEPTIONS = {
+    "certifi": {
+        "licence": "Mozilla Public License 2.0 (MPL 2.0)",
+        "shown_as": "MPL-2.0 (named exception, unmodified CA bundle; see README Licence section)",
+    },
+}
+
 
 def licence_of(dist: metadata.Distribution) -> str:
     meta = dist.metadata
@@ -67,6 +79,21 @@ def _part_permissive(part: str) -> bool:
     return any(w in ALLOWED_WORDS for w in words) or "PYTHON SOFTWARE FOUNDATION" in part.upper()
 
 
+def is_allowed(name: str, licence: str) -> bool:
+    """Permissive licence, or the exact licence of a named exception."""
+    exception = EXCEPTIONS.get(name)
+    if exception is not None and licence == exception["licence"]:
+        return True
+    return is_permissive(licence)
+
+
+def shown_licence(name: str, licence: str) -> str:
+    exception = EXCEPTIONS.get(name)
+    if exception is not None and licence == exception["licence"]:
+        return exception["shown_as"]
+    return licence
+
+
 def dependencies() -> dict[str, metadata.Distribution]:
     found: dict[str, metadata.Distribution] = {}
     seen: set[tuple[str, frozenset[str]]] = set()
@@ -102,7 +129,7 @@ def render() -> str:
         "|---|---|",
     ]
     for name, dist in sorted(dependencies().items()):
-        lines.append(f"| {name} | {licence_of(dist)} |")
+        lines.append(f"| {name} | {shown_licence(name, licence_of(dist))} |")
     return "\n".join(lines) + "\n"
 
 
@@ -116,7 +143,7 @@ def main() -> int:
         return 0
     errors = []
     for name, dist in sorted(dependencies().items()):
-        if not is_permissive(licence_of(dist)):
+        if not is_allowed(name, licence_of(dist)):
             errors.append(f"non-permissive or unknown licence: {name} ({licence_of(dist)})")
     if not TABLE.exists() or TABLE.read_text() != table:
         errors.append(f"{TABLE.name} is stale; regenerate with: scripts/vm.sh licences")

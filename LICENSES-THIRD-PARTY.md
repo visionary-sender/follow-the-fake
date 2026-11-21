@@ -6,7 +6,7 @@ Covers the runtime dependencies and the `dev` extra of `ftf`, recursively.
 | Package | Licence |
 |---|---|
 | annotated-types | MIT |
-| certifi | Mozilla Public License 2.0 (MPL 2.0) |
+| certifi | MPL-2.0 (named exception, unmodified CA bundle; see README Licence section) |
 | charset-normalizer | MIT |
 | filelock | MIT |
 | idna | BSD-3-Clause |
