@@ -6,12 +6,13 @@ import math
 import numpy as np
 import pytest
 
-from ftf.contract.models import EvidenceStatus, Indicator, VectorRef
+from ftf.contract.models import Dataset, EvidenceStatus, Indicator, VectorRef
+from ftf.features.common import VectorStore as VectorWriter
 from ftf.linking.similarity import (
     MIN_POSITIVES,
     VIEWS,
     Calibration,
-    FileVectorStore,
+    DatasetVectorStore,
     View,
     cllr,
     cllr_min,
@@ -27,7 +28,7 @@ from ftf.linking.similarity import (
 )
 
 MODEL = "test/model-a"
-SLUG = "test_model-a"
+STORE = VectorWriter(".", MODEL).store  # vectors/<safe-model>-<sha8>
 
 
 def rng(seed=0):
@@ -43,7 +44,7 @@ def pos_sims(n, seed=1):
     return np.clip(rng(seed).normal(0.93, 0.03, n), -1, 1)
 
 
-def vec_ind(cap, n=0, kind="text_embedding", model=MODEL, dim=8, store=f"vectors/{SLUG}"):
+def vec_ind(cap, n=0, kind="text_embedding", model=MODEL, dim=8, store=STORE):
     iid = f"{cap}/{kind}/{n}"
     return Indicator(id=iid, capture_id=cap, layer="creative", kind=kind, level="campaign",
                      vector_ref=VectorRef(store=store, key=iid, model=model, dim=dim),
@@ -55,15 +56,13 @@ def val_ind(cap, value, kind="image_phash", n=0):
                      level="campaign", value=value, observed="static", extractor="test@0")
 
 
-def write_store(base, vectors: dict, model=MODEL, slug=SLUG):
-    d = base / "vectors"
-    d.mkdir(parents=True, exist_ok=True)
-    keys = list(vectors)
-    m = np.stack([np.asarray(vectors[k], dtype=np.float32) for k in keys]) if keys else np.zeros((0, 8), np.float32)
-    m = m / np.maximum(np.linalg.norm(m, axis=1, keepdims=True), 1e-12)
-    np.save(d / f"{slug}.npy", m)
-    (d / f"{slug}.keys.json").write_text(json.dumps({"model": model, "keys": keys}))
-    return FileVectorStore(base)
+def write_store(base, vectors: dict, model=MODEL):
+    """Write vectors with Visual's own writer, so the layout is exactly the features stage's."""
+    w = VectorWriter(base, model)
+    for k, v in vectors.items():
+        w.add(k, np.asarray(v, dtype=np.float32))
+    w.save()
+    return DatasetVectorStore(base)
 
 
 # --------------------------------------------------------------------------- similarities
@@ -223,25 +222,61 @@ def test_fit_rejects_bad_input():
 # --------------------------------------------------------------------------- vector store
 
 
-def test_file_vector_store(tmp_path):
+def test_dataset_vector_store(tmp_path):
     a, b = vec_ind("c1"), vec_ind("c2")
     store = write_store(tmp_path, {a.id: np.arange(8) + 1.0})
-    v = store.get(a.vector_ref)
+    v = store.get(a.vector_ref, a.capture_id)
     assert v is not None and v.shape == (8,)
     assert np.linalg.norm(v) == pytest.approx(1.0, rel=1e-5)
-    assert store.get(b.vector_ref) is None  # key absent
+    assert store.get(b.vector_ref, b.capture_id) is None  # key absent
     assert store.get(vec_ind("c1", store="vectors/nope").vector_ref) is None  # store absent
     assert store.get(vec_ind("c1", dim=16).vector_ref) is None  # wrong dim
-    assert store.get(vec_ind("c1", model="other").vector_ref) is None  # wrong model
     assert store.get(vec_ind("c1", store="../outside").vector_ref) is None  # leaves base dir
+    assert DatasetVectorStore().get(a.vector_ref, a.capture_id) is None  # no directory known
 
 
-def test_file_vector_store_malformed(tmp_path):
+def test_dataset_vector_store_malformed(tmp_path):
     d = tmp_path / "vectors"
     d.mkdir()
-    np.save(d / f"{SLUG}.npy", np.zeros((2, 8), np.float32))
-    (d / f"{SLUG}.keys.json").write_text(json.dumps({"model": MODEL, "keys": ["only-one"]}))
-    assert FileVectorStore(tmp_path).get(vec_ind("c1").vector_ref) is None
+    np.save(d / (STORE.split("/")[1] + ".npy"), np.zeros((2, 8), np.float32))
+    (d / (STORE.split("/")[1] + ".keys.json")).write_text(json.dumps({"model": MODEL, "keys": ["only-one"]}))
+    assert DatasetVectorStore(tmp_path).get(vec_ind("c1").vector_ref) is None
+
+
+def _dataset(name, inc_id, cap_id, indicators):
+    return Dataset.model_validate({
+        "name": name,
+        "incidents": [{"id": inc_id, "source": "test", "captures": [{"id": cap_id, "stage": "lander"}],
+                       "indicators": [i.model_dump(mode="json") for i in indicators]}],
+    })
+
+
+def test_vectors_resolve_per_dataset_directory(tmp_path):
+    """A new incident assigned against a collection: each side's vectors live in its own out_dir,
+    under the same store name and possibly the same key."""
+    base_dir, new_dir = tmp_path / "collection", tmp_path / "new"
+    old, new = vec_ind("old1"), vec_ind("new1")
+    u = np.eye(8)[0]
+    write_store(base_dir, {old.id: u, "shadow": -u})
+    write_store(new_dir, {new.id: 0.999 * u + 0.0447 * np.eye(8)[1], "shadow": u})
+    coll = _dataset("collection", "inc-old", "old1", [old])
+    fresh = _dataset("new", "inc-new", "new1", [new])
+    store = DatasetVectorStore.for_datasets((coll, base_dir), (fresh, new_dir))
+    assert store.get(old.vector_ref, "old1") is not None
+    assert store.get(new.vector_ref, "new1") is not None
+    assert store.get(new.vector_ref, "old1") is None  # the new key is not in the collection's store
+    cal = Calibration.fit(null_sims(20000), view="text_embedding")
+    row = view_evidence(VIEWS["text_embedding"], old, new, store, cal)
+    assert row.status is EvidenceStatus.shared and row.bits > 3.5
+    # same key in both directories resolves to the right file
+    shadow_old = vec_ind("old1", n=9).model_copy(update={"vector_ref": old.vector_ref.model_copy(update={"key": "shadow"})})
+    shadow_new = vec_ind("new1", n=9).model_copy(update={"vector_ref": old.vector_ref.model_copy(update={"key": "shadow"})})
+    assert store.get(shadow_old.vector_ref, "old1") @ store.get(shadow_new.vector_ref, "new1") == pytest.approx(-1.0, abs=1e-5)
+    # incremental: add_dataset on an existing store
+    s2 = DatasetVectorStore(base_dir)
+    assert s2.get(new.vector_ref, "new1") is None
+    s2.add_dataset(fresh, new_dir)
+    assert s2.get(new.vector_ref, "new1") is not None
 
 
 # --------------------------------------------------------------------------- evidence rows

@@ -22,11 +22,10 @@ Calibration (plans/knowledge/07 §1.6, §3 D2 item 5):
 Bits are always clipped to [0, cap]: a low similarity is weak evidence of nothing, never
 evidence against a link, because creatives are routinely swapped inside a campaign.
 
-Vector store (Visual project's layout, HACK-13): one store per model, `VectorRef.store` =
-"vectors/<model-slug>" relative to the directory holding dataset.json; files `<store>.npy`
-(float32 matrix, one row per vector, L2-normalised) and `<store>.keys.json`
-(`{"model": ..., "keys": [...]}`, row order); `VectorRef.key` is the indicator id. Anything
-missing or malformed reads as missing (0 bits).
+Vectors (Visual project, HACK-13/HACK-40): `VectorRef.store` is used exactly as written in the
+dataset, relative to that dataset's output directory, and read through
+`ftf.features.common.load_vectors`. Vectors are L2-normalised; cosine is computed anyway, so an
+unnormalised store is still compared correctly. A missing store or key reads as missing (0 bits).
 """
 
 from __future__ import annotations
@@ -40,7 +39,8 @@ from typing import Any, Callable, Iterable, Optional, Protocol, Sequence, Union
 
 import numpy as np
 
-from ftf.contract.models import EvidenceRow, EvidenceStatus, Indicator, VectorRef, linkable
+from ftf.contract.models import Dataset, EvidenceRow, EvidenceStatus, Indicator, VectorRef, linkable
+from ftf.features.common import load_vectors
 
 CALIBRATION_FORMAT = "ftf-similarity-calibration@1"
 MIN_POSITIVES = 10
@@ -157,53 +157,75 @@ def view_for_kind(kind: str) -> Optional[View]:
 
 
 class VectorStore(Protocol):
-    def get(self, ref: VectorRef) -> Optional[np.ndarray]:
-        """The vector `ref` points at, or None if it is missing or unreadable."""
+    def get(self, ref: VectorRef, capture_id: Optional[str] = None) -> Optional[np.ndarray]:
+        """The vector `ref` points at (for an indicator of `capture_id`), or None if missing."""
 
 
-def read_vector_store(base_dir: Union[str, Path], store: str) -> Optional[tuple[list[str], np.ndarray, Optional[str]]]:
-    """(keys, matrix, model) of one store in the Visual layout, or None if absent or malformed.
+class DatasetVectorStore:
+    """Vectors written by the features stage, resolved per dataset directory.
 
-    Stand-in for `ftf.features.common.load_vectors` until Visual's loader is on main.
+    `VectorRef.store` is relative to the output directory of the dataset the indicator came
+    from. When a new incident is assigned against a linked collection, the collection's
+    captures and the new incident's captures live in different directories, so the directory
+    is looked up per capture: `capture_dirs` maps capture id -> directory, and `default_dir`
+    covers captures not in the map. Each (directory, store) is loaded once through Visual's
+    `ftf.features.common.load_vectors`; a missing or malformed store reads as missing.
     """
-    base = Path(base_dir).resolve()
-    p = (base / store).resolve()
-    if base not in p.parents:
-        return None  # refuse store paths that leave the base directory
-    npy, keys_json = p.with_name(p.name + ".npy"), p.with_name(p.name + ".keys.json")
-    try:
-        meta = json.loads(keys_json.read_text(encoding="utf-8"))
-        matrix = np.load(npy, allow_pickle=False)
-    except (OSError, ValueError):
-        return None
-    keys = meta.get("keys") if isinstance(meta, dict) else None
-    model = meta.get("model") if isinstance(meta, dict) else None
-    if (not isinstance(keys, list) or not all(isinstance(k, str) for k in keys) or matrix.ndim != 2
-            or len(keys) != matrix.shape[0] or not np.issubdtype(matrix.dtype, np.number)):
-        return None
-    return keys, matrix, model if isinstance(model, str) else None
 
+    def __init__(self, default_dir: Union[str, Path, None] = None,
+                 capture_dirs: Optional[dict[str, Union[str, Path]]] = None):
+        self.default_dir = Path(default_dir).resolve() if default_dir is not None else None
+        self.capture_dirs = {c: Path(d).resolve() for c, d in (capture_dirs or {}).items()}
+        self._stores: dict[tuple[Path, str], Optional[tuple[dict[str, int], np.ndarray]]] = {}
 
-class FileVectorStore:
-    """Reads vectors from the Visual store layout under `base_dir`; each store is loaded once."""
+    @classmethod
+    def for_datasets(cls, *datasets: tuple[Dataset, Union[str, Path]]) -> "DatasetVectorStore":
+        """One store over several (dataset, its output directory) pairs; later pairs win."""
+        dirs: dict[str, Union[str, Path]] = {}
+        for ds, out_dir in datasets:
+            for inc in ds.incidents:
+                for cap in inc.captures:
+                    dirs[cap.id] = out_dir
+        default = datasets[0][1] if len(datasets) == 1 else None
+        return cls(default, dirs)
 
-    def __init__(self, base_dir: Union[str, Path]):
-        self.base_dir = Path(base_dir)
-        self._stores: dict[str, Optional[tuple[dict[str, int], np.ndarray, Optional[str]]]] = {}
+    def add_dataset(self, ds: Dataset, out_dir: Union[str, Path]) -> None:
+        d = Path(out_dir).resolve()
+        for inc in ds.incidents:
+            for cap in inc.captures:
+                self.capture_dirs[cap.id] = d
 
-    def _load(self, store: str):
-        if store not in self._stores:
-            got = read_vector_store(self.base_dir, store)
-            self._stores[store] = None if got is None else ({k: i for i, k in enumerate(got[0])}, got[1], got[2])
-        return self._stores[store]
+    def dir_for(self, capture_id: Optional[str]) -> Optional[Path]:
+        if capture_id is not None and capture_id in self.capture_dirs:
+            return self.capture_dirs[capture_id]
+        return self.default_dir
 
-    def get(self, ref: VectorRef) -> Optional[np.ndarray]:
-        loaded = self._load(ref.store)
+    def _load(self, base: Path, store: str) -> Optional[tuple[dict[str, int], np.ndarray]]:
+        key = (base, store)
+        if key not in self._stores:
+            loaded = None
+            target = (base / store).resolve()
+            if base in target.parents:  # refuse store paths that leave the dataset directory
+                try:
+                    keys, matrix = load_vectors(base, store)
+                    matrix = np.asarray(matrix)
+                    if matrix.ndim == 2 and np.issubdtype(matrix.dtype, np.number) and len(keys) == len(matrix):
+                        loaded = ({str(k): i for i, k in enumerate(keys)}, matrix)
+                except (OSError, ValueError, KeyError, TypeError):
+                    loaded = None
+            self._stores[key] = loaded
+        return self._stores[key]
+
+    def get(self, ref: VectorRef, capture_id: Optional[str] = None) -> Optional[np.ndarray]:
+        base = self.dir_for(capture_id)
+        if base is None:
+            return None
+        loaded = self._load(base, ref.store)
         if loaded is None:
             return None
-        index, matrix, model = loaded
+        index, matrix = loaded
         row = index.get(ref.key)
-        if row is None or (model is not None and model != ref.model):
+        if row is None:
             return None
         v = np.asarray(matrix[row], dtype=np.float64)
         if v.shape != (ref.dim,) or not np.all(np.isfinite(v)):
@@ -533,8 +555,8 @@ def similarity(view: View, ind_a: Union[Indicator, Sequence[Indicator], None],
     if view.representation == "vector":
         if store is None:
             return None, present, "no vector store"
-        va = [(i, i.vector_ref, store.get(i.vector_ref)) for i in a if i.vector_ref is not None]
-        vb = [(i, i.vector_ref, store.get(i.vector_ref)) for i in b if i.vector_ref is not None]
+        va = [(i, i.vector_ref, store.get(i.vector_ref, i.capture_id)) for i in a if i.vector_ref is not None]
+        vb = [(i, i.vector_ref, store.get(i.vector_ref, i.capture_id)) for i in b if i.vector_ref is not None]
         for ia, ra, xa in va:
             for ib, rb, xb in vb:
                 if xa is None or xb is None:
