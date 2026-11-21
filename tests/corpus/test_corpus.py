@@ -387,3 +387,31 @@ def test_victim_and_blocked(corpus):
     # The 403 home page is kept, but not as a must-not-link distractor.
     assert rows["fetch:cap-403"]["corpus_kind"] == "must_not_link_blocked"
     assert summary["by_corpus_kind"]["must_not_link"] == 1
+
+
+def test_tag_ingested(corpus, tmp_path):
+    from ftf.corpus.ingested import tag_ingested
+
+    root, picked = corpus
+    _capture(root / "fetch-victim", "v-g", "https://invest.example/", "live", "live", "2026-11-21T23:00:00Z")
+    build_corpus(root, "scanner", [RUN], ["fetch-1", "fetch-2"], [picked], ["picked-fetch"], "t",
+                 victim_dirs=["fetch-victim"])
+    # Shaped like `ftf ingest` output: the default fetch and its victim re-fetch grouped in one incident.
+    ingested = {"incidents": [
+        {"id": "fetch:cap-g", "captures": [{"id": "fetch:cap-g:c1"}, {"id": "fetch:cap-g:c2"}]},
+        {"id": "fetch:v-g", "captures": [{"id": "fetch:v-g:c1"}]},
+        {"id": "fetch:cap-lp", "captures": [{"id": "fetch:cap-lp:c1"}]},
+        {"id": "fetch:cap-dead", "captures": [{"id": "fetch:cap-dead:c1"}]},
+        {"id": "fetch:cap-gz", "captures": [{"id": "fetch:cap-gz:c1"}]},
+        {"id": "fetch:unknown", "captures": [{"id": "fetch:unknown:c1"}]},
+    ]}
+    (tmp_path / "ing.json").write_text(json.dumps(ingested))
+    out = tmp_path / "kinds.jsonl"
+    s = tag_ingested(tmp_path / "ing.json", root / "manifest.jsonl", out)
+    rows = {r["incident_id"]: r for r in map(json.loads, out.read_text().splitlines())}
+    assert s["untagged"] == 1 and s["tagged"] == 5
+    assert rows["fetch:cap-g"]["corpus_kind"] == "bare_domain"  # cloaked default fetch only
+    assert rows["fetch:v-g"]["corpus_kind"] == "fetched_landing" and rows["fetch:v-g"]["profiles"] == ["victim-pl-mobile"]
+    assert {i["corpus_incident_id"] for i in rows["fetch:cap-lp"]["corpus_items"]} == {"adlib:meta-1", "adlib:meta-2"}
+    assert rows["fetch:cap-dead"]["corpus_kind"] == "bare_domain"
+    assert rows["fetch:cap-gz"]["corpus_kind"] == "must_not_link"

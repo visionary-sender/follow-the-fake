@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Run `ftf ingest` over a corpus batch's fetcher folders and tag the result (HACK-18).
+# Runs on the workbench, inside the synced checkout:  scripts/vm.sh run -- bash scripts/corpus-ingest.sh batch-0
+# Re-run whenever new indicator extractors merge: it overwrites <batch>/ingested/ and re-syncs it.
+set -euo pipefail
+batch=${1:?usage: corpus-ingest.sh <batch name>}
+case "$batch" in *[!A-Za-z0-9._-]*|.*) echo "bad batch name" >&2; exit 2 ;; esac
+D=/data/derived/corpus/$batch
+[ -f "$D/manifest.jsonl" ] || { echo "no $D/manifest.jsonl; run ftf corpus build first" >&2; exit 1; }
+inputs=()
+for d in "$D"/fetch-* "$D"/picked-*; do
+  [ -d "$d" ] && inputs+=("${d#"$D"/}")
+done
+mkdir -p "$D/ingested"
+cd "$D"
+ftf ingest "${inputs[@]}" --root . --out ingested/dataset.json --timing ingested/timing.json
+ftf corpus tag-ingested --dataset ingested/dataset.json --manifest manifest.jsonl --out ingested/corpus_kind.jsonl \
+  | tee ingested/summary.json
+gcloud storage rsync -r "$D/ingested/" "gs://follow-the-fake-data/outputs/corpus/$batch/ingested/" 2>&1 | tail -1

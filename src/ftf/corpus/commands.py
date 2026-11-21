@@ -4,6 +4,8 @@
         write DIR/urls-<n>.txt (input for `ftf fetch --list`) and DIR/targets.jsonl
     ftf corpus articles --picked LIST --fetch DIR [--per-page 3] --out TSV
         real article URLs linked from fetched home/section pages of LIST (a new picked list)
+    ftf corpus tag-ingested --dataset INGESTED.json --manifest DIR/manifest.jsonl --out corpus_kind.jsonl
+        join `ftf ingest` output (the canonical incidents) with the corpus manifest
     ftf corpus build --root DIR [--scanner SUB] [--fetch SUB ...] [--picked LIST --picked-fetch SUB]
         read what sits under DIR, write DIR/dataset.json, DIR/manifest.jsonl, DIR/summary.json
 
@@ -70,6 +72,13 @@ def _articles(args: argparse.Namespace) -> int:
     return 0
 
 
+def _tag_ingested(args: argparse.Namespace) -> int:
+    from ftf.corpus.ingested import tag_ingested
+
+    print(json.dumps(tag_ingested(Path(args.dataset), Path(args.manifest), Path(args.out)), indent=2))
+    return 0
+
+
 def _build(args: argparse.Namespace) -> int:
     from ftf.corpus.build import build_corpus
 
@@ -106,6 +115,12 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     a.add_argument("--per-page", type=int, default=3, help="articles per home/section page (default 3)")
     a.add_argument("--out", required=True, help="output TSV (a picked list)")
     a.set_defaults(func=_articles)
+
+    g = sub.add_parser("tag-ingested", help="corpus_kind.jsonl for an `ftf ingest` dataset of a batch")
+    g.add_argument("--dataset", required=True, help="`ftf ingest` output (dataset.json)")
+    g.add_argument("--manifest", required=True, help="manifest.jsonl from `ftf corpus build`")
+    g.add_argument("--out", required=True, help="output corpus_kind.jsonl")
+    g.set_defaults(func=_tag_ingested)
 
     b = sub.add_parser("build", help="package scanner items and captures into a contract dataset")
     b.add_argument("--root", required=True, help="corpus directory; all paths are relative to it")
