@@ -12,6 +12,7 @@ Covers the runtime dependencies and the `app` and `dev` extras of `ftf`, recursi
 | certifi | MPL-2.0 (named exception, unmodified CA bundle; see README Licence section) |
 | charset-normalizer | MIT |
 | click | BSD-3-Clause |
+| datasketch | MIT License |
 | filelock | MIT |
 | h11 | MIT License |
 | idna | BSD-3-Clause |
@@ -20,6 +21,7 @@ Covers the runtime dependencies and the `app` and `dev` extras of `ftf`, recursi
 | jinja2 | BSD License |
 | jsonschema | MIT |
 | jsonschema-specifications | MIT |
+| lxml | BSD-3-Clause |
 | markupsafe | BSD-3-Clause |
 | narwhals | MIT |
 | networkx | BSD-3-Clause |
@@ -42,6 +44,7 @@ Covers the runtime dependencies and the `app` and `dev` extras of `ftf`, recursi
 | requests | Apache Software License |
 | requests-file | Apache Software License |
 | rpds-py | MIT |
+| scipy | BSD License |
 | starlette | BSD-3-Clause |
 | streamlit | Apache-2.0 |
 | tldextract | BSD-3-Clause |
