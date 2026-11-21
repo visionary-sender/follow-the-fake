@@ -169,3 +169,19 @@ def test_one_kit_layer_is_enough_for_template_not_for_campaign():
     assert _partition(group(be, Relation.campaign)[0]) == {frozenset({"x-c1"}), frozenset({"y-c1"})}
     one = cluster(["x", "y"], [ps("x", "y", 8, layers=1)], TAU, min_layers=1)
     assert one == [{"x", "y"}]
+
+
+def test_decoy_only_clusters_are_not_campaigns():
+    d = [simple(f"d{i}", (L.kit, "KD"), (L.landing, "LD"), (L.offer, "OD"), stage="decoy") for i in range(2)]
+    x = simple("x", (L.kit, "K1"))
+    ds = dataset(*d, x)
+    camps, _ = group(stub_backend(ds), Relation.campaign)
+    assert _partition(camps) == {frozenset({"x-c1"})}
+
+
+def test_non_decoy_duplicate_keeps_a_decoy_canonical_in_the_partition():
+    d = incident("d", [cap("d-c1", "decoy")], {"d-c1": [(L.kit, "K1")]})
+    dup = incident("e", [cap("e-c1", "lander", duplicate_of="d-c1")], {"e-c1": [(L.kit, "K1")]})
+    ds = dataset(d, dup)
+    camps, _ = group(stub_backend(ds), Relation.campaign)
+    assert _partition(camps) == {frozenset({"d-c1", "e-c1"})}

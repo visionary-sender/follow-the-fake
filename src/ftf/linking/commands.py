@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from collections import Counter
 from pathlib import Path
 
@@ -55,7 +56,7 @@ def _write(ds: Dataset, path: Path) -> None:
 
 def run_link(args: argparse.Namespace) -> int:
     ds = _load(args.input)
-    relations = [Relation(r) for r in args.relation] if args.relation else list(ALL_RELATIONS)
+    relations = list(dict.fromkeys(Relation(r) for r in args.relation)) if args.relation else list(ALL_RELATIONS)
     out = link_dataset(ds, relations)
     _write(out, args.out)
     n_caps = sum(len(i.captures) for i in out.incidents)
@@ -74,6 +75,9 @@ def run_assign(args: argparse.Namespace) -> int:
     base = _load(args.collection)
     new = _load(args.new)
     relation = Relation(args.relation)
+    if not any(c.relation is relation for c in base.campaigns):
+        print(f"ftf assign: {args.collection} has no {relation.value} campaigns; run `ftf link` with that relation first", file=sys.stderr)
+        return 2
     results = [link_incident(base, inc, relation) for inc in new.incidents]
     out = combine(base, list(new.incidents))
     data = out.model_dump(mode="json")

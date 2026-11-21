@@ -10,13 +10,15 @@ Method (07 §2.4, D1/D2 "Assignment"):
   informative ledger rank above pairs that share nothing, so a conflict on a lander is not
   hidden behind a 0-bit ad-to-ad pair.
 * With tau = `threshold()` (it scales with the collection size) and K campaigns of the relation:
-  `assign` if the best score >= tau + log2 K and that pair qualifies as an edge (enough positive
+  `assign` to the best campaign whose score is >= tau + log2 K and whose best pair qualifies as an edge (enough positive
   layers for the relation, or a live private id; see `grouping.MIN_LAYERS`); `new` if it is <= tau - 3; `review` otherwise. An item whose
   evidence capacity is below tau cannot reach the bar at all, so it goes to `review`, never `new`
   (a screenshot-only item is not proof of a new campaign).
 * Evidence capacity = sum, over the layers the item can still show, of the most bits the weight
   table gives that layer. Which layers a modality can show is read from the collection itself
   (indicator provenance -> artefact type), not hard-coded.
+* An incident whose capture is an exact duplicate (`duplicate_of`) of a collection capture is
+  assigned to the campaign holding that capture.
 * The collection is not re-clustered.
 """
 
@@ -95,15 +97,19 @@ def link_incident(
     canon = canonical_map(combined)
     stage = {c.id: c.stage for i in combined.incidents for c in i.captures}
 
+    own = {c.id for c in incident.captures}
     probe = _probe(incident, canon, stage)
+    # Exact duplicates of a collection capture: the incident is that capture again.
+    dup_of = sorted({canon[c.id] for c in incident.captures if canon[c.id] not in own})
     campaigns = [c for c in base.campaigns if c.relation is relation]
     tau = be.threshold(relation)
     k = len(campaigns)
     bar = tau + (math.log2(k) if k > 1 else 0.0)
+    min_layers = MIN_LAYERS[relation]
 
     scored: list[tuple[Campaign, Optional[PairScore], dict[str, PairScore]]] = []
     for camp in campaigns:
-        members = _members(camp, canon, stage) - set(probe)
+        members = _members(camp, canon, stage)
         per_member: dict[str, PairScore] = {}
         for m in sorted(members):
             best_m: Optional[PairScore] = None
@@ -117,24 +123,47 @@ def link_incident(
         scored.append((camp, top, per_member))
     scored.sort(key=lambda t: (-(t[1].bits if t[1] else -math.inf), t[0].id))
 
-    capacity, gains = evidence_capacity(combined, incident, probe, be.layer_caps(relation))
+    capacity, gains = evidence_capacity(combined, incident, probe or dup_of, be.layer_caps(relation))
 
+    dup_camp = next((camp for camp in campaigns if set(dup_of) & {canon.get(m, m) for m in camp.capture_ids}), None)
     candidates = [
         Candidate(campaign_id=camp.id, score_bits=round(ps.bits, 3), note=_candidate_note(ps))
         for camp, ps, _ in scored[:TOP_CANDIDATES]
         if ps is not None
     ]
+    if dup_camp is not None and all(c.campaign_id != dup_camp.id for c in candidates):
+        top_dup = next(ps for camp, ps, _ in scored if camp.id == dup_camp.id)
+        candidates.append(
+            Candidate(
+                campaign_id=dup_camp.id,
+                score_bits=round(top_dup.bits, 3) if top_dup is not None else 0.0,
+                note="exact duplicate of a member capture",
+            )
+        )
     best_camp, best_ps = (scored[0][0], scored[0][1]) if scored and scored[0][1] is not None else (None, None)
     best = best_ps.bits if best_ps is not None else 0.0
+    # The assign target is the best campaign that clears the bar with a qualifying ledger,
+    # not necessarily the top-scoring one (that one may rest on a single layer).
+    target = next(
+        (camp for camp, ps, _ in scored if ps is not None and ps.bits >= bar and qualifies(ps, tau, min_layers)),
+        None,
+    )
 
-    if best_ps is not None and best >= bar and qualifies(best_ps, tau, MIN_LAYERS[relation]):
-        decision, campaign_id = Decision.assign, best_camp.id
+    if dup_camp is not None:
+        decision, campaign_id = Decision.assign, dup_camp.id
+    elif target is not None:
+        decision, campaign_id = Decision.assign, target.id
+        if all(c.campaign_id != target.id for c in candidates):
+            ps = next(p for camp, p, _ in scored if camp.id == target.id)
+            candidates.append(Candidate(campaign_id=target.id, score_bits=round(ps.bits, 3), note=_candidate_note(ps)))
     elif best <= tau - NEW_MARGIN and capacity >= tau:
         decision, campaign_id = Decision.new, None
     else:
         decision, campaign_id = Decision.review, None
 
-    note = _note(relation, best, tau, bar, k, capacity, gains, best_ps)
+    note = _note(relation, best, tau, bar, k, capacity, gains, best_ps, min_layers)
+    if dup_of:
+        note = f"exact duplicate of {', '.join(dup_of)}; " + note
     assignment = Assignment(
         incident_id=incident.id,
         candidates=candidates,
@@ -178,7 +207,13 @@ def combine(base: Dataset, incidents: list[Incident]) -> Dataset:
 
 
 def _probe(incident: Incident, canon: dict[str, str], stage: dict[str, Stage]) -> list[str]:
-    caps = list(dict.fromkeys(canon[c.id] for c in incident.captures))
+    """The incident's own canonical captures, non-decoy first (decoys only if nothing else).
+
+    Captures that duplicate a collection capture are left out: they are handled as exact
+    duplicates, and scoring them would put two collection captures in the incident's links.
+    """
+    own = {c.id for c in incident.captures}
+    caps = list(dict.fromkeys(canon[c.id] for c in incident.captures if canon[c.id] in own))
     non_decoy = [c for c in caps if stage[c] is not Stage.decoy]
     return non_decoy or caps
 
@@ -262,12 +297,13 @@ def _note(
     capacity: float,
     gains: list[tuple[ArtefactType, Optional[str], float, list[Layer]]],
     best_ps: Optional[PairScore],
+    min_layers: int,
 ) -> str:
     parts = [
         f"{relation.value}: best {best:.1f} bits vs assign bar {bar:.1f} (tau {tau:.1f} + log2 K, K={k}), new at <= {tau - NEW_MARGIN:.1f}",
         f"evidence capacity {capacity:.1f} bits",
     ]
-    if best_ps is not None and best >= bar and not qualifies(best_ps, tau, MIN_LAYERS[relation]):
+    if best_ps is not None and best >= bar and not qualifies(best_ps, tau, min_layers):
         parts.append("best match rests on one layer only")
     if capacity < tau:
         parts.append("capacity below tau: the inputs present cannot prove a new campaign")

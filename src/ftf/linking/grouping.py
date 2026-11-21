@@ -13,7 +13,7 @@ Method (07 §1.8, D2 "Linking / clustering"):
   otherwise, and `-tau` for a pair that shares nothing (0 bits).
 * Clustering is greedy average linkage on those signed weights (GAEC-style correlation
   clustering): repeatedly merge the two clusters with the highest mean cross weight while that
-  mean is positive, they are joined by at least one qualifying edge, and no cross pair is
+  mean is non-negative, they are joined by at least one qualifying edge, and no cross pair is
   cannot-linked. Unlike connected components, one false private-id match between two groups
   is outvoted by all the other cross pairs, so it does not chain them.
 * Non-decoy captures of one incident are one ad's redirect chain: they start in one unit
@@ -21,10 +21,10 @@ Method (07 §1.8, D2 "Linking / clustering"):
   (D1: max over members). A decoy capture is what the cloaker shows non-targets, so it is
   never must-linked to its incident: it stands alone and joins a cluster only on its own
   evidence, and cannot pull its incident anywhere.
-* Every cluster with at least one non-decoy capture becomes a `Campaign`, singletons included,
-  so each relation's campaigns are a full partition of the non-decoy captures and assignment
-  can match a new item to a collection item that has no group yet. Decoy-only singletons are
-  left out. Exact duplicates (`duplicate_of`) follow their canonical capture.
+* Every cluster with at least one non-decoy capture (counting duplicates) becomes a
+  `Campaign`, singletons included, so each relation's campaigns are a full partition of the
+  non-decoy captures and assignment can match a new item to a collection item that has no
+  group yet. Decoy-only clusters, of any size, are left out. Exact duplicates (`duplicate_of`) follow their canonical capture.
 """
 
 from __future__ import annotations
@@ -208,7 +208,9 @@ def candidate_pairs(ds: Dataset, relation: Relation, nodes: Optional[set[str]] =
     pairs: set[tuple[str, str]] = set()
     lists = [p for p in postings.values() if 2 <= len(p) <= HUB_POSTINGS]
     if relation in CANNOT_LINK_RELATIONS:
-        lists += [b for b in buckets.values() if len(b) >= 2]
+        # Capped like value postings: past the cap the conflict is only seen between captures
+        # that share some other value (pairs that share nothing never link anyway).
+        lists += [b for b in buckets.values() if 2 <= len(b) <= HUB_POSTINGS]
     for members in lists:
         ms = sorted(members)
         for i, a in enumerate(ms):
@@ -258,9 +260,10 @@ def group(ctx: Any, relation: Relation = Relation.campaign) -> tuple[list[Campai
     links: list[Link] = []
     n_out = 0
     for cl in clusters:
-        if all(captures[c].stage is Stage.decoy for c in cl) and len(cl) == 1:
-            continue
         members = sorted(cl)
+        with_dups = set(members) | {d for m in members for d in dups.get(m, [])}
+        if all(captures[c].stage is Stage.decoy for c in with_dups):
+            continue
         cl_links: list[Link] = []
         layer_bits: dict[str, float] = defaultdict(float)
         for i, a in enumerate(members):
@@ -276,7 +279,7 @@ def group(ctx: Any, relation: Relation = Relation.campaign) -> tuple[list[Campai
                     if r.status is EvidenceStatus.shared and r.bits > 0:
                         layer_bits[r.layer.value] += r.bits
         n_out += 1
-        capture_ids = sorted(set(members) | {d for m in members for d in dups.get(m, [])})
+        capture_ids = sorted(with_dups)
         incidents = sorted({incident_of[c] for c in capture_ids})
         campaigns.append(
             Campaign(

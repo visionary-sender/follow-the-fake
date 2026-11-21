@@ -130,3 +130,52 @@ def test_conflict_on_a_lander_is_not_hidden_by_an_empty_ad_pair():
     a_id = next(c.id for c in col.campaigns if c.relation is Relation.campaign and "a0-c1" in c.capture_ids)
     assert by[a_id] < 0  # platform +1.5, tenant conflict -4
     assert "conflict: tenant" in next(c.note for c in a.candidates if c.campaign_id == a_id)
+
+
+def test_exact_duplicate_of_a_collection_capture_is_assigned_to_its_campaign():
+    from linking_support import cap, incident
+
+    x = simple("x", (L.tenant, "T1"), (L.landing, "LA"))
+    ds = dataset(x)
+    col = link_dataset(ds, backend=stub_backend(ds))
+    new = incident("n", [cap("n-c1", duplicate_of="x-c1")], {"n-c1": [(L.tenant, "T1"), (L.landing, "LA")]})
+    res = link_incident(col, new, backend=stub_backend)
+    camp = next(c for c in col.campaigns if c.relation is Relation.campaign and "x-c1" in c.capture_ids)
+    assert res.assignment.decision is Decision.assign
+    assert res.assignment.campaign_id == camp.id
+    assert "exact duplicate" in res.assignment.note
+    assert all("n-c1" in (l.a, l.b) for l in res.links)  # never a link between two collection captures
+
+
+def test_assign_target_is_best_qualifying_campaign_not_top_score():
+    g1 = [simple(f"g{i}", (L.tenant, "T1"), (L.landing, "L1")) for i in range(2)]
+    g2 = [simple(f"h{i}", (L.kit, "K2"), (L.offer, "O2"), (L.infrastructure, "I2")) for i in range(2)]
+    ds = dataset(*g1, *g2)
+    col = link_dataset(ds, backend=stub_backend(ds))
+
+    def low_tau(d):
+        be = stub_backend(d)
+        be.threshold = lambda relation: 2.0
+        return be
+
+    # vs g: tenant only, 5 bits on one layer; vs h: offer + infrastructure, 3 bits on two layers.
+    new = simple("n", (L.tenant, "T1"), (L.offer, "O2"), (L.infrastructure, "I2"))
+    a = assign(col, new, backend=low_tau)
+    h = next(c.id for c in col.campaigns if c.relation is Relation.campaign and "h0-c1" in c.capture_ids)
+    k = sum(1 for c in col.campaigns if c.relation is Relation.campaign)
+    assert 2.0 + math.log2(k) <= 3.0
+    assert a.candidates[0].campaign_id != h
+    assert a.decision is Decision.assign and a.campaign_id == h
+
+
+def test_cli_assign_refuses_relation_without_campaigns(tmp_path, monkeypatch, capsys):
+    from ftf import cli
+    from ftf.linking import backend as backend_mod
+
+    monkeypatch.setattr(backend_mod.Backend, "from_dataset", classmethod(lambda cls, ds: stub_backend(ds)))
+    (tmp_path / "in.json").write_text(dataset(simple("a", (L.kit, "K1"))).to_json())
+    (tmp_path / "new.json").write_text(dataset(simple("n", (L.kit, "K1"))).to_json())
+    assert cli.main(["link", str(tmp_path / "in.json"), "-o", str(tmp_path / "l.json"), "--relation", "template", "--relation", "template"]) == 0
+    assert capsys.readouterr().out.count("  template:") == 1
+    assert cli.main(["assign", str(tmp_path / "l.json"), str(tmp_path / "new.json"), "-o", str(tmp_path / "o.json")]) == 2
+    assert not (tmp_path / "o.json").exists()
