@@ -246,3 +246,40 @@ def test_cli_targets_and_build(corpus, tmp_path, capsys):
     assert main(["corpus", "build", "--root", str(root), "--scanner", "scanner", "--run", RUN,
                  "--fetch", "fetch-1", "--fetch", "fetch-2"]) == 0
     assert '"incidents": 6' in capsys.readouterr().out
+
+
+def test_article_links_same_site_only():
+    from ftf.corpus.articles import article_links
+
+    html = """
+    <a href="/wiadomosci/7,114884,31234567,tytul-artykulu.html#x">a</a>
+    <a href="https://next.gazeta.pl/next/7,151003,31234568,inny.html?utm=1">b</a>
+    <a href="https://evil.example/7,1,2,x.html">c</a>
+    <a href="http://wiadomosci.gazeta.pl/wiadomosci/7,1,3,plain-http.html">d</a>
+    <a href="/wiadomosci/0,0.html">e</a>
+    <a href="/wiadomosci/7,114884,31234567,tytul-artykulu.html">dup</a>
+    """
+    assert article_links(html, "https://wiadomosci.gazeta.pl/", 10) == [
+        "https://wiadomosci.gazeta.pl/wiadomosci/7,114884,31234567,tytul-artykulu.html",
+        "https://next.gazeta.pl/next/7,151003,31234568,inny.html",
+    ]
+    tvn = '<a href="/polska/jakis-tytul-ra1234567">x</a><a href="/polska">y</a>'
+    assert article_links(tvn, "https://tvn24.pl/", 5) == ["https://tvn24.pl/polska/jakis-tytul-ra1234567"]
+
+
+def test_cli_articles(tmp_path, capsys):
+    root = tmp_path / "b"
+    _capture(root / "pf", "cap-home", "https://tvn24.pl/", "live", "live", "2026-11-21T22:00:00Z")
+    (root / "pf" / "cap-home" / "page.html").write_text(
+        '<a href="/polska/a-ra1">1</a><a href="/swiat/b-ra2">2</a><a href="/c-ra3">3</a>'
+    )
+    _capture(root / "pf", "cap-dead", "https://www.gazeta.pl/", "dead", "timeout", "2026-11-21T22:00:01Z")
+    picked = tmp_path / "home.tsv"
+    picked.write_text("https://tvn24.pl/\ttvn24.pl\thome\nhttps://www.gazeta.pl/\tgazeta.pl\thome\n")
+    out = tmp_path / "articles.tsv"
+    assert main(["corpus", "articles", "--picked", str(picked), "--fetch", str(root / "pf"),
+                 "--per-page", "2", "--out", str(out)]) == 0
+    rows = [r.split("\t") for r in out.read_text().splitlines()]
+    assert [r[0] for r in rows] == ["https://tvn24.pl/polska/a-ra1", "https://tvn24.pl/swiat/b-ra2"]
+    assert all(r[1:3] == ["tvn24.pl", "article"] for r in rows)
+    assert len(read_picked(out)) == 2

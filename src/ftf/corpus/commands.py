@@ -2,6 +2,8 @@
 
     ftf corpus targets --queue Q [--run R ...] [--picked LIST] --out DIR [--parts 2]
         write DIR/urls-<n>.txt (input for `ftf fetch --list`) and DIR/targets.jsonl
+    ftf corpus articles --picked LIST --fetch DIR [--per-page 3] --out TSV
+        real article URLs linked from fetched home/section pages of LIST (a new picked list)
     ftf corpus build --root DIR [--scanner SUB] [--fetch SUB ...] [--picked LIST --picked-fetch SUB]
         read what sits under DIR, write DIR/dataset.json, DIR/manifest.jsonl, DIR/summary.json
 
@@ -39,6 +41,32 @@ def _targets(args: argparse.Namespace) -> int:
     return 0
 
 
+def _articles(args: argparse.Namespace) -> int:
+    from ftf.corpus.articles import article_rows
+    from ftf.corpus.build import read_fetch_dirs
+
+    root = Path(args.fetch)
+    fetched = read_fetch_dirs(root.parent, [root.name])
+    rows: list[str] = []
+    seen: set[str] = set()
+    for p in read_picked(Path(args.picked)):
+        fc = fetched.get(p.url)
+        if p.page_kind not in ("home", "section") or fc is None or not fc.is_page:
+            continue
+        html = root.parent / fc.rel_dir / "page.html"
+        if not html.is_file():
+            continue
+        base = fc.manifest.get("final_url") or p.url
+        for row in article_rows(html, base, p.brand, args.per_page):
+            url = row.split("\t", 1)[0]
+            if url not in seen:
+                seen.add(url)
+                rows.append(row)
+    Path(args.out).write_text("".join(r + "\n" for r in rows), encoding="utf-8")
+    print(f"{len(rows)} article URLs -> {args.out}")
+    return 0
+
+
 def _build(args: argparse.Namespace) -> int:
     from ftf.corpus.build import build_corpus
 
@@ -67,6 +95,13 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     t.add_argument("--parts", type=int, default=1, help="number of URL lists (default 1)")
     t.add_argument("--limit", type=int, default=0, help="keep only the first N targets")
     t.set_defaults(func=_targets)
+
+    a = sub.add_parser("articles", help="article URLs linked from fetched real home pages")
+    a.add_argument("--picked", required=True, help="hand-picked TSV list of home/section pages")
+    a.add_argument("--fetch", required=True, help="`ftf fetch` output dir for that list")
+    a.add_argument("--per-page", type=int, default=3, help="articles per home/section page (default 3)")
+    a.add_argument("--out", required=True, help="output TSV (a picked list)")
+    a.set_defaults(func=_articles)
 
     b = sub.add_parser("build", help="package scanner items and captures into a contract dataset")
     b.add_argument("--root", required=True, help="corpus directory; all paths are relative to it")
