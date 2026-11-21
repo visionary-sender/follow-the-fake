@@ -117,7 +117,7 @@ class ScoringContext:
         layers: dict[str, set[Layer]] = {c: set() for c in canon_ids}
         index: dict[tuple[Layer, str, str], set[str]] = defaultdict(set)
         live_private: dict[tuple[Layer, str, str], set[str]] = defaultdict(set)
-        has_owner: set[str] = set()  # incidents with any owner-level id (live or static)
+        owners: dict[str, set[str]] = defaultdict(set)  # incident → owner-level ids (live or static)
         for inc in ds.incidents:
             for ind in inc.indicators:
                 cap = canonical[ind.capture_id]
@@ -135,10 +135,10 @@ class ScoringContext:
                 # rarity counts the incident of the canonical capture, never the duplicate's
                 index[(ind.layer, ind.kind, norm)].add(incident_of[cap])
                 if ind.layer is Layer.owner:
-                    has_owner.add(incident_of[cap])
+                    owners[incident_of[cap]].add(f"{ind.kind}={norm}")
                 if ind.observed is Observed.live and weights.weight(ind.kind, ind.layer).private:
                     live_private[(ind.layer, ind.kind, norm)].add(incident_of[cap])
-        group_of = _pre_groups({incident_of[c] for c in canon_ids}, live_private, has_owner)
+        group_of = _pre_groups({incident_of[c] for c in canon_ids}, live_private, owners)
         return cls(
             ds=ds,
             weights=weights,
@@ -352,19 +352,19 @@ def _seen(ctx: ScoringContext, key: Key, norm: str) -> str:
 
 
 def _pre_groups(
-    incidents: set[str], live_private: dict[tuple[Layer, str, str], set[str]], has_owner: set[str]
+    incidents: set[str], live_private: dict[tuple[Layer, str, str], set[str]], owners: dict[str, set[str]]
 ) -> dict[str, str]:
     """Connected components (union-find) of incidents sharing a live operator-private id, finest first.
 
-    1. Owner ids join their carriers.
-    2. Tracker instance / tracking account ids (live pixel) join two components unless both
-       already hold an owner id (two different owners stay apart).
-    3. Tenant ids join two components only if neither holds an owner id: a tenant can be a
-       reseller hosting several owners (07 §2.2 item 5).
-    Other private layers (fallback kinds) are treated like tracker ids.
+    Every component carries the owner-level ids (live or static) of its incidents.
+    1. Live owner ids join their carriers.
+    2. Tracker instance / tracking account ids (live pixel) and fallback private kinds join two
+       components unless both hold owner ids and none is shared (two different owners stay apart).
+    3. Tenant ids join two components only if neither holds an owner id, or both hold a shared
+       one: a tenant can be a reseller hosting several owners (07 §2.2 item 5).
     """
     parent = {i: i for i in incidents}
-    owned = {i: i in has_owner for i in incidents}  # per root: component holds an owner id
+    own = {i: frozenset(owners.get(i, ())) for i in incidents}  # per root
 
     def find(x: str) -> str:
         while parent[x] != x:
@@ -375,20 +375,23 @@ def _pre_groups(
     def tier(layer: Layer) -> int:
         return 0 if layer is Layer.owner else 2 if layer is Layer.tenant else 1
 
+    def allowed(t: int, oa: frozenset, ob: frozenset) -> bool:
+        if t == 0 or oa & ob:
+            return True
+        if t == 1:
+            return not (oa and ob)
+        return not oa and not ob
+
     for t in (0, 1, 2):
         for key in sorted(k for k in live_private if tier(k[0]) == t):
             first, *rest = sorted(live_private[key])
             for other in rest:
                 ra, rb = find(first), find(other)
-                if ra == rb:
-                    continue
-                if t == 1 and owned[ra] and owned[rb]:
-                    continue
-                if t == 2 and (owned[ra] or owned[rb]):
+                if ra == rb or not allowed(t, own[ra], own[rb]):
                     continue
                 root, child = min(ra, rb), max(ra, rb)
                 parent[child] = root
-                owned[root] = owned[ra] or owned[rb]
+                own[root] = own[ra] | own[rb]
     return {i: find(i) for i in incidents}
 
 def _fmt_weight(bits: float, scale: float) -> str:

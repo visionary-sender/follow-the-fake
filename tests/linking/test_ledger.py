@@ -245,6 +245,10 @@ def test_reseller_tenant_with_two_owners_is_cannot_link():
     bare = [i for i in side("unused") if i[0] is not L.owner]
     ctx2 = ScoringContext.from_dataset(Dataset(name="tenant-only", incidents=[incident("x", bare), incident("y", bare)]))
     assert ctx2.group_of["x"] == ctx2.group_of["y"]
+    # same static owner on both sides: the live tenant still joins them
+    same = [i for i in side("unused") if i[0] is not L.owner] + [ind(L.owner, "aio_owner", "owner-1")]
+    ctx3 = ScoringContext.from_dataset(Dataset(name="same-owner", incidents=[incident("x", same), incident("y", same)]))
+    assert ctx3.group_of["x"] == ctx3.group_of["y"]
 
 
 def test_collector_traces_change_no_score(ds, ctx):
