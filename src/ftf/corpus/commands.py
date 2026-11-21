@@ -6,6 +6,8 @@
         real article URLs linked from fetched home/section pages of LIST (a new picked list)
     ftf corpus tag-ingested --dataset INGESTED.json --manifest DIR/manifest.jsonl --out corpus_kind.jsonl
         join `ftf ingest` output (the canonical incidents) with the corpus manifest
+    ftf corpus convert-scanner --scanner OLD --out DIR
+        rewrite batch 0's pre-v1 scanner snapshot as v1 capture folders (capture.json + ad.json)
     ftf corpus build --root DIR [--scanner SUB] [--fetch SUB ...] [--picked LIST --picked-fetch SUB]
         read what sits under DIR, write DIR/dataset.json, DIR/manifest.jsonl, DIR/summary.json
 
@@ -79,6 +81,13 @@ def _tag_ingested(args: argparse.Namespace) -> int:
     return 0
 
 
+def _convert_scanner(args: argparse.Namespace) -> int:
+    from ftf.corpus.convert_scanner import convert
+
+    print(json.dumps(convert(Path(args.scanner), Path(args.out), args.run or None), indent=2))
+    return 0
+
+
 def _build(args: argparse.Namespace) -> int:
     from ftf.corpus.build import build_corpus
 
@@ -121,6 +130,12 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     g.add_argument("--manifest", required=True, help="manifest.jsonl from `ftf corpus build`")
     g.add_argument("--out", required=True, help="output corpus_kind.jsonl")
     g.set_defaults(func=_tag_ingested)
+
+    v = sub.add_parser("convert-scanner", help="rewrite a pre-v1 scanner snapshot in the v1 per-capture layout")
+    v.add_argument("--scanner", required=True, help="old snapshot dir (queue.jsonl, runs/, creatives/)")
+    v.add_argument("--out", required=True, help="output dir for v1 capture folders")
+    v.add_argument("--run", action="append", help="keep only these scanner run ids (repeatable)")
+    v.set_defaults(func=_convert_scanner)
 
     b = sub.add_parser("build", help="package scanner items and captures into a contract dataset")
     b.add_argument("--root", required=True, help="corpus directory; all paths are relative to it")

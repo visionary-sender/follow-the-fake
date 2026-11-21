@@ -415,3 +415,52 @@ def test_tag_ingested(corpus, tmp_path):
     assert {i["corpus_incident_id"] for i in rows["fetch:cap-lp"]["corpus_items"]} == {"adlib:meta-1", "adlib:meta-2"}
     assert rows["fetch:cap-dead"]["corpus_kind"] == "bare_domain"
     assert rows["fetch:cap-gz"]["corpus_kind"] == "must_not_link"
+
+
+def test_convert_scanner_v1(tmp_path):
+    from ftf.corpus.convert_scanner import convert
+
+    sc = tmp_path / "old"
+    (sc / "creatives").mkdir(parents=True)
+    (sc / "creatives" / "abc.jpg").write_bytes(b"\xff\xd8 not really a jpeg")
+
+    def ind(iid, kind, layer, level, value, loc):
+        return {"id": f"{iid}/{kind}", "capture_id": f"{iid}/ad", "layer": layer, "kind": kind, "level": level,
+                "value": value, "observed": "static", "provenance": {"artefact_id": f"{iid}/ad/library", "locator": loc},
+                "extractor": "old"}
+
+    meta = {"id": "meta-111", "source": "scanner_meta", "source_ref": "111",
+            "captures": [{"id": "meta-111/ad", "stage": "ad", "captured_on": "2026-11-21", "artefacts": [
+                {"id": "meta-111/ad/library", "type": "ad_library"},
+                {"id": "meta-111/ad/creative/0", "type": "ad_screenshot", "path": "creatives/abc.jpg", "size": 20},
+                {"id": "meta-111/ad/creative/1", "type": "ad_screenshot", "path": "creatives/missing.jpg"}]}],
+            "indicators": [ind("meta-111", "meta_ad_id", "creative", "capture", "111", "ad_id"),
+                           ind("meta-111", "advertiser_page_id", "distribution_account", "operator", "999", "page_id"),
+                           ind("meta-111", "ad_text", "creative", "campaign", "Invented text", "body"),
+                           ind("meta-111", "landing_url", "landing", "landing", "https://lp.example/x", "link_url"),
+                           ind("meta-111", "landing_domain", "landing", "landing", "lp.example", "link_url"),
+                           ind("meta-111", "ad_start_date", "creative", "capture", "2026-11-14", "start_date")]}
+    cert = {"id": "certpl-7", "source": "scanner_certpl", "source_ref": "7",
+            "captures": [{"id": "certpl-7/ad", "stage": "unknown", "artefacts": [{"id": "certpl-7/ad/library", "type": "url"}]}],
+            "indicators": [ind("certpl-7", "cert_register_id", "creative", "capture", "7", "ad_id"),
+                           ind("certpl-7", "landing_domain", "landing", "landing", "Shop.Bad-Domain.example", "DomainAddress")]}
+    _write_dataset(sc / f"runs/{RUN}/incidents-meta.json", [meta])
+    _write_dataset(sc / f"runs/{RUN}/incidents-certpl.json", [cert])
+    (sc / "queue.jsonl").write_text(json.dumps(_row("meta:111", "meta", "meta-111", keyword="kw")) + "\n")
+
+    out = tmp_path / "v1"
+    s = convert(sc, out)
+    assert s["captures"] == 2 and s["creatives"] == 1 and s["by_source"] == {"meta": 1, "certpl": 1}
+    folders = {p.parent.name: p.parent for p in out.glob("*/capture.json")}
+    mfolder = folders[f"{RUN}-meta-111"]
+    man = json.loads((mfolder / "capture.json").read_text())
+    ad = json.loads((mfolder / "ad.json").read_text())
+    inc = m.Incident.model_validate(man["incident"])
+    assert inc.id == "adlib:111" and inc.captures[0].id == "adlib:111:ad"
+    assert ad["page_id"] == "999" and ad["body"] == "Invented text" and ad["keyword"] == "kw"
+    assert ad["landing_url"] == "https://lp.example/x" and ad["title"] is None
+    (cre,) = [a for a in inc.captures[0].artefacts if a.type is m.ArtefactType.asset]
+    assert cre.path == f"{RUN}-meta-111/creative-0.jpg" and (out / cre.path).read_bytes().startswith(b"\xff\xd8")
+    assert len(cre.sha256) == 64
+    cinc = m.Incident.model_validate(json.loads((folders[f"{RUN}-certpl-bad-domain.example"] / "capture.json").read_text())["incident"])
+    assert cinc.id == "certpl:bad-domain.example" and cinc.captures[0].id == "certpl:bad-domain.example:listing"
