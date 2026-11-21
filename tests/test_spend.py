@@ -186,7 +186,7 @@ def test_deleted_vm_without_logged_stop_is_capped_by_its_max_run_duration():
 
 def test_disk_kept_after_instance_delete_and_unknown_size_flagged():
     insert = {"machineType": "x/e2-standard-4", "disks": [
-        {"boot": True, "initializeParams": {"diskType": "x/pd-ssd"}},  # size from image: unknown
+        {"boot": True, "autoDelete": True, "initializeParams": {"diskType": "x/pd-ssd"}},  # size from image: unknown
         {"autoDelete": False, "initializeParams": {"diskName": "keep", "diskSizeGb": "10",
                                                    "diskType": "x/pd-standard"}}]}
     evs = spend.parse_events([
