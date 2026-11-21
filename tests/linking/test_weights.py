@@ -97,7 +97,7 @@ def test_differing_aio_campaign_under_one_owner_is_no_conflict():
     ctx = _pair(owner + [ind(L.owner, "aio_campaign", "camp-1")], owner + [ind(L.owner, "aio_campaign", "camp-2")])
     s = score_pair(ctx, "x/lander", "y/lander", Relation.campaign)
     assert not [r for r in s.rows if r.status is EvidenceStatus.conflict]
-    assert row(s, "aio_owner").bits == pytest.approx(5.0)  # 6 − 1 static copy prior, k = 1
+    assert row(s, "aio_owner").bits == pytest.approx(4.0)  # 6 − 1 static copy prior − log2(2 groups)
 
 
 @pytest.mark.parametrize("kind", ["meta_pixel", "capi_gateway", "xid_tracker_machine"])
@@ -118,6 +118,6 @@ def test_template_kinds_count_for_template_weakly_for_campaign():
     ctx = _pair(tpl, tpl)
     t = score_pair(ctx, "x/lander", "y/lander", Relation.template)
     c = score_pair(ctx, "x/lander", "y/lander", Relation.campaign)
-    assert row(t, "aio_lander_template").bits == pytest.approx(4.0)
-    assert row(t, "aio_flow").bits == pytest.approx(3.0)
+    assert row(t, "aio_lander_template").bits == pytest.approx(3.0)  # 4 − log2(2 groups)
+    assert row(t, "aio_flow").bits == pytest.approx(2.0)  # 3 − log2(2 groups)
     assert c.bits <= 2.0 < t.bits

@@ -133,8 +133,9 @@ HAND_TABLE = WeightTable(
         "contact_email": _K(L.offer, 4.5, private=True, relations=_row(0.0, 0.0, 1.0, 1.0, 1.0)),
         "contact_phone": _K(L.offer, 4.5, private=True, relations=_row(0.0, 0.0, 1.0, 1.0, 1.0)),
         # lead endpoint: Ingestion marks it platform-level (several owners can post to one
-        # endpoint), so not private (a shared live endpoint must not alone make a strict link)
-        "form_endpoint": _K(L.offer, 4.0, relations=_row(0.0, 0.0, 1.0, 1.0, 1.0)),
+        # endpoint), so not private (a shared live endpoint must not alone make a strict link);
+        # its handler path ships with the kit, so it counts half toward template
+        "form_endpoint": _K(L.offer, 4.0, relations=_row(0.5, 0.0, 1.0, 1.0, 1.0)),
         "form_field_set": _K(L.offer, 1.0, relations=_row(1.0, 0.0, 0.25, 0.5, 1.0)),  # kit-like, low
         "aio_form": _K(L.offer, 1.0),  # form template of the platform, near-constant
         # video host tenant: tenant-like but host-side (infrastructure layer), multi-valued
@@ -152,7 +153,7 @@ HAND_TABLE = WeightTable(
         # SDK; rarity over pre-groups demotes the platform-wide ones, so the prior stays modest.
         "asset_sha256": _K(L.kit, 2.0),  # one identical asset file
         "asset_norm_sha256": _K(L.kit, 2.0),  # same asset after re-minification
-        "inline_script_sha256": _K(L.kit, 2.0),  # normalised inline script, per-deployment literals masked
+        "inline_script_sha256": _K(L.kit, 3.0),  # normalised inline script with per-deployment literals masked: the kit's own code
         "dom_skeleton_sha256": _K(L.kit, 3.0),  # whole-page tag skeleton: one page build (≥30 tags)
         "dom_skeleton_lsh": _K(L.kit, 1.0),  # one MinHash band of a near-identical skeleton; one band counts
         # URL parameter shapes (values dropped): platform-level structure, template-ish, weak
