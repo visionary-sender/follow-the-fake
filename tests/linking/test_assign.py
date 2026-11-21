@@ -179,3 +179,49 @@ def test_cli_assign_refuses_relation_without_campaigns(tmp_path, monkeypatch, ca
     assert capsys.readouterr().out.count("  template:") == 1
     assert cli.main(["assign", str(tmp_path / "l.json"), str(tmp_path / "new.json"), "-o", str(tmp_path / "o.json")]) == 2
     assert not (tmp_path / "o.json").exists()
+
+
+def test_tenant_conflict_on_another_capture_blocks_assignment():
+    from linking_support import cap, incident
+
+    col = _collection()
+    caps = [cap("n-l1"), cap("n-l2")]
+    vals = {
+        "n-l1": [(L.platform, "P1"), (L.tenant, "T1"), (L.landing, "LA"), (L.kit, "K1"), (L.tracking_account, "PXA", True)],
+        "n-l2": [(L.tenant, "T5")],
+    }
+    a = assign(col, incident("n", caps, vals), backend=stub_backend)
+    assert a.decision is Decision.review
+    assert "tenant/owner conflict" in a.note
+    # Template has no cannot-link: the same incident is not blocked there.
+    t = assign(col, incident("n", caps, vals), relation=Relation.template, backend=stub_backend)
+    assert "tenant/owner conflict" not in t.note
+
+
+def test_duplicate_shortcut_does_not_override_a_conflict():
+    from linking_support import cap, incident
+
+    x = simple("x", (L.tenant, "T1"), (L.landing, "LA"))
+    ds = dataset(x)
+    col = link_dataset(ds, backend=stub_backend(ds))
+    new = incident("n", [cap("n-c1", duplicate_of="x-c1"), cap("n-c2")], {"n-c1": [(L.tenant, "T1"), (L.landing, "LA")], "n-c2": [(L.tenant, "T2")]})
+    a = assign(col, new, backend=stub_backend)
+    assert a.decision is Decision.review
+
+
+def test_cli_assign_handles_new_incidents_duplicating_each_other(tmp_path, monkeypatch):
+    from ftf import cli
+    from ftf.linking import backend as backend_mod
+    from linking_support import cap, incident
+
+    monkeypatch.setattr(backend_mod.Backend, "from_dataset", classmethod(lambda cls, ds: stub_backend(ds)))
+    a = [simple(f"a{i}", (L.tenant, "T1"), (L.landing, "LA"), (L.kit, "K1")) for i in range(2)]
+    (tmp_path / "in.json").write_text(dataset(*a).to_json())
+    first = incident("n2", [cap("n2-c1", duplicate_of="n1-c1")], {"n2-c1": [(L.tenant, "T8"), (L.landing, "L8")]})
+    second = simple("n1", (L.tenant, "T8"), (L.landing, "L8"), (L.kit, "K8"))
+    (tmp_path / "new.json").write_text(Dataset.model_construct(contract_version="0.1.0", name="n", description=None, incidents=[first, second], links=[], campaigns=[], assignments=[]).model_dump_json())
+    assert cli.main(["link", str(tmp_path / "in.json"), "-o", str(tmp_path / "linked.json")]) == 0
+    assert cli.main(["assign", str(tmp_path / "linked.json"), str(tmp_path / "new.json"), "-o", str(tmp_path / "out.json")]) == 0
+    out = Dataset.from_json((tmp_path / "out.json").read_bytes())
+    decisions = {a.incident_id: a.decision for a in out.assignments}
+    assert decisions == {"n1": Decision.new, "n2": Decision.review}  # a duplicate of a capture in no campaign

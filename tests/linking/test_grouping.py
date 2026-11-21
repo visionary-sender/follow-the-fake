@@ -121,9 +121,13 @@ def test_incident_captures_are_must_linked_and_decoy_does_not_pull():
     a = [simple(f"a{i}", (L.tenant, "T1"), (L.landing, "LA")) for i in range(2)]
     d = [simple(f"d{i}", (L.kit, "KD"), (L.landing, "LD"), (L.offer, "OD")) for i in range(2)]
     ds = dataset(m, *a, *d)
-    part = _partition(group(stub_backend(ds), Relation.campaign)[0])
+    be = stub_backend(ds)
+    part = _partition(group(be, Relation.campaign)[0])
     assert frozenset({"m-ad", "m-l", "a0-c1", "a1-c1"}) in part
-    assert frozenset({"m-d", "d0-c1", "d1-c1"}) in part  # the decoy joins D on its own, without m's other captures
+    assert frozenset({"d0-c1", "d1-c1"}) in part  # under campaign the decoy clusters only with decoys
+    assert not any("m-d" in p for p in part)  # a decoy-only singleton is not a campaign
+    tpart = _partition(group(be, Relation.template)[0])
+    assert frozenset({"m-d", "d0-c1", "d1-c1"}) in tpart  # under template it joins D on its own evidence
 
 
 def test_duplicates_follow_their_canonical_capture():
@@ -185,3 +189,28 @@ def test_non_decoy_duplicate_keeps_a_decoy_canonical_in_the_partition():
     ds = dataset(d, dup)
     camps, _ = group(stub_backend(ds), Relation.campaign)
     assert _partition(camps) == {frozenset({"d-c1", "e-c1"})}
+
+
+def test_platform_conflict_is_not_cannot_link():
+    x = simple("x", (L.platform, "P1"), (L.tenant, "T1"), (L.landing, "LA"), (L.kit, "K1"))
+    y = simple("y", (L.platform, "P2"), (L.tenant, "T1"), (L.landing, "LA"), (L.kit, "K1"))
+    ds = dataset(x, y)
+    assert _partition(group(stub_backend(ds), Relation.campaign)[0]) == {frozenset({"x-c1", "y-c1"})}
+
+
+def test_candidate_pairs_use_normalised_values_and_skip_unknown():
+    from ftf.linking.grouping import candidate_pairs
+
+    x = simple("x", (L.landing, "LA  1"), (L.infrastructure, "unknown"))
+    y = simple("y", (L.landing, " LA 1"), (L.infrastructure, "unknown"))
+    z = simple("z", (L.infrastructure, "unknown"))
+    pairs = candidate_pairs(dataset(x, y, z), Relation.template)
+    assert pairs == {("x-c1", "y-c1")}
+
+
+def test_incident_with_a_duplicate_capture_stays_whole():
+    x = incident("x", [cap("x-c1")], {"x-c1": [(L.kit, "K1")]})
+    y = incident("y", [cap("y-c1", duplicate_of="x-c1"), cap("y-c2")], {"y-c1": [(L.kit, "K1")], "y-c2": [(L.offer, "O9")]})
+    ds = dataset(x, y)
+    part = _partition(group(stub_backend(ds), Relation.campaign)[0])
+    assert part == {frozenset({"x-c1", "y-c1", "y-c2"})}

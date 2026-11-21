@@ -17,8 +17,11 @@ Method (07 §2.4, D1/D2 "Assignment"):
 * Evidence capacity = sum, over the layers the item can still show, of the most bits the weight
   table gives that layer. Which layers a modality can show is read from the collection itself
   (indicator provenance -> artefact type), not hard-coded.
-* An incident whose capture is an exact duplicate (`duplicate_of`) of a collection capture is
-  assigned to the campaign holding that capture.
+* An incident whose (non-decoy) capture is an exact duplicate (`duplicate_of`) of a collection
+  capture is assigned to the campaign holding that capture; if that capture is in no campaign
+  or in several, it goes to review.
+* Under operator / campaign a tenant or owner conflict between any probe capture and a member
+  of the chosen campaign (cannot-link) sends the incident to review instead of assigning it.
 * The collection is not re-clustered.
 """
 
@@ -47,7 +50,7 @@ from ftf.contract.models import (
     linkable,
 )
 from ftf.linking.backend import Backend
-from ftf.linking.grouping import MIN_LAYERS, SINGLE_VALUED_LAYERS, canonical_map, link_id, qualifies
+from ftf.linking.grouping import CANNOT_LINK_RELATIONS, MIN_LAYERS, SINGLE_VALUED_LAYERS, canonical_map, has_conflict, link_id, qualifies
 from ftf.linking.types import METHOD, PairScore
 
 NEW_MARGIN = 3.0  # bits below tau at which an item is declared new
@@ -99,8 +102,11 @@ def link_incident(
 
     own = {c.id for c in incident.captures}
     probe = _probe(incident, canon, stage)
-    # Exact duplicates of a collection capture: the incident is that capture again.
-    dup_of = sorted({canon[c.id] for c in incident.captures if canon[c.id] not in own})
+    # Exact duplicates of a collection capture: the incident is that capture again. Decoys do
+    # not count when the incident has anything else.
+    dup_src = [c for c in incident.captures if stage[canon[c.id]] is not Stage.decoy and c.stage is not Stage.decoy] or list(incident.captures)
+    dup_of = sorted({canon[c.id] for c in dup_src if canon[c.id] not in own})
+    blocks_on_conflict = relation in CANNOT_LINK_RELATIONS
     campaigns = [c for c in base.campaigns if c.relation is relation]
     tau = be.threshold(relation)
     k = len(campaigns)
@@ -108,6 +114,7 @@ def link_incident(
     min_layers = MIN_LAYERS[relation]
 
     scored: list[tuple[Campaign, Optional[PairScore], dict[str, PairScore]]] = []
+    conflicted: set[str] = set()  # campaigns with a tenant/owner conflict against the incident
     for camp in campaigns:
         members = _members(camp, canon, stage)
         per_member: dict[str, PairScore] = {}
@@ -115,6 +122,8 @@ def link_incident(
             best_m: Optional[PairScore] = None
             for x in probe:
                 ps = be.score(x, m, relation)
+                if blocks_on_conflict and has_conflict(ps):
+                    conflicted.add(camp.id)
                 if best_m is None or _rank(ps) > _rank(best_m):
                     best_m = ps
             if best_m is not None:
@@ -125,7 +134,8 @@ def link_incident(
 
     capacity, gains = evidence_capacity(combined, incident, probe or dup_of, be.layer_caps(relation))
 
-    dup_camp = next((camp for camp in campaigns if set(dup_of) & {canon.get(m, m) for m in camp.capture_ids}), None)
+    dup_camps = [camp for camp in campaigns if set(dup_of) & {canon.get(m, m) for m in camp.capture_ids}]
+    dup_camp = dup_camps[0] if len(dup_camps) == 1 else None
     candidates = [
         Candidate(campaign_id=camp.id, score_bits=round(ps.bits, 3), note=_candidate_note(ps))
         for camp, ps, _ in scored[:TOP_CANDIDATES]
@@ -149,8 +159,14 @@ def link_incident(
         None,
     )
 
-    if dup_camp is not None:
+    if dup_of and (dup_camp is None or dup_camp.id in conflicted):
+        # A duplicate of a capture in no campaign, in several, or one whose campaign conflicts
+        # with the incident's other captures: a person decides.
+        decision, campaign_id = Decision.review, None
+    elif dup_camp is not None:
         decision, campaign_id = Decision.assign, dup_camp.id
+    elif target is not None and target.id in conflicted:
+        decision, campaign_id = Decision.review, None
     elif target is not None:
         decision, campaign_id = Decision.assign, target.id
         if all(c.campaign_id != target.id for c in candidates):
@@ -163,7 +179,10 @@ def link_incident(
 
     note = _note(relation, best, tau, bar, k, capacity, gains, best_ps, min_layers)
     if dup_of:
-        note = f"exact duplicate of {', '.join(dup_of)}; " + note
+        where = f"campaign {dup_camp.id}" if dup_camp is not None else f"{len(dup_camps)} campaigns"
+        note = f"exact duplicate of {', '.join(dup_of)} ({where}); " + note
+    if decision is Decision.review and conflicted & {c.id for c in [target, dup_camp] if c is not None}:
+        note = "tenant/owner conflict with the best campaign; " + note
     assignment = Assignment(
         incident_id=incident.id,
         candidates=candidates,

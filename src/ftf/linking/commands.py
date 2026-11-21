@@ -138,12 +138,28 @@ def run_assign(args: argparse.Namespace) -> int:
     if not any(c.relation is relation for c in base.campaigns):
         print(f"ftf assign: {args.collection} has no {relation.value} campaigns; run `ftf link` with that relation first", file=sys.stderr)
         return 2
-    results = [link_incident(base, inc, relation) for inc in new.incidents]
-    out = combine(base, list(new.incidents))
-    data = out.model_dump(mode="json")
-    data["links"] += [l.model_dump(mode="json") for r in results for l in r.links]
-    data["assignments"] += [r.assignment.model_dump(mode="json") for r in results]
-    out = Dataset.model_validate(data)
+    # New incidents may duplicate each other's captures (`duplicate_of` points at the smallest id):
+    # add them one at a time, each after the captures it points at, so each one validates.
+    known = {c.id for i in base.incidents for c in i.captures}
+    pending = list(new.incidents)
+    results = []
+    current = base
+    while pending:
+        ready = [i for i in pending if all(c.duplicate_of is None or c.duplicate_of in known or c.duplicate_of in {x.id for x in i.captures} for c in i.captures)]
+        if not ready:
+            missing = sorted({c.duplicate_of for i in pending for c in i.captures if c.duplicate_of and c.duplicate_of not in known})
+            print(f"ftf assign: duplicate_of points at unknown captures: {', '.join(missing)}", file=sys.stderr)
+            return 2
+        for inc in ready:
+            res = link_incident(current, inc, relation)
+            results.append(res)
+            data = combine(current, [inc]).model_dump(mode="json")
+            data["links"] += [l.model_dump(mode="json") for l in res.links]
+            data["assignments"] += [res.assignment.model_dump(mode="json")]
+            current = Dataset.model_validate(data)
+            known |= {c.id for c in inc.captures}
+            pending.remove(inc)
+    out = current
     _write(out, args.out)
     counts = Counter(r.assignment.decision.value for r in results)
     print(f"{len(results)} incidents ({relation.value}): " + ", ".join(f"{k} {v}" for k, v in sorted(counts.items())) + f" -> {args.out}")

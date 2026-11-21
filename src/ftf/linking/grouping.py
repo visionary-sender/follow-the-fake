@@ -1,10 +1,12 @@
-"""One partition of the captures per relation, with cannot-link on conflicting single-valued ids.
+"""One partition of the captures per relation, with cannot-link on conflicting tenant / owner ids.
 
 Method (07 §1.8, D2 "Linking / clustering"):
 
 * Candidate pairs come from an inverted index over linkable indicator values: two captures are
-  scored only if they share at least one value, or (operator / campaign relations) both carry a
-  single-valued id (platform, tenant, owner) so the ledger can report a conflict.
+  scored only if they share at least one value (compared in the ledger's normalised form), or
+  (operator / campaign relations) both carry a tenant or owner id so the ledger can report a
+  conflict. Cannot-link = a tenant/owner conflict (`ledger.has_private_conflict`); a platform
+  conflict only costs bits, since one operator can run several platforms.
 * An edge qualifies when bits >= tau and (>= `MIN_LAYERS[relation]` positive layers or a live
   operator-private id). Operator, campaign and tracking-account links need two layers, so one
   copied static id cannot make them. Template and ecosystem need one: a kit is by itself the
@@ -19,8 +21,11 @@ Method (07 §1.8, D2 "Linking / clustering"):
 * Non-decoy captures of one incident are one ad's redirect chain: they start in one unit
   (must-link), unless two of them conflict. Between units the best capture pair counts
   (D1: max over members). A decoy capture is what the cloaker shows non-targets, so it is
-  never must-linked to its incident: it stands alone and joins a cluster only on its own
-  evidence, and cannot pull its incident anywhere.
+  never must-linked to its incident. Under operator / campaign it clusters only with other
+  decoys (cannot-link to non-decoys), so it cannot pull its incident into a second campaign;
+  under template / tracking account / ecosystem it joins a cluster on its own evidence.
+  Must-link groups use canonical capture ids, so an incident whose capture duplicates another
+  incident's capture stays in one piece (and joins that incident).
 * Every cluster with at least one non-decoy capture (counting duplicates) becomes a
   `Campaign`, singletons included, so each relation's campaigns are a full partition of the
   non-decoy captures and assignment can match a new item to a collection item that has no
@@ -45,10 +50,13 @@ from ftf.contract.models import (
     linkable,
 )
 from ftf.linking.backend import Backend
+from ftf.linking.ledger import has_private_conflict, normalise
 from ftf.linking.types import PairScore
+from ftf.linking.weights import IGNORED_VALUES
 
 ALL_RELATIONS: tuple[Relation, ...] = tuple(Relation)
-SINGLE_VALUED_LAYERS = frozenset({Layer.platform, Layer.tenant, Layer.owner})
+SINGLE_VALUED_LAYERS = frozenset({Layer.platform, Layer.tenant, Layer.owner})  # conflicts shown in notes
+PRIVATE_SINGLE_LAYERS = frozenset({Layer.tenant, Layer.owner})  # conflicts that are cannot-link
 CANNOT_LINK_RELATIONS = frozenset({Relation.operator, Relation.campaign})
 MIN_LAYERS: dict[Relation, int] = {
     Relation.template: 1,
@@ -66,7 +74,8 @@ def qualifies(ps: PairScore, tau: float, min_layers: int = 2) -> bool:
 
 
 def has_conflict(ps: PairScore) -> bool:
-    return any(r.status is EvidenceStatus.conflict and r.layer in SINGLE_VALUED_LAYERS for r in ps.rows)
+    """Cannot-link: a tenant or owner conflict (not platform)."""
+    return has_private_conflict(ps)
 
 
 def _pair(a: str, b: str) -> frozenset[str]:
@@ -97,14 +106,30 @@ def cluster(
             best[key] = ps
     cannot = {p for p in cannot_link if len(p) == 2}
 
-    # Units: must-link groups, split greedily where two members are cannot-linked.
+    # Units: must-link groups (overlapping groups are joined), split greedily where two members
+    # are cannot-linked.
+    parent: dict[str, str] = {}
+
+    def find(x: str) -> str:
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            x = parent[x]
+        return x
+
+    for group_ in must_link:
+        ms = sorted(set(group_) & node_set)
+        for m in ms[1:]:
+            ra, rb = find(ms[0]), find(m)
+            if ra != rb:
+                parent[max(ra, rb)] = min(ra, rb)
+    joined: dict[str, list[str]] = defaultdict(list)
+    for n in sorted(parent):
+        joined[find(n)].append(n)
     unit_of: dict[str, int] = {}
     units: list[list[str]] = []
-    for group_ in must_link:
+    for root in sorted(joined):
         local: list[int] = []
-        for n in sorted(set(group_) & node_set):
-            if n in unit_of:
-                continue
+        for n in joined[root]:
             for ui in local:
                 if not any(_pair(n, m) in cannot for m in units[ui]):
                     units[ui].append(n)
@@ -202,8 +227,11 @@ def candidate_pairs(ds: Dataset, relation: Relation, nodes: Optional[set[str]] =
         cid = canon.get(ind.capture_id, ind.capture_id)
         if nodes is not None and cid not in nodes:
             continue
-        postings[(ind.layer.value, ind.kind, ind.value)].add(cid)
-        if ind.layer in SINGLE_VALUED_LAYERS:
+        norm = normalise(ind.value, ind.layer)
+        if not norm or norm.casefold() in IGNORED_VALUES:
+            continue
+        postings[(ind.layer.value, ind.kind, norm)].add(cid)
+        if ind.layer in PRIVATE_SINGLE_LAYERS:
             buckets[(ind.layer.value, ind.kind)].add(cid)
     pairs: set[tuple[str, str]] = set()
     lists = [p for p in postings.values() if 2 <= len(p) <= HUB_POSTINGS]
@@ -244,7 +272,14 @@ def group(ctx: Any, relation: Relation = Relation.campaign) -> tuple[list[Campai
     cannot: set[frozenset[str]] = set()
     if relation in CANNOT_LINK_RELATIONS:
         cannot = {_pair(ps.a, ps.b) for ps in scores if has_conflict(ps)}
-    must = [[c.id for c in i.captures if c.id in nodes and c.stage is not Stage.decoy] for i in ds.incidents]
+        # Decoys cluster only with decoys here: what a cloaker shows non-targets says nothing
+        # about who runs the campaign, and must not pull its incident into a second one.
+        decoys = {n for n in nodes if captures[n].stage is Stage.decoy}
+        cannot |= {_pair(ps.a, ps.b) for ps in scores if (ps.a in decoys) != (ps.b in decoys)}
+    must = [
+        [canon[c.id] for c in i.captures if c.stage is not Stage.decoy and captures[canon[c.id]].stage is not Stage.decoy]
+        for i in ds.incidents
+    ]
 
     min_layers = MIN_LAYERS[relation]
     clusters = cluster(nodes, scores, tau, cannot, must, min_layers)
