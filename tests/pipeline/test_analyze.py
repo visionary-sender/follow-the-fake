@@ -5,6 +5,7 @@ import pytest
 
 from ftf.contract import Dataset, Decision
 from ftf.contract.fixture import fixture_dir, load_fixture
+from ftf.ingest import ids
 from ftf.pipeline import AnalysisInput, analyze, guess_kind
 from pipeline_synthetic import synthetic_base
 
@@ -63,7 +64,7 @@ def test_file_inputs_are_stored_hashed_and_reviewed(tmp_path, kind, name, data):
     res = analyze(AnalysisInput(kind=kind, path=src, name=name), synthetic_base(), run_dir=run)
     assert res.ok, res.stages
     assert all(s.status in STATUSES for s in res.stages)
-    assert res.incident.id == f"input:{hashlib.sha256(data).hexdigest()[:12]}"
+    assert res.incident.id == ids.input_incident_id([hashlib.sha256(data).hexdigest()])
     (art,) = res.incident.captures[0].artefacts
     assert art.sha256 == hashlib.sha256(data).hexdigest()
     assert (res.input_root / art.path).read_bytes() == data and res.input_root == run / "input"
@@ -100,8 +101,9 @@ def test_case_folder_is_hashed_in_place(tmp_path):
     (case / "page.html").write_bytes(b"<html></html>")
     (case / "sub" / "shot.png").write_bytes(b"png")
     res = analyze(AnalysisInput(kind="dataset_item", path=case), synthetic_base(), run_dir=tmp_path / "run")
-    types = sorted(a.type.value for a in res.incident.captures[0].artefacts)
-    assert types == ["html", "screenshot"]
+    assert res.ok, res.stages  # ingestion splits the folder into captures (sub-folder = its own capture)
+    types = sorted(a.type.value for c in res.incident.captures for a in c.artefacts)
+    assert types == ["ad_screenshot", "html"]
     _valid(res)
 
 
