@@ -385,7 +385,10 @@ def build_corpus(
     if lists:
         pfetched = read_fetch_dirs(root, picked_fetch_dirs)
         for lst in lists:
-            for p in read_picked(Path(lst)):
+            lp = Path(lst)
+            if not lp.is_absolute() and not lp.exists():
+                lp = root / lp  # lists kept inside the batch directory
+            for p in read_picked(lp):
                 fc = pfetched.get(p.url)
                 if fc is None:
                     continue

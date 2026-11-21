@@ -113,7 +113,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     b.add_argument("--scanner", help="subdir with the scanner snapshot (queue.jsonl, runs/, creatives/)")
     b.add_argument("--run", action="append", help="keep only these scanner run ids (repeatable)")
     b.add_argument("--fetch", action="append", help="subdir of `ftf fetch` output for queue targets")
-    b.add_argument("--picked", action="append", help="hand-picked must-not-link TSV list (repeatable)")
+    b.add_argument("--picked", action="append", help="hand-picked must-not-link TSV list, relative to cwd or --root (repeatable)")
     b.add_argument("--picked-fetch", action="append", help="subdir of `ftf fetch` output for --picked")
     b.add_argument("--victim-fetch", action="append", help="subdir of `ftf fetch --profile victim-pl-mobile` output (repeatable)")
     b.set_defaults(func=_build)

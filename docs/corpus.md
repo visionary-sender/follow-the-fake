@@ -39,6 +39,19 @@ The manifest has the same value.
 | `bare_domain` | a CERT Polska list entry with no live page: not fetched, dead, or cloaked; also an ad lander that was cloaked or dead | incident `certpl:<register id>`, capture `certpl:<id>:c1` | none; the domain is a `landing_domain` indicator, and the fetch verdict is in the manifest |
 | `must_not_link` | a real page of an impersonated outlet, bank, brand or public figure | the fetcher's own incident `fetch:<capture_id>` | as for `fetched_landing` |
 
+A fifth value, `must_not_link_blocked`, marks a hand-picked real page that the fetcher could not
+load (e.g. tvn24.pl's HTTP 403). It is kept as honest data, but it is not a distractor, because
+its capture shows an error page.
+
+**Victim-profile re-fetch.** Every batch-0 URL whose first verdict was `bot_wall`, `decoy` or
+`empty` was fetched once more with HACK-17's `--profile victim-pl-mobile` (a Polish phone
+browser). Meta items also got `--referer https://l.facebook.com/ --fbclid`. Both captures are kept.
+The second one is `adlib:<id>:lander-victim` for ads and `<incident>:victim` otherwise. It is
+tagged `corpus_profile = victim-pl-mobile` and has its own `corpus_kind` from its own verdict. The
+manifest has `victim_capture_id`, `victim_outcome`, `victim_category`, `victim_final_url` and
+`victim_flipped_to_live`. `summary.json` → `victim_profile` counts the default → victim verdict
+pairs. A CERT domain that loads only under the victim profile counts as `fetched_landing`.
+
 An ad record's incident-level kind stays `ad_record`. Its lander capture is tagged
 `fetched_landing` if the page loaded, otherwise `bare_domain`.
 
