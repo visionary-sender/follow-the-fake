@@ -12,7 +12,7 @@ landed. Owners: edit your adapter here when your public call changes; keep it on
 | link/assign | Linking (HACK-21/22) | `ftf.linking.link_incident(base, incident)` |
 
 Without a library the fallback keeps the result valid: the input becomes one capture of a new
-incident (ad-hoc ids `input:<sha12>`, see `adhoc_ids`), the modalities it lacks are listed as
+incident (ad-hoc ids from `ftf.ingest.ids`, see `adhoc_ids`), the modalities it lacks are listed as
 `missing` with a reason, and the decision is `review` with a note. A base item
 (`dataset_item` with a base incident id) reuses the base's precomputed indicators, links and
 assignment (the fixture backend).
@@ -48,6 +48,7 @@ from ftf.contract import (
     Observed,
     Stage,
 )
+from ftf.ingest import ids
 from ftf.pipeline.analyze import AnalysisInput, SimilarItem
 
 METHOD = "ftf-pipeline@0.1"
@@ -123,14 +124,13 @@ def _safe_name(name: str) -> str:
 # -- ids (Ingestion, HACK-9, owns the scheme; see HACK-41) -----------------------------------
 
 
-def adhoc_ids(digest: str) -> tuple[str, str]:
-    """(incident id, capture id) of an ad-hoc input: `input:<sha12>` and `input:<sha12>:c1`.
+def adhoc_ids(digests_or_url: list[str] | str) -> tuple[str, str]:
+    """(incident id, capture id) of an input ingestion did not handle: `input:<sha12>` and `…:c1`.
 
-    Minted by the rule posted on HACK-9/HACK-41 for inputs ingestion did not handle.
-    TODO(HACK-9): call `ftf.ingest.ids` here once it is on main; nothing else mints ids.
+    `ftf.ingest.ids` owns the rule: sha12 over the sorted artefact sha256s, or over the URL.
     """
-    inc_id = f"input:{digest[:12]}"
-    return inc_id, f"{inc_id}:c1"
+    inc_id = ids.input_incident_id(digests_or_url)
+    return inc_id, ids.capture_id(inc_id, ids.SINGLE_CAPTURE_KEY)
 
 
 # -- fallback incident ------------------------------------------------------------------------
@@ -140,8 +140,10 @@ def raw_root() -> Path:
     return Path(os.environ.get("FTF_RAW_ROOT") or "/data/raw")
 
 
-def _store_input(ctx: RunContext) -> tuple[list[tuple[Path, str, ArtefactType]], str]:
-    """Copy (or, for a case folder, list) the input bytes. Returns (path, rel, type) and a digest.
+def _store_input(ctx: RunContext) -> tuple[list[tuple[Path, str, ArtefactType]], list[str] | str]:
+    """Copy (or, for a case folder, list) the input bytes. Returns (path, rel, type) and the id key.
+
+    The id key is the URL for a URL input, else the artefact sha256s (`ftf.ingest.ids` rule).
 
     `rel` is relative to `ctx.input_root` (the per-run input dir, or the case folder's root).
     """
@@ -154,8 +156,7 @@ def _store_input(ctx: RunContext) -> tuple[list[tuple[Path, str, ArtefactType]],
             if r.is_relative_to(root)  # nothing reached through a symlinked directory outside the root
         )[:MAX_FOLDER_FILES]
         out = [(p, p.relative_to(root).as_posix(), _FILE_TYPES.get(p.suffix.lower(), ArtefactType.asset)) for p in files]
-        digest = hashlib.sha256("\n".join(f"{rel}:{sha256_file(p)}" for p, rel, _ in out).encode()).hexdigest()
-        return out, digest
+        return out, [sha256_file(p) for p, _, _ in out]
     in_dir = ctx.run_dir / "input"
     in_dir.mkdir(parents=True, exist_ok=True)
     if inp.kind in ("url", "keyword") or inp.kind == "dataset_item":
@@ -163,7 +164,8 @@ def _store_input(ctx: RunContext) -> tuple[list[tuple[Path, str, ArtefactType]],
         target = in_dir / name
         target.write_text((inp.text or "").strip() + "\n", encoding="utf-8")
         typ = ArtefactType.url if inp.kind == "url" else ArtefactType.text
-        return [(target, name, typ)], sha256_file(target)
+        key = (inp.text or "").strip() if inp.kind == "url" else [sha256_file(target)]
+        return [(target, name, typ)], key
     target = _copy_upload(ctx)
     ext = target.suffix.lower()
     if inp.kind == "media":
@@ -175,7 +177,7 @@ def _store_input(ctx: RunContext) -> tuple[list[tuple[Path, str, ArtefactType]],
             "html": ArtefactType.html,
             "mhtml": ArtefactType.mhtml,
         }[inp.kind]
-    return [(target, target.name, typ)], sha256_file(target)
+    return [(target, target.name, typ)], [sha256_file(target)]
 
 
 def _copy_upload(ctx: RunContext) -> Path:
@@ -198,11 +200,11 @@ def _missing_reason(ctx: RunContext, modality: ArtefactType) -> str:
 
 
 def _fallback_incident(ctx: RunContext) -> Incident:
-    stored, digest = _store_input(ctx)
-    inc_id, cap_id = adhoc_ids(digest)
+    stored, key = _store_input(ctx)
+    inc_id, cap_id = adhoc_ids(key)
     artefacts = []
-    for n, (path, rel, typ) in enumerate(stored, start=1):
-        artefacts.append(Artefact(id=f"{cap_id}:a{n}", type=typ, path=rel, sha256=sha256_file(path), size=path.stat().st_size))
+    for path, rel, typ in stored:
+        artefacts.append(Artefact(id=ids.artefact_id(cap_id, rel), type=typ, path=rel, sha256=sha256_file(path), size=path.stat().st_size))
     present = {a.type for a in artefacts}
     missing = []
     for modality in FULL_REPORT:
@@ -375,8 +377,7 @@ def finish(ctx: RunContext) -> None:
         try:
             ctx.incident = _fallback_incident(ctx)
         except Exception as exc:  # e.g. an unreadable input file: still return a valid result
-            digest = hashlib.sha256(f"{ctx.inp.kind}:{ctx.inp.label}".encode()).hexdigest()
-            inc_id, cap_id = adhoc_ids(digest)
+            inc_id, cap_id = adhoc_ids(f"{ctx.inp.kind}:{ctx.inp.label}")
             ctx.incident = Incident(id=inc_id, source="submitted", source_ref=ctx.inp.label[:300],
                                     captures=[Capture(id=cap_id, stage=Stage.unknown)])
             ctx.notes.append(f"input could not be stored: {exc.__class__.__name__}: {exc}")
