@@ -1,0 +1,92 @@
+{
+  "about": "Public values that say nothing about who runs a scam. Read by ftf.indicators._stoplist; the matching rules are in that module's docstring.",
+  "hosts": {
+    "about": "Public CDNs, library hosts, analytics/ad SDK hosts and anycast fronts. A host matches the entry or any subdomain of it.",
+    "cdn": [
+      "cdn.jsdelivr.net", "fastly.jsdelivr.net", "cdnjs.cloudflare.com", "unpkg.com", "code.jquery.com", "ajax.googleapis.com",
+      "ajax.aspnetcdn.com", "stackpath.bootstrapcdn.com", "maxcdn.bootstrapcdn.com", "cdn.skypack.dev", "esm.sh", "cdn.tailwindcss.com",
+      "use.fontawesome.com", "kit.fontawesome.com", "ka-f.fontawesome.com", "fonts.googleapis.com", "fonts.gstatic.com", "www.gstatic.com",
+      "ssl.gstatic.com", "cct.google", "polyfill.io", "cdn.polyfill.io"
+    ],
+    "sdk": [
+      "connect.facebook.net", "www.facebook.com", "facebook.com", "graph.facebook.com", "static.xx.fbcdn.net", "www.googletagmanager.com",
+      "www.google-analytics.com", "region1.google-analytics.com", "analytics.google.com", "stats.g.doubleclick.net", "googleads.g.doubleclick.net",
+      "www.googleadservices.com", "pagead2.googlesyndication.com", "td.doubleclick.net", "www.google.com", "analytics.tiktok.com",
+      "sc-static.net", "tr.snapchat.com", "static.ads-twitter.com", "analytics.twitter.com", "snap.licdn.com", "bat.bing.com",
+      "www.clarity.ms", "c.clarity.ms", "mc.yandex.ru", "cdn.taboola.com", "trc.taboola.com", "q.quora.com", "challenges.cloudflare.com",
+      "static.cloudflareinsights.com", "www.youtube.com", "i.ytimg.com", "www.w3.org", "github.com", "vuejs.org", "npms.io", "fpjs.dev",
+      "schema.org", "ogp.me"
+    ],
+    "brands": [
+      "gazeta.pl", "static.im-g.pl", "im-g.pl", "tvn24.pl", "tvn.pl", "onet.pl", "wp.pl", "interia.pl", "polsatnews.pl", "rmf24.pl",
+      "money.pl", "bankier.pl", "businessinsider.com.pl", "pap.pl", "tvp.info", "pkobp.pl", "pekao.com.pl", "mbank.pl", "santander.pl",
+      "ing.pl", "nbp.pl", "gov.pl", "zus.pl", "inpost.pl", "orlen.pl", "amazon.com"
+    ]
+  },
+  "bare_domains": {
+    "about": "Shared hosting and cloud suffixes: stopped only when the value is exactly the suffix (a registered-domain value), never a tenant host under it.",
+    "values": [
+      "on.aws", "amazonaws.com", "cloudfront.net", "run.app", "appspot.com", "b-cdn.net", "netlify.app", "vercel.app", "pages.dev",
+      "workers.dev", "herokuapp.com", "github.io", "web.app", "firebaseapp.com", "azurewebsites.net", "blogspot.com"
+    ]
+  },
+  "ip_networks": {
+    "about": "Anycast front ends shared by unrelated sites: Cloudflare's published ranges and Meta's edge.",
+    "values": [
+      "173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22", "141.101.64.0/18", "108.162.192.0/18",
+      "190.93.240.0/20", "188.114.96.0/20", "197.234.240.0/22", "198.41.128.0/17", "162.158.0.0/15", "104.16.0.0/13",
+      "104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22", "2400:cb00::/32", "2606:4700::/32", "2803:f800::/32", "2405:b500::/32",
+      "2405:8100::/32", "2a06:98c0::/29", "2c0f:f248::/32", "57.144.0.0/14", "157.240.0.0/16", "31.13.24.0/21", "31.13.64.0/18",
+      "2a03:2880::/32"
+    ]
+  },
+  "hashes": {
+    "about": "sha256 of public library files (identified by their licence banner) and of brand assets/fonts copied from the impersonated sites.",
+    "values": {
+      "fc9a93dd241f6b045cbff0481cf4e1901becd0e12fb45166a8f17f95823f0b1a": "jquery 3.7.1",
+      "ff1523fb7389539c84c65aba19260648793bb4f5e29329d2ee8804bc37a3fe6e": "jquery 3.6.0",
+      "cbdf0712673ad94781b25c743f49d8d6135f59d76ec1c9e060b4b2e259aeb28d": "meta fbevents.js",
+      "9e4b581a7483e88873ad835a840ffaaff1c85b3be28951e12e8207a318e7776b": "meta fbevents.js",
+      "d1d447a1c635595c8e298ee070e50f6b1f18037575682160a2923a16d0dc8e2e": "meta fbevents.js",
+      "2e46a5ad4a38b8360a6d6026358242b93edc1e0770a2e0297ebfb240026df58d": "normalize.css 8.0.1",
+      "91c1bc96a19fe79a9381c52b6747f22f7af342f5ad95c43c89c951d935572d15": "normalize.css 8.0.1",
+      "f6ff782d74dcdad9d382a2df1f15704f266d628ce2fa4d762d86a92cf92151b0": "shaka-player",
+      "4e86f0e22e4771b5b8aac24c613c661806a678b1afa284d03cf6ad03d3e21a0a": "sweetalert2 11.26.25",
+      "74ca6aae5468dbc924790c3b4d219a089b90a34bad53a0f7ca3a73e73b6f5ab8": "swiper 11.2.10",
+      "985f1224c0eeec99d367a9db35e58e44b21e7eb9ce45831b15b4c108e41fd97f": "swiper 11.2.10",
+      "c22cfb6520a7fdbb738632834019acf47c78b1279462c0eb4cb83bae83ecb5a7": "fontawesome 6.5.1",
+      "ec405e0731aaf5b753307cf9416e5c673cbc1e3b8007d3001eac19840288af61": "google font oswald",
+      "52e605852c72cc2df1473df1fb7f26a3a0be58e31835bc8f33f29b1918c82cbd": "google font libre franklin",
+      "61216d8e3efe8c5a26861f8b92dc9a922645c662da95c37bf787a4a774a5c8d5": "google font libre franklin",
+      "6eb09d4194487281b52180b90b00b158db407cef4bcdb5d31f9ca48580d8066d": "google font roboto",
+      "153fc85b70298beeb1d61a5f723331649e7f23bb77302a66e61cb3e2fbdb5e79": "google font (fonts.gstatic.com)",
+      "2654f8d1261a420fc81628122bee9d494b493227e3d7d9baa4238360b92b11d3": "google font (fonts.gstatic.com)",
+      "3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62": "google font (fonts.gstatic.com)",
+      "34b9c504cab7a73e37b746343a449132e56cf7b5481af2cb81dc74dcff25c956": "google font (fonts.gstatic.com)",
+      "46281456234014ceb2a79bff447245de0f76b8d803be0738972ed374c3206c5b": "google font (fonts.gstatic.com)",
+      "4851e60df7e67b489609516bdc9f53d3ed8b6090c3e16e149350a88f172a574e": "google font (fonts.gstatic.com)",
+      "a7386f772de25b62a3a449fa5d9f3e09916b65cf6a6dfc52f5a103c276fee157": "google font (fonts.gstatic.com)",
+      "ab5c23a05e39deed14d9d8262b0dce9f024f86105a27196cad37d14a3f516e09": "google font (fonts.gstatic.com)",
+      "863e76c898d82e756fc01e7943ef740ee5015bb94f2e3ac92ff558a8a718ac53": "brand gazeta.pl favicon",
+      "d43d7492f0e97c799eea0883ce4b4dac70e0704037285661172a088f05190d99": "brand gazeta.pl logo svg"
+    }
+  },
+  "file_names": {
+    "about": "Regexes (case-insensitive, full match) over a file base name with the browser-save suffix .pobrane removed.",
+    "values": [
+      "jquery(?:[-.]\\d+(?:\\.\\d+)*)?(?:\\.slim)?(?:\\.min)?\\.js", "jquery-migrate.*\\.js", "jquery-ui.*\\.(?:js|css)",
+      "bootstrap(?:\\.bundle)?(?:\\.min)?\\.(?:js|css)", "popper(?:\\.min)?\\.js", "swiper-bundle(?:\\.min)?\\.(?:js|css)",
+      "moment(?:-with-locales)?(?:\\.min)?\\.js", "hls(?:\\.light)?(?:\\.min)?\\.js", "shaka-player.*\\.js", "lodash(?:\\.min)?\\.js",
+      "vue(?:\\.global|\\.runtime)?(?:\\.prod)?(?:\\.min)?\\.js", "axios(?:\\.min)?\\.js", "sweetalert2(?:\\.all)?(?:\\.min)?\\.(?:js|css)",
+      "normalize(?:\\.min)?\\.css", "animate(?:\\.min)?\\.css", "fontawesome(?:\\.min)?\\.(?:js|css)",
+      "lazysizes(?:\\.min)?\\.js", "slick(?:\\.min)?\\.(?:js|css)", "owl\\.carousel(?:\\.min)?\\.(?:js|css)", "gsap(?:\\.min)?\\.js",
+      "fbevents\\.js", "gtm\\.js", "saved_resource(?:\\(\\d+\\))?\\.html", "video\\d+\\.ts", "playlist\\.m3u8",
+      "\\d{1,2}\\.(?:png|jpe?g|webp|gif)"
+    ]
+  },
+  "values": {
+    "about": "Low-entropy header and parameter values (case-insensitive exact match on the whole value).",
+    "headers": ["server: cloudflare", "cloudflare", "via: 1.1 caddy", "1.1 caddy", "via: 0.0 caddy", "0.0 caddy", "server: nginx", "nginx", "server: apache", "apache"],
+    "params": ["utm_source=ig", "utm_source=fb", "utm_source=facebook", "utm_medium=paid", "geo=pl", "media_type=image", "lp=1", "offer_id=1"]
+  }
+}
