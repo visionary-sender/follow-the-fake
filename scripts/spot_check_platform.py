@@ -8,7 +8,7 @@ The expectations file is organiser-derived data, so it lives in the bucket
 (gs://follow-the-fake-data/outputs/spot-check/), never in git. Its shape:
 
     {"shared":   [["meta_pixel", ["p1", "p3"]], ...],   # nodes must share at least one value
-     "disjoint": [["meta_pixel", ["1", "p1"]], ...],    # nodes must not share any value
+     "disjoint": [["meta_pixel", ["1", "p1"]], ...],    # no two nodes may share a value
      "present":  [["meta_pixel", ["10", "p8"]], ...]}   # each node must carry a value
 
 A node is a case folder ("p3", "61") meaning the union of its captures, or a full capture id.
@@ -19,6 +19,7 @@ can go into a PR. It also reports extraction time per capture.
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import statistics
 import sys
@@ -79,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
         checks.append(("shared", kind, nodes, ok, [n for n, s in zip(nodes, sets) if not s]))
     for kind, nodes in expect.get("disjoint", []):
         sets = [values.get((n, kind), set()) for n in nodes]
-        ok = bool(sets) and all(sets) and not set.intersection(*sets)
+        ok = len(sets) >= 2 and all(sets) and all(not (a & b) for a, b in itertools.combinations(sets, 2))
         checks.append(("disjoint", kind, nodes, ok, [n for n, s in zip(nodes, sets) if not s]))
     for kind, nodes in expect.get("present", []):
         missing = [n for n in nodes if not values.get((n, kind))]

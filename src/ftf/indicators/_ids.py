@@ -69,10 +69,14 @@ class Hit:
 
 # --------------------------------------------------------------------------- access tokens
 
+# Same separators and value end as `ftf.indicators.redact`, for any `*token` key (also in a URL
+# fragment), plus bare EAA tokens after any %xx or \u00xx escape.
+_TOKEN_SEP = r"(?:=|%3D|%253D|\\u003d|\\?\"\s*:\s*\\?\"|%22%3A%22|%2522%253A%2522)"
+_TOKEN_VALUE = r"(?:(?!%2[0236]|%25|\\u00)[^&\s\"'<>#,;}\\])*"
 _TOKEN_PARAM = re.compile(
-    r"((?:^|[?&;\s\"']|%26|%3F)(?:access_token|[a-z_]*token)(?:=|%3D)|\"[a-z_]*token\"\s*:\s*\")[^&\s\"'<>#,;}%]*", re.I
+    r"((?:^|[?&;#\s\"'\\]|%26|%3F|%23|%22|%2526|%253F)(?:access_token|[a-z_]*token)" + _TOKEN_SEP + ")" + _TOKEN_VALUE, re.I
 )
-_EAA = re.compile(r"(?:(?<=%3D)|(?<=%3d)|(?<=%26)|(?<=%22)|(?<![A-Za-z0-9]))EAA[A-Za-z0-9]{10,}")
+_EAA = re.compile(r"(?:(?<=%[0-9A-Fa-f]{2})|(?<=\\u00[0-9A-Fa-f]{2})|(?<![A-Za-z0-9]))EAA[A-Za-z0-9]{10,}")
 
 
 def strip_tokens(text: str) -> str:

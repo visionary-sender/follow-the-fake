@@ -385,3 +385,23 @@ def test_strip_tokens_encoded_forms():
     tok = "EAAB" + "q9Wz" * 8
     for s in (f"%3Faccess_token%3D{tok}%26a%3D1", f'{{"access_token":"{tok}"}}', f"x%3D{tok}", f"%26{tok}"):
         assert "q9Wz" not in strip_tokens(s)
+
+
+def test_redact_and_strip_escaped_and_app_tokens():
+    from ftf.indicators import redact
+
+    tok = "EAAB" + "q9Wz" * 8
+    secret = "SeCrEt" + "q9Wz" * 4
+    leaky = [
+        f"https://g.example.test/x?access_token=123456%7C{secret}&y=1",  # app token id|secret, encoded "|"
+        f'JSON.parse("{{\\"u\\":\\"https://x.example.test/?access_token\\u003d{tok}\\"}}")',
+        f"u%3Dhttps%253A%252F%252Fa.example.test%252F%253Faccess_token%253D{tok}",
+        f"u=https%3A%2F%2Fa.example.test%2F{tok}",
+        f'{{\\"access_token\\":\\"123|{secret}\\"}}',
+        f"data=%7B%22access_token%22%3A%22123%7C{secret}%22%7D",
+    ]
+    for s in leaky:
+        assert "q9Wz" not in redact(s), s
+        assert "q9Wz" not in strip_tokens(s), s
+    assert "y=1" in redact(leaky[0])
+    assert "q9Wz" not in strip_tokens(f"https://x.example.test/cb#access_token=ya29.{secret}&state=1")
