@@ -14,6 +14,7 @@ from ftf.contract import (
     CONTRACT_VERSION,
     Assignment,
     Dataset,
+    Decision,
     Incident,
     Link,
 )
@@ -162,6 +163,15 @@ class AnalysisResult:
                 needed.add(capture_owner[dup])
 
         incidents = [self.incident] + [i for i in base.incidents if i.id in needed]
+        assignment = self.assignment
+        unknown = [c.campaign_id for c in assignment.candidates if c.campaign_id not in base_campaigns]
+        if unknown:  # e.g. a proposed new campaign: the document can only reference base campaigns
+            kept = [c for c in assignment.candidates if c.campaign_id in base_campaigns]
+            update = {"candidates": kept,
+                      "note": " ".join(x for x in (assignment.note, f"candidates not in the base left out: {', '.join(unknown)}") if x)}
+            if assignment.decision.value == "assign" and assignment.campaign_id in unknown:
+                update.update(decision=Decision.review, campaign_id=None)
+            assignment = assignment.model_copy(update=update)
         return Dataset(
             contract_version=CONTRACT_VERSION,
             name=name or f"analysis of {self.input.kind}: {self.input.label}"[:200],
@@ -169,7 +179,7 @@ class AnalysisResult:
             incidents=incidents,
             links=list(links.values()),
             campaigns=list(campaigns.values()),
-            assignments=[self.assignment],
+            assignments=[assignment],
         )
 
     def summary(self) -> dict:
@@ -226,11 +236,15 @@ def analyze(
     base: Dataset,
     *,
     offline: bool = True,
+    fetch: bool = False,
     run_dir: str | os.PathLike | None = None,
     keep_run_dir: bool = True,
 ) -> AnalysisResult:
     """Analyse one input against the campaign `base`. Never raises for stage failures.
 
+    `offline=False` allows network enrichment (registries, DNS over HTTPS); it never contacts the
+    page itself. `fetch=True` (and online) lets a URL be fetched live with `ftf.fetch`: only on the
+    sandbox VM, never on the workbench or in the demo app.
     Input bytes are copied into a per-run directory (`run_dir`, else a fresh temp dir under
     $FTF_RUN_DIR or the system temp dir), hashed with sha256 and never executed or rendered.
     """
@@ -239,7 +253,7 @@ def analyze(
     own_dir = run_dir is None
     rdir = Path(run_dir) if run_dir is not None else Path(tempfile.mkdtemp(prefix="ftf-run-", dir=_run_root()))
     rdir.mkdir(parents=True, exist_ok=True)
-    ctx = stages.RunContext(inp=inp, base=base, offline=offline, run_dir=rdir)
+    ctx = stages.RunContext(inp=inp, base=base, offline=offline, run_dir=rdir, fetch=fetch)
     reports: list[StageReport] = []
     for name, fn in stages.STAGES:
         start = time.perf_counter()

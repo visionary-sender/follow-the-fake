@@ -75,6 +75,7 @@ class RunContext:
     base: Dataset
     offline: bool
     run_dir: Path
+    fetch: bool = False  # live page fetching: sandbox only, never on the workbench or the jury's machine
     input_root: Optional[Path] = None  # artefact paths of the incident are relative to this
     incident: Optional[Incident] = None
     links: list[Link] = field(default_factory=list)
@@ -97,8 +98,12 @@ def _optional(module: str, name: str) -> Optional[Callable]:
     """`module.name` if the module is importable and has it, else None."""
     try:
         mod = importlib.import_module(module)
-    except ImportError:
-        return None
+    except ModuleNotFoundError as exc:
+        # Only "the package is not installed" means not available; a broken dependency inside
+        # an installed package is a real error and surfaces as the stage's `error` status.
+        if exc.name is not None and (module == exc.name or module.startswith(exc.name + ".")):
+            return None
+        raise
     return getattr(mod, name, None)
 
 
@@ -142,8 +147,13 @@ def _store_input(ctx: RunContext) -> tuple[list[tuple[Path, str, ArtefactType]],
     """
     inp = ctx.inp
     if inp.kind == "dataset_item" and inp.path is not None:  # a case folder: hashed in place, never copied or opened
-        files = sorted(p for p in inp.path.rglob("*") if p.is_file() and not p.is_symlink())[:MAX_FOLDER_FILES]
-        out = [(p, p.relative_to(ctx.input_root).as_posix(), _FILE_TYPES.get(p.suffix.lower(), ArtefactType.asset)) for p in files]
+        folder = inp.path.resolve()
+        root = ctx.input_root.resolve()
+        files = sorted(
+            r for r in (p.resolve() for p in folder.rglob("*") if p.is_file() and not p.is_symlink())
+            if r.is_relative_to(root)  # nothing reached through a symlinked directory outside the root
+        )[:MAX_FOLDER_FILES]
+        out = [(p, p.relative_to(root).as_posix(), _FILE_TYPES.get(p.suffix.lower(), ArtefactType.asset)) for p in files]
         digest = hashlib.sha256("\n".join(f"{rel}:{sha256_file(p)}" for p, rel, _ in out).encode()).hexdigest()
         return out, digest
     in_dir = ctx.run_dir / "input"
@@ -179,8 +189,8 @@ def _copy_upload(ctx: RunContext) -> Path:
 
 def _missing_reason(ctx: RunContext, modality: ArtefactType) -> str:
     if modality in (ArtefactType.html, ArtefactType.har) and ctx.inp.kind == "url":
-        if ctx.offline:
-            return "not fetched: offline run (live pages are fetched only from the sandbox, HACK-17)"
+        if ctx.offline or not ctx.fetch:
+            return "not fetched: live pages are fetched only from the sandbox (HACK-17)"
         return "not fetched: the fetcher (HACK-17) is not available here"
     if modality is ArtefactType.ad_library:
         return "no Ad Library entry was submitted"
@@ -214,14 +224,6 @@ def _add_indicators(incident: Incident, indicators: list[Indicator]) -> Incident
 # -- stages -----------------------------------------------------------------------------------
 
 
-def _ingest_call(paths: list[Path], root: Path) -> list[Incident]:
-    """Ingestion (HACK-9): `ftf.ingest.ingest(inputs, *, root=None, name, indicators=True) -> Dataset`."""
-    ingest_fn = _optional("ftf.ingest", "ingest")
-    if ingest_fn is None:
-        raise ModuleNotFoundError("ftf.ingest")
-    return list(ingest_fn(paths, root=root, name="analyze", indicators=True).incidents)
-
-
 def ingest(ctx: RunContext) -> tuple[str, str]:
     inp = ctx.inp
     if inp.kind == "dataset_item" and inp.path is None:
@@ -238,29 +240,35 @@ def ingest(ctx: RunContext) -> tuple[str, str]:
         ctx.incident = _fallback_incident(ctx)
         return "skipped", "a keyword has no file to ingest; stored as a text artefact"
 
+    root = ctx.input_root
     if inp.kind == "url":
-        fetch_url = None if ctx.offline else _optional("ftf.fetch", "fetch_url")
+        fetch_url = _optional("ftf.fetch", "fetch_url") if ctx.fetch and not ctx.offline else None
         if fetch_url is None:
             ctx.incident = _fallback_incident(ctx)
-            why = "offline run; live pages are fetched only from the sandbox" if ctx.offline else "the fetcher (HACK-17) is not available"
+            if not ctx.fetch or ctx.offline:
+                why = "page fetching is off; live pages are fetched only from the sandbox"
+            else:
+                why = "the fetcher (HACK-17) is not available"
             return "skipped", f"URL not fetched ({why}); stored as a URL artefact"
         fetch_dir = ctx.run_dir / "fetch"
-        fetch_url(inp.text.strip(), fetch_dir)  # HACK-17: writes a capture directory; ingestion builds the Incident
-        sources, ctx.input_root = [fetch_dir], fetch_dir
+        fetch_url(refang(inp.text), fetch_dir)  # HACK-17: writes a capture directory; ingestion builds the Incident
+        sources, root = [fetch_dir], fetch_dir
     elif inp.kind == "dataset_item":
         sources = [inp.path]
     else:
         sources = [_copy_upload(ctx)]
 
-    try:
-        incidents = _ingest_call(sources, ctx.input_root)
-    except ModuleNotFoundError:
+    ingest_fn = _optional("ftf.ingest", "ingest")
+    if ingest_fn is None:
         ctx.incident = _fallback_incident(ctx)
         return "not_available", "ingestion (HACK-9) not available: the input is stored as one capture (hashed, not parsed)"
+    # Ingestion (HACK-9): ingest(inputs, *, root=None, name, indicators=True) -> Dataset
+    incidents = list(ingest_fn(sources, root=root, name="analyze", indicators=True).incidents)
     if not incidents:
         ctx.incident = _fallback_incident(ctx)
         return "error", "ingestion returned no incident; the input is stored as one capture"
     ctx.incident = incidents[0]
+    ctx.input_root = root
     extra = f"; {len(incidents) - 1} further incident(s) ignored" if len(incidents) > 1 else ""
     return "ok", f"ingested by ftf.ingest: {len(ctx.incident.captures)} capture(s), {len(ctx.incident.indicators)} indicator(s){extra}"
 
@@ -278,9 +286,17 @@ def content_features(ctx: RunContext) -> tuple[str, str]:
     return "ok", f"{len(ctx.incident.indicators) - before} indicator(s) added"
 
 
+def refang(text: str) -> str:
+    """Undo display defanging (`hxxp`, `[.]`) so a pasted, defanged URL can be looked up."""
+    text = text.strip()
+    if text[:4].lower() == "hxxp":
+        text = "http" + text[4:]
+    return text.replace("[.]", ".").replace("[:]", ":")
+
+
 def _domains(ctx: RunContext) -> list[str]:
     if ctx.inp.kind == "url":
-        return [ctx.inp.text.strip().replace("hxxp", "http", 1).replace("[.]", ".")]
+        return [refang(ctx.inp.text)]
     return []
 
 
@@ -356,7 +372,14 @@ STAGES: list[tuple[str, Callable[[RunContext], tuple[str, str]]]] = [
 def finish(ctx: RunContext) -> None:
     """Make the result complete even when a stage failed."""
     if ctx.incident is None:
-        ctx.incident = _fallback_incident(ctx)
+        try:
+            ctx.incident = _fallback_incident(ctx)
+        except Exception as exc:  # e.g. an unreadable input file: still return a valid result
+            digest = hashlib.sha256(f"{ctx.inp.kind}:{ctx.inp.label}".encode()).hexdigest()
+            inc_id, cap_id = adhoc_ids(digest)
+            ctx.incident = Incident(id=inc_id, source="submitted", source_ref=ctx.inp.label[:300],
+                                    captures=[Capture(id=cap_id, stage=Stage.unknown)])
+            ctx.notes.append(f"input could not be stored: {exc.__class__.__name__}: {exc}")
     if ctx.assignment is None or ctx.assignment.incident_id != ctx.incident.id:
         ctx.assignment = _review(ctx.incident, "a stage failed before a decision was made; see the stage list")
         ctx.links = []

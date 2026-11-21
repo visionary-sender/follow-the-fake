@@ -62,11 +62,54 @@ def test_stage_exception_is_reported_not_raised(tmp_path, monkeypatch):
     res.to_dataset()
 
 
-def test_url_offline_never_calls_fetch(tmp_path, monkeypatch):
+def test_url_is_never_fetched_without_fetch_flag(tmp_path, monkeypatch):
     def fetch_url(*a, **k):
-        raise AssertionError("fetch called offline")
+        raise AssertionError("page fetched")
 
     _module(monkeypatch, "ftf.fetch", fetch_url=fetch_url)
     monkeypatch.chdir(tmp_path)
-    res = analyze(AnalysisInput(kind="url", text="https://x.example.com"), synthetic_base(), run_dir=tmp_path / "run", offline=True)
-    assert res.stages[0].status == "skipped" and "offline" in res.stages[0].note
+    for offline in (True, False):
+        # online enrichment alone must not open the page (enrichment itself is stubbed out here)
+        monkeypatch.setattr("ftf.pipeline.stages.enrichment", lambda ctx: ("skipped", "stub"))
+        monkeypatch.setattr("ftf.pipeline.stages.STAGES", [("ingest", __import__("ftf.pipeline.stages", fromlist=["ingest"]).ingest)])
+        res = analyze(AnalysisInput(kind="url", text="https://x.example.com"), synthetic_base(), run_dir=tmp_path / f"run{offline}", offline=offline)
+        assert res.stages[0].status == "skipped" and "sandbox" in res.stages[0].note
+
+
+def test_fetch_flag_refangs_and_ingests_fetch_dir(tmp_path, monkeypatch):
+    seen = {}
+
+    def fetch_url(url, out_dir):
+        seen["url"] = url
+        out_dir.mkdir(parents=True)
+
+    def ingest(inputs, *, root=None, name="ingest", indicators=True):
+        seen["ingest"] = (list(inputs), root)
+        return Dataset(name=name, incidents=[Incident(id="fetch:x", source="fetch", captures=[Capture(id="fetch:x:c1", stage=Stage.lander)])])
+
+    _module(monkeypatch, "ftf.fetch", fetch_url=fetch_url)
+    _module(monkeypatch, "ftf.ingest", ingest=ingest)
+    from ftf.pipeline import stages
+    ctx = stages.RunContext(inp=AnalysisInput(kind="url", text="hxxps://a[.]example[.]com/p"), base=synthetic_base(),
+                            offline=False, run_dir=tmp_path, fetch=True)
+    assert stages.ingest(ctx)[0] == "ok"
+    assert seen["url"] == "https://a.example.com/p"
+    assert seen["ingest"] == ([tmp_path / "fetch"], tmp_path / "fetch") and ctx.input_root == tmp_path / "fetch"
+
+
+def test_broken_dependency_inside_installed_package_is_an_error(tmp_path, monkeypatch):
+    import importlib
+
+    real = importlib.import_module
+
+    def fake_import(name, *a, **k):
+        if name == "ftf.ingest":
+            raise ModuleNotFoundError("No module named 'somedep'", name="somedep")
+        return real(name, *a, **k)
+
+    monkeypatch.setattr(importlib, "import_module", fake_import)
+    src = tmp_path / "p.html"
+    src.write_bytes(b"x")
+    res = analyze(AnalysisInput(kind="html", path=src), synthetic_base(), run_dir=tmp_path / "run")
+    assert res.stages[0].status == "error" and "somedep" in res.stages[0].note
+    res.to_dataset()

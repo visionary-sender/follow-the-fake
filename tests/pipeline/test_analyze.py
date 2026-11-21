@@ -89,7 +89,7 @@ def test_url_input_offline_enrichment_from_empty_cache(tmp_path, monkeypatch):
     assert enrich.status == "ok" and "offline" in enrich.note
     assert res.incident.indicators and all(i.value == "unknown" for i in res.incident.indicators)
     missing = {m.modality.value: m.reason for m in res.incident.captures[0].missing}
-    assert "offline" in missing["har"]
+    assert "sandbox" in missing["har"]
     assert not (tmp_path / "data").exists()  # no cache file created as a side effect
     _valid(res)
 
@@ -153,3 +153,35 @@ def test_fixture_screenshot_and_keyword_inputs(tmp_path):
         res = analyze(inp, base, run_dir=tmp_path / inp.kind)
         assert res.ok and res.assignment.decision is Decision.review
         _valid(res)
+
+
+def test_relative_case_folder(tmp_path, monkeypatch):
+    (tmp_path / "case").mkdir()
+    (tmp_path / "case" / "page.html").write_bytes(b"<html></html>")
+    monkeypatch.chdir(tmp_path)
+    res = analyze(AnalysisInput(kind="dataset_item", path="case"), synthetic_base(), run_dir=tmp_path / "run")
+    assert res.ok, res.stages
+    assert [a.path for a in res.incident.captures[0].artefacts] == ["case/page.html"]
+    _valid(res)
+
+
+def test_to_dataset_drops_candidates_outside_the_base(tmp_path, monkeypatch):
+    import sys
+    import types
+
+    from ftf.contract import Assignment, Candidate
+
+    def link_incident(base, incident, relation=None):
+        a = Assignment(incident_id=incident.id, candidates=[Candidate(campaign_id="new:1", score_bits=11.0),
+                                                            Candidate(campaign_id="C1", score_bits=3.0)],
+                       decision=Decision.assign, campaign_id="new:1", evidence_capacity_bits=9.0, method="fake@0")
+        return types.SimpleNamespace(assignment=a, links=[])
+
+    mod = types.ModuleType("ftf.linking")
+    mod.link_incident = link_incident
+    monkeypatch.setitem(sys.modules, "ftf.linking", mod)
+    res = analyze(AnalysisInput(kind="keyword", text="x"), synthetic_base(), run_dir=tmp_path)
+    ds = _valid(res)
+    (a,) = ds.assignments
+    assert [c.campaign_id for c in a.candidates] == ["C1"]
+    assert a.decision is Decision.review and "new:1" in a.note

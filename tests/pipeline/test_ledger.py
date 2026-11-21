@@ -6,9 +6,8 @@ from pipeline_synthetic import synthetic_base
 
 def test_defang_and_display():
     assert ledger.defang("https://a.example.com/x") == "hxxps://a[.]example[.]com/x"
-    assert ledger.defang("shop.example.pl") == "shop[.]example[.]pl"
-    assert ledger.defang("1920x1080") == "1920x1080"
-    assert ledger.defang("12.5") == "12.5"
+    assert ledger.display_value("shop.example.pl") == "shop[.]example[.]pl"
+    assert ledger.display_value("1920x1080") == "1920x1080"
     long = ledger.display_value("x" * 200)
     assert len(long) == ledger.MAX_VALUE_CHARS and long.endswith("…")
     assert ledger.display_value("a\nb") == "a b"
@@ -33,9 +32,10 @@ def test_ledger_rows_statuses_and_seen_in(tmp_path):
 def test_relation_sentence_and_tier():
     base = synthetic_base()
     strong, weak = base.links
-    assert ledger.relation_sentence(strong) == "same campaign: yes, +12.0 bits (Strong; 1 shared layer(s))"
-    assert ledger.tier(weak) == ledger.INSUFFICIENT
-    assert ledger.relation_sentence(weak).startswith("same ecosystem: insufficient alone, +2.0 bits")
+    t = ledger.review_threshold_bits(base)
+    assert ledger.relation_sentence(strong, t) == "same campaign: yes, +12.0 bits (Strong; 1 shared layer(s))"
+    assert ledger.tier(weak, t) == ledger.INSUFFICIENT
+    assert ledger.relation_sentence(weak, t).startswith("same ecosystem: insufficient alone, +2.0 bits")
 
 
 def test_what_would_change():

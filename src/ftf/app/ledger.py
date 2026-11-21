@@ -1,18 +1,27 @@
 """Evidence ledger and result tables as plain data (no Streamlit), for the app, HACK-31 and the README.
 
-Vocabulary follows the CERT Polska evidence tiers NASK analysts use: link level `strict` is
-**Strong**, `medium` **Medium**, `loose` **Supplementary**; a score below the review threshold is
-**Insufficient alone**. Every value taken from a capture goes through `display_value`, which
+Vocabulary, `defang` and `tier` come from `ftf.app.relations` (one copy, shared with the
+Campaigns page): CERT Polska evidence tiers Strong / Medium / Supplementary, and
+"Insufficient alone" below the review threshold. Every value taken from a capture goes through `display_value`, which
 defangs URLs and domains (`hxxp`, `[.]`) and truncates, so nothing shown is clickable.
 """
 
 from __future__ import annotations
 
-import re
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Iterable, Optional, Sequence
 
+from ftf.app.relations import (
+    COLLECTOR_NOTE,
+    INSUFFICIENT,
+    LEVEL_LABEL as LEVEL_LABELS,
+    MISSING_NOTE,
+    RELATION_LABEL as RELATION_LABELS,
+    defang,
+    review_threshold_bits,
+)
+from ftf.app.relations import tier as level_tier
 from ftf.contract import (
     Assignment,
     Dataset,
@@ -26,15 +35,6 @@ from ftf.contract import (
     Relation,
 )
 
-LEVEL_LABELS = {LinkLevel.strict: "Strong", LinkLevel.medium: "Medium", LinkLevel.loose: "Supplementary"}
-INSUFFICIENT = "Insufficient alone"
-RELATION_LABELS = {
-    Relation.template: "same template",
-    Relation.tracking_account: "same tracking account",
-    Relation.operator: "same operator",
-    Relation.campaign: "same campaign",
-    Relation.ecosystem: "same ecosystem",
-}
 STATUS_LABELS = {
     EvidenceStatus.shared: "shared",
     EvidenceStatus.conflict: "conflict",
@@ -43,12 +43,13 @@ STATUS_LABELS = {
     EvidenceStatus.collector_excluded: "collector-excluded",
 }
 STATUS_NOTES = {
-    EvidenceStatus.missing: "not available — not a penalty",
-    EvidenceStatus.collector_excluded: "describes the collector, not the scam",
+    EvidenceStatus.missing: MISSING_NOTE,
+    EvidenceStatus.collector_excluded: COLLECTOR_NOTE,
     EvidenceStatus.hub_subsumed: "common hub value; counted at a coarser level",
 }
 DECISION_LABELS = {"assign": "Assign to campaign", "new": "New campaign", "review": "Needs review"}
-# Display thresholds; the linking engine owns the real ones (the fixture uses 10 / 4 bits).
+# Display ranges for candidate campaigns; the linking engine owns the real thresholds
+# (the fixture uses 10 / 4 bits). Single links use `relations.review_threshold_bits(base)`.
 REVIEW_THRESHOLD_BITS = 4.0
 ASSIGN_THRESHOLD_BITS = 10.0
 # Upper bound of what each missing input could add, by layer. Illustrative priors (method doc §D2)
@@ -63,18 +64,6 @@ MODALITY_BITS = {
     "ad_library": (3.0, "distribution account layer"),
 }
 MAX_VALUE_CHARS = 60
-
-_URLISH = re.compile(r"(?i)\b(?:https?|ftp)://|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b")
-
-
-def defang(text: str) -> str:
-    """`https://a.example/x` → `hxxps://a[.]example/x`. Leaves text without URLs or domains alone."""
-    if not _URLISH.search(text):
-        return text
-    out = re.sub(r"(?i)\bhttp", "hxxp", text)
-    out = re.sub(r"(?i)\bftp://", "fxp://", out)
-    return re.sub(r"(?<=[A-Za-z0-9-])\.(?=[A-Za-z0-9-])", "[.]", out)
-
 
 def truncate(text: str, limit: int = MAX_VALUE_CHARS) -> str:
     text = " ".join(text.split())
@@ -94,11 +83,9 @@ def fmt_bits(bits: Optional[float]) -> str:
     return f"{bits:+.1f} bits"
 
 
-def tier(link: Link, review_threshold: float = REVIEW_THRESHOLD_BITS) -> str:
-    """Evidence tier label of a link."""
-    if link.score_bits is not None and link.score_bits < review_threshold:
-        return INSUFFICIENT
-    return LEVEL_LABELS[link.level]
+def tier(link: Link, threshold: float) -> str:
+    """Evidence tier label of a link (`relations.tier` applied to the link)."""
+    return level_tier(link.level, link.score_bits, threshold)
 
 
 def _indicator_text(ind: Indicator) -> str:
@@ -173,10 +160,10 @@ def ledger_rows(link: Link, dataset: Dataset, population: Dataset | None = None)
     return rows
 
 
-def relation_sentence(link: Link, review_threshold: float = REVIEW_THRESHOLD_BITS) -> str:
-    """e.g. 'same template: yes, +5.5 bits (Medium)'."""
+def relation_sentence(link: Link, threshold: float) -> str:
+    """e.g. 'same template: yes, +5.5 bits (Medium; 2 shared layer(s))'. `threshold`: see `review_threshold_bits`."""
     label = RELATION_LABELS[link.relation]
-    t = tier(link, review_threshold)
+    t = tier(link, threshold)
     verdict = "insufficient alone" if t == INSUFFICIENT else "yes"
     positive = sum(1 for e in link.evidence if e.status is EvidenceStatus.shared and e.bits > 0)
     conflicts = sum(1 for e in link.evidence if e.status is EvidenceStatus.conflict)
@@ -271,6 +258,7 @@ def decision_summary(assignment: Assignment, campaigns: Dataset) -> dict:
 def similar_rows(similar: Iterable, base: Dataset) -> list[dict]:
     """'Similar incidents' table from `AnalysisResult.similar`."""
     sources = {i.id: i.source for i in base.incidents}
+    threshold = review_threshold_bits(base)
     return [
         {
             "incident": s.incident_id,
@@ -279,7 +267,7 @@ def similar_rows(similar: Iterable, base: Dataset) -> list[dict]:
             "our capture": s.own_capture_id,
             "bits": None if s.score_bits is None else round(s.score_bits, 2),
             "relation": RELATION_LABELS[Relation(s.relation)],
-            "tier": LEVEL_LABELS[LinkLevel(s.level)] if s.score_bits is None or s.score_bits >= REVIEW_THRESHOLD_BITS else INSUFFICIENT,
+            "tier": level_tier(LinkLevel(s.level), s.score_bits, threshold),
         }
         for s in similar
     ]

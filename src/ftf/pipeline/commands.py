@@ -33,7 +33,8 @@ def register_analyze(subparsers: argparse._SubParsersAction) -> None:
     parser.add_argument("input", metavar="INPUT", help="URL, keyword, file, case folder or base incident id")
     parser.add_argument("--kind", choices=INPUT_KINDS, help="input kind (default: guessed from INPUT)")
     parser.add_argument("--base", type=Path, help="campaign base, a contract dataset.json (default: $FTF_BASE, else the fixture)")
-    parser.add_argument("--online", action="store_true", help="allow network enrichment and fetching (default: offline; FTF_OFFLINE=1 forces offline)")
+    parser.add_argument("--online", action="store_true", help="allow network enrichment: registries, DNS over HTTPS (default: offline; FTF_OFFLINE=1 forces offline)")
+    parser.add_argument("--fetch", action="store_true", help="with --online, fetch a URL input live with ftf fetch; sandbox VM only, never the workbench")
     parser.add_argument("--out", type=Path, help="write the result as a contract Dataset (JSON) here")
     parser.set_defaults(func=run_analyze)
 
@@ -67,8 +68,13 @@ def run_analyze(args: argparse.Namespace) -> int:
         print(f"ftf analyze: {exc}", file=sys.stderr)
         return USAGE_EXIT
     offline = not args.online or _env_flag("FTF_OFFLINE")
-    result = analyze(inp, base, offline=offline)
-    dataset = result.to_dataset()
+    result = analyze(inp, base, offline=offline, fetch=args.fetch)
+    try:
+        dataset = result.to_dataset()
+    except ValueError as exc:
+        print(f"ftf analyze: the result is not a valid contract dataset: {exc}", file=sys.stderr)
+        print(json.dumps(result.summary(), indent=2, ensure_ascii=False))
+        return ERROR_EXIT
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(dataset.to_json() + "\n", encoding="utf-8")

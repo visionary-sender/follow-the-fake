@@ -67,18 +67,29 @@ with st.sidebar:
     st.text(f"{'FTF_BASE' if source else 'fixture'}: {base.name}")
     st.text(f"{len(base.incidents)} incidents, {len(base.links)} links, {len(base.campaigns)} campaigns")
     online = st.checkbox("Online enrichment", value=False, key="online",
-                         help="Off by default. Live pages are fetched only from the sandbox, never from here.")
+                         help="Registry and DNS lookups (RDAP, DNS over HTTPS, crt.sh, CERT Polska list). "
+                              "The page itself is never opened from here; live pages are fetched only from the sandbox.")
+
+
+def _clear_result() -> None:
+    old = st.session_state.pop("result", None)
+    if old is not None and old.run_dir is not None:
+        shutil.rmtree(old.run_dir, ignore_errors=True)
+
 
 # -- 1. input ------------------------------------------------------------------------------------
 st.header("1. Input")
-kind = st.radio("What do you want to analyse?", list(KIND_LABELS), format_func=KIND_LABELS.get, horizontal=True, key="kind")
+kind = st.radio("What do you want to analyse?", list(KIND_LABELS), format_func=KIND_LABELS.get, horizontal=True, key="kind",
+                on_change=_clear_result)
 text = None
 upload = None
 if kind == "dataset_item":
     ids = [i.id for i in base.incidents]
     text = st.selectbox("Incident from the base", ids, key="item") if ids else None
 elif kind == "url":
-    text = st.text_input("Suspicious URL (not opened; offline enrichment only)", key="url")
+    text = st.text_input(
+        "Suspicious URL (never opened; " + ("online registry and DNS lookups)" if online else "offline: cached enrichment only)"),
+        key="url")
 elif kind == "keyword":
     text = st.text_input("Keyword or phrase from the ad", key="keyword")
 else:
@@ -99,6 +110,7 @@ if st.button("Analyse", type="primary", key="analyze"):
         st.warning("Cannot analyse this input.")
         st.text(str(exc))
     else:
+        _clear_result()  # one run directory at a time: the previous upload copy is deleted
         with st.spinner("Running the pipeline…"):
             st.session_state["result"] = analyze(inp, base, offline=not online)
     finally:
@@ -110,8 +122,15 @@ if result is None:
     st.info("Pick an input and press Analyse.")
     st.stop()
 
-dataset = result.to_dataset()
 incident = result.incident
+try:
+    dataset = result.to_dataset()
+except ValueError as exc:
+    st.error("The result does not form a valid contract dataset; showing the stages only.")
+    st.text(str(exc))
+    _table(ledger.stage_rows(result.stages))
+    st.stop()
+threshold = ledger.review_threshold_bits(base)
 
 # -- 2. stages -----------------------------------------------------------------------------------
 st.header("2. Pipeline stages")
@@ -167,7 +186,7 @@ st.header("5. Evidence ledger")
 if not result.links:
     st.text("No links to known cases.")
 for link in sorted(result.links, key=lambda l: -(l.score_bits or 0)):
-    head = ledger.defang(f"{link.a} ↔ {link.b} · {ledger.relation_sentence(link)}")
+    head = ledger.defang(f"{link.a} ↔ {link.b} · {ledger.relation_sentence(link, threshold)}")
     with st.expander(head, expanded=False):
         st.text(f"Method: {link.method} · link id {link.id}")
         _table([r.as_dict() for r in ledger.ledger_rows(link, dataset, population=base)])
