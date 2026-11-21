@@ -11,6 +11,7 @@ Covers the runtime dependencies and the `dev` extra of `ftf`, recursively.
 | filelock | MIT |
 | idna | BSD-3-Clause |
 | iniconfig | MIT |
+| numpy | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 |
 | packaging | Apache-2.0 OR BSD-2-Clause |
 | pluggy | MIT License |
 | pydantic | MIT |

@@ -25,7 +25,9 @@ TABLE = ROOT / "LICENSES-THIRD-PARTY.md"
 EXTRAS = ("dev",)
 
 # Matched against whole words of a licence name ("MIT License", "BSD-2-Clause", "PSF-2.0").
-ALLOWED_WORDS = {"MIT", "BSD", "0BSD", "APACHE", "PSF", "ISC", "HPND"}
+ALLOWED_WORDS = {"MIT", "BSD", "0BSD", "APACHE", "PSF", "ISC", "HPND", "ZLIB"}
+# Public-domain dedications; checked before the "CC" deny prefix (CC-BY-SA etc. stay denied).
+PUBLIC_DOMAIN_WORDS = {"CC0"}
 DENIED_PREFIXES = ("GPL", "LGPL", "AGPL", "MPL", "EUPL", "SSPL", "CDDL", "EPL", "CC", "GNU")
 DENIED_WORDS = {"MOZILLA", "PROPRIETARY", "COMMERCIAL", "UNLICENSED"}
 
@@ -74,6 +76,8 @@ def is_permissive(licence: str) -> bool:
 
 def _part_permissive(part: str) -> bool:
     words = re.split(r"[\s,\-]+", part.upper())
+    if any(w in PUBLIC_DOMAIN_WORDS for w in words) and not any(w in DENIED_WORDS for w in words):
+        return True
     if any(w in DENIED_WORDS or w.startswith(DENIED_PREFIXES) for w in words):
         return False
     return any(w in ALLOWED_WORDS for w in words) or "PYTHON SOFTWARE FOUNDATION" in part.upper()
