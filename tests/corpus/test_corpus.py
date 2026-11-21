@@ -462,5 +462,8 @@ def test_convert_scanner_v1(tmp_path):
     (cre,) = [a for a in inc.captures[0].artefacts if a.type is m.ArtefactType.asset]
     assert cre.path == f"{RUN}-meta-111/creative-0.jpg" and (out / cre.path).read_bytes().startswith(b"\xff\xd8")
     assert len(cre.sha256) == 64
-    cinc = m.Incident.model_validate(json.loads((folders[f"{RUN}-certpl-bad-domain.example"] / "capture.json").read_text())["incident"])
-    assert cinc.id == "certpl:bad-domain.example" and cinc.captures[0].id == "certpl:bad-domain.example:listing"
+    (cfolder,) = [p for n, p in folders.items() if n.startswith(f"{RUN}-certpl-")]
+    cinc = m.Incident.model_validate(json.loads((cfolder / "capture.json").read_text())["incident"])
+    cad = json.loads((cfolder / "ad.json").read_text())
+    assert cinc.id.startswith("certpl:") and cinc.captures[0].id == f"{cinc.id}:listing"
+    assert cad["register_id"] == "7" and cad["landing_domain"] == "shop.bad-domain.example"
