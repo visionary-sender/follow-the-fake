@@ -104,9 +104,14 @@ HAND_TABLE = WeightTable(
         "meta_pixel": _K(L.tracking_account, 3.0, private=True),  # ad account's pixel
         "capi_gateway": _K(L.tracking_account, 3.0, private=True),  # server-side pixel gateway of one account
         "google_ads_id": _K(L.tracking_account, 3.0, private=True),  # ads conversion account
-        "google_analytics_id": _K(L.tracking_account, 3.0, private=True),  # analytics property
-        "clarity_id": _K(L.tracking_account, 3.0, private=True),  # session-recording project
-        "push_client_id": _K(L.tracker_instance, 3.0, private=True),  # push-service client: one tracker instance
+        "tiktok_pixel": _K(L.tracking_account, 3.0, private=True),  # ad account's pixel on another network
+        "push_client_id": _K(L.tracking_account, 3.0, private=True),  # push-service client of one operator
+        # analytics ids: a lander that is a saved copy of a real outlet's article fires that outlet's
+        # analytics, so a shared one must not alone make a strict link (not private)
+        "google_analytics_id": _K(L.tracking_account, 3.0),  # analytics property
+        "gtm_container": _K(L.tracking_account, 3.0),  # tag-manager container
+        "clarity_id": _K(L.tracking_account, 3.0),  # session-recording project
+        "yandex_metrica_id": _K(L.tracking_account, 3.0),  # analytics counter
         "xid_tracker_machine": _K(L.tracker_instance, 3.0, private=True),  # self-hosted tracker machine id
         "tracker_postback": _K(L.tracker_instance, 3.0, private=True),  # conversion postback of one tracker
         # platform chain: tenant → owner → aio campaign → landing (07 §2.2 item 5)
@@ -129,17 +134,22 @@ HAND_TABLE = WeightTable(
         # distribution: traffic source configured in the platform; a label, operator-level
         "aio_source": _K(L.distribution_account, 2.0),
         # offer: operator-private contact data; the offer layer's default scale halves operator,
-        # these say as much about operator as about campaign
-        "contact_email": _K(L.offer, 4.5, private=True, relations=_row(0.0, 0.0, 1.0, 1.0, 1.0)),
-        "contact_phone": _K(L.offer, 4.5, private=True, relations=_row(0.0, 0.0, 1.0, 1.0, 1.0)),
-        # lead endpoint: Ingestion marks it platform-level (several owners can post to one
-        # endpoint), so not private (a shared live endpoint must not alone make a strict link);
-        # its handler path ships with the kit, so it counts half toward template
-        "form_endpoint": _K(L.offer, 4.0, relations=_row(0.5, 0.0, 1.0, 1.0, 1.0)),
-        "form_field_set": _K(L.offer, 1.0, relations=_row(1.0, 0.0, 0.25, 0.5, 1.0)),  # kit-like, low
-        "aio_form": _K(L.offer, 1.0),  # form template of the platform, near-constant
-        # video host tenant: tenant-like but host-side (infrastructure layer), multi-valued
-        "video_cdn_tenant": _K(L.infrastructure, 4.0, private=True),
+        # these say as much about operator as about campaign. Kept below 07's ~4.5 because an
+        # impersonating page can show the real brand's hotline or footer email (a hub)
+        "contact_email": _K(L.offer, 3.5, private=True, relations=_row(0.0, 0.0, 1.0, 1.0, 1.0)),
+        "contact_phone": _K(L.offer, 3.5, private=True, relations=_row(0.0, 0.0, 1.0, 1.0, 1.0)),
+        "contact_telegram": _K(L.offer, 3.5, private=True, relations=_row(0.0, 0.0, 1.0, 1.0, 1.0)),
+        "aio_advertiser": _K(L.offer, 3.0, private=True, relations=_row(0.0, 0.0, 1.0, 1.0, 1.0)),  # advertiser id in the platform
+        "offer_id": _K(L.offer, 3.0),  # offer id of an affiliate network: campaign-level, shared by affiliates
+        # lead endpoint: a normalised path (no host), the same on every lander of one platform or
+        # kit, so a weak template hint rather than an operator id; not private
+        "form_endpoint": _K(L.offer, 2.0, relations=_row(1.0, 0.0, 0.25, 0.5, 1.0)),
+        "form_field_set": _K(L.offer, 2.0, relations=_row(1.0, 0.0, 0.25, 0.5, 1.0)),  # kit-like form fields
+        # near-constant form template of the platform: display only (rarity keeps it below hub_bits)
+        "aio_form": _K(L.offer, 1.0),
+        # video host tenant: tenant-like but host-side (infrastructure layer), multi-valued; not
+        # private, since a copied article can hotlink the real outlet's video zone
+        "video_cdn_tenant": _K(L.infrastructure, 4.0),
         # kit
         # A whole identical asset set (07 §2.5 c: s 0.9, u 0.02 → template +5.5 after one bit of
         # rarity). Deliberate deviation from 07, which counts it fully toward campaign: here it
@@ -149,16 +159,17 @@ HAND_TABLE = WeightTable(
         # lander template: a template-level id, counts fully for template, weakly for campaign
         "aio_lander_template": _K(L.kit, 4.0, relations=_row(1.0, 0.0, 0.25, 0.25, 1.0)),
         "aio_macros_file": _K(L.kit, 2.0),
-        # HACK-11 kit fingerprints. One asset hash can be a landing build or a whole platform's
-        # SDK; rarity over pre-groups demotes the platform-wide ones, so the prior stays modest.
-        "asset_sha256": _K(L.kit, 2.0),  # one identical asset file
-        "asset_norm_sha256": _K(L.kit, 2.0),  # same asset after re-minification
-        "inline_script_sha256": _K(L.kit, 3.0),  # normalised inline script with per-deployment literals masked: the kit's own code
-        "dom_skeleton_sha256": _K(L.kit, 3.0),  # whole-page tag skeleton: one page build (≥30 tags)
-        "dom_skeleton_lsh": _K(L.kit, 1.0),  # one MinHash band of a near-identical skeleton; one band counts
-        # URL parameter shapes (values dropped): platform-level structure, template-ish, weak
-        "page_url_shape": _K(L.landing, 1.0, relations=_row(1.0, 0.0, 0.5, 0.5, 1.0)),
-        "form_action_shape": _K(L.landing, 1.0, relations=_row(1.0, 0.0, 0.5, 0.5, 1.0)),
+        # HACK-11 kit fingerprints: template evidence (kit scale: template 1, campaign 0.5). One asset
+        # hash can be a landing build or a whole platform's SDK; rarity over pre-groups demotes the
+        # platform-wide ones. Priors are set so a pair-only value (k = 2) still clears hub_bits.
+        "asset_sha256": _K(L.kit, 2.5),  # one identical asset file
+        "asset_norm_sha256": _K(L.kit, 2.5),  # same asset after re-minification
+        "inline_script_sha256": _K(L.kit, 3.0),  # normalised inline script, per-deployment literals masked
+        "dom_skeleton_sha256": _K(L.kit, 3.5),  # whole-page tag skeleton: one page build (≥30 tags)
+        "dom_skeleton_lsh": _K(L.kit, 2.0),  # one MinHash band of a near-identical skeleton; one band counts
+        # URL parameter shapes (values dropped): structure of the kit or tracker, template-ish, weak
+        "page_url_shape": _K(L.landing, 2.0, relations=_row(1.0, 0.0, 0.25, 0.5, 1.0)),
+        "form_action_shape": _K(L.landing, 2.0, relations=_row(1.0, 0.0, 0.25, 0.5, 1.0)),
         "brand_asset": _K(L.kit, 0.3),  # impersonated brand's logo/fonts: a stop-list hub
         # creative
         "ad_caption": _K(L.creative, 2.0),
@@ -174,7 +185,7 @@ HAND_TABLE = WeightTable(
         "meta_adset_name": _K(L.distribution_account, 2.0),  # account-chosen label
         # infrastructure (HACK-19 enrichment and prototype signals); shared hosting is weak
         "third_party_host": _K(L.infrastructure, 1.5),  # HACK-11: foreign host a page loads; CDNs are hubs
-        "third_party_domain": _K(L.infrastructure, 1.0),  # HACK-11: its registered domain, coarser
+        "third_party_domain": _K(L.infrastructure, 1.5),  # HACK-11: its registered domain, coarser
         "server_ip": _K(L.infrastructure, 1.5),
         "a_record_ip": _K(L.infrastructure, 1.5),
         "nameserver": _K(L.infrastructure, 1.5),

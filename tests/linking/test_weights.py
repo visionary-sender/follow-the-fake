@@ -45,7 +45,8 @@ def row(score, kind):
     (r,) = [r for r in score.rows if r.kind == kind]
     return r
 
-# Linkable kinds Ingestion emits (kind names only, no values).
+# Linkable kinds Ingestion emits (kind names only, no values). Copied from `ftf.indicators._ids.KINDS`
+# on the HACK-10 branch; switch to importing it once that package is on main.
 INGESTION_KINDS = {
     "aio_action_files", "aio_campaign", "aio_campaign_name", "aio_cdn_tenant", "aio_flow", "aio_form",
     "aio_handle_key", "aio_lander_template", "aio_landing", "aio_landing_name", "aio_owner", "aio_sdk_asset",
@@ -53,6 +54,7 @@ INGESTION_KINDS = {
     "form_field_set", "google_ads_id", "google_analytics_id", "meta_ad_id", "meta_ad_name", "meta_adset_id",
     "meta_adset_name", "meta_campaign_id", "meta_campaign_name", "meta_pixel", "platform_name",
     "push_client_id", "tracker_postback", "video_cdn_tenant", "xid_tracker_machine",
+    "aio_advertiser", "contact_telegram", "gtm_container", "offer_id", "tiktok_pixel", "yandex_metrica_id",
     # HACK-11 kit and page-structure fingerprints
     "asset_sha256", "asset_norm_sha256", "inline_script_sha256", "dom_skeleton_sha256", "dom_skeleton_lsh",
     "page_url_shape", "form_action_shape", "third_party_host", "third_party_domain",
@@ -121,3 +123,22 @@ def test_template_kinds_count_for_template_weakly_for_campaign():
     assert row(t, "aio_lander_template").bits == pytest.approx(3.0)  # 4 − log2(2 groups)
     assert row(t, "aio_flow").bits == pytest.approx(2.0)  # 3 − log2(2 groups)
     assert c.bits <= 2.0 < t.bits
+
+
+def test_analytics_ids_are_not_private():
+    """A copied outlet article fires the outlet's analytics: a shared one alone gives no strict link."""
+    a = [ind(L.tracking_account, "google_analytics_id", "ga-1", live=True)]
+    s = score_pair(_pair(a, a), "x/lander", "y/lander", Relation.campaign)
+    assert row(s, "google_analytics_id").status is EvidenceStatus.shared
+    assert not s.live_private
+
+
+@pytest.mark.parametrize(
+    "kind", ["asset_sha256", "asset_norm_sha256", "inline_script_sha256", "dom_skeleton_sha256", "dom_skeleton_lsh",
+             "page_url_shape", "form_action_shape", "form_endpoint", "form_field_set"],
+)
+def test_template_hints_clear_hub_bits_for_a_pair(kind):
+    layer = HAND_TABLE.kinds[kind].layer
+    v = [ind(layer, kind, "fp-1")]
+    s = score_pair(_pair(v, v), "x/lander", "y/lander", Relation.template)
+    assert row(s, kind).bits >= HAND_TABLE.hub_bits
