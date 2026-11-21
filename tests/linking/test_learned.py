@@ -355,7 +355,7 @@ def test_values_on_captures_without_tenant_or_owner_are_no_platform_constants():
     assert Hierarchy.from_dataset(ds).level((L.kit, "kit_asset_set", "kitset-1")) is None
 
 
-def test_live_private_gate_ignores_ids_zeroed_by_the_chain_rule():
+def test_live_pixel_subsumed_by_its_owner_level_keeps_the_gate_through_that_level():
     def inc(iid, camp):
         cid = f"{iid}/lander"
         rows = [(L.tenant, "aio_cdn_tenant", "tenant-1", Level.tenant, False),
@@ -369,7 +369,8 @@ def test_live_private_gate_ignores_ids_zeroed_by_the_chain_rule():
     ds = Dataset(name="synthetic", incidents=[inc("g1", "camp-1"), inc("g2", "camp-2"), inc("g3", "camp-2")])
     s = score_pair(ScoringContext.from_dataset(ds), "g1/lander", "g2/lander", Relation.operator)
     (pixel,) = [r for r in s.rows if r.kind == "meta_pixel"]
-    assert pixel.status is EvidenceStatus.hub_subsumed and not s.live_private
+    assert pixel.status is EvidenceStatus.hub_subsumed and pixel.bits == 0
+    assert s.live_private  # the owner level's one term carries the live id of that level
 
 
 def test_a_page_shape_next_to_the_landing_id_is_not_a_second_landing_term():
@@ -532,3 +533,49 @@ def test_learned_bits_raise_a_prior_by_at_most_max_raise():
         for rel in info["learned_relations"]:
             hand = entry.bits * HAND_TABLE.scale(kind, entry.layer, Relation(rel))
             assert info["bits"][rel] <= hand + MAX_RAISE + 1e-6, kind
+
+
+# ---- review round 3 ----
+
+
+def test_filtered_corpus_with_a_duplicate_of_a_dropped_capture_still_counts():
+    keep = incident("keep", [ind(L.kit, "asset_sha256", "a-1")])
+    gone = Incident(id="certpl:x.example:listing", source="scanner_certpl",
+                    captures=[Capture(id="certpl:x.example:listing:c1", stage="unknown")])
+    keep = keep.model_copy(update={"captures": [keep.captures[0].model_copy(update={"duplicate_of": gone.captures[0].id})]})
+    ds = Dataset.model_construct(name="corpus", incidents=[gone, keep], links=[], campaigns=[], assignments=[],
+                                 contract_version="0.1.0", description=None)
+    bg = BackgroundCounts.from_dataset(ds)
+    assert bg.n_incidents == 1 and bg.count(L.kit, "asset_sha256", "a-1") == 1
+
+
+def test_campaign_constant_found_when_a_carrier_lacks_a_landing_id():
+    caption = ind(L.creative, "ad_caption", "Same caption")
+    ds = Dataset(name="synthetic", incidents=[
+        incident("q1", chain("tenant-1", "owner-1", "camp-1", "landing-1") + [caption]),
+        incident("q2", chain("tenant-1", "owner-1", "camp-1", "landing-2") + [caption]),
+        incident("q3", chain("tenant-1", "owner-1", "camp-1") + [caption]),
+    ])
+    assert Hierarchy.from_dataset(ds).level((L.creative, "ad_caption", "same caption")) is Level.campaign
+
+
+def test_live_private_id_beaten_within_its_level_keeps_the_gate():
+    from ftf.linking.hierarchy import ChainRow, apply_chain_rule
+    from ftf.contract.models import EvidenceRow
+
+    h = Hierarchy(level_of={(L.owner, "aio_owner", "o"): Level.operator, (L.kit, "kit_asset_set", "k"): Level.operator})
+    rows = [
+        ChainRow(EvidenceRow(layer=L.owner, kind="aio_owner", status=EvidenceStatus.shared, bits=4.0), 4.0,
+                 (L.owner, "aio_owner", "o"), live_private=True, private=True),
+        ChainRow(EvidenceRow(layer=L.kit, kind="kit_asset_set", status=EvidenceStatus.shared, bits=5.0), 5.0,
+                 (L.kit, "kit_asset_set", "k")),
+    ]
+    kept, subsumed = apply_chain_rule(rows, h, 1.7)
+    assert [c.key[1] for c in kept] == ["kit_asset_set"] and kept[0].live_private and len(subsumed) == 1
+
+
+def test_site_kinds_say_nothing_about_template_and_display_domain_is_weak():
+    for kind in ("landing_host", "landing_domain", "ad_landing_domain", "ad_display_domain", "certpl_listing_domain"):
+        assert HAND_TABLE.scale(kind, HAND_TABLE.kinds[kind].layer, Relation.template) == 0
+        assert not HAND_TABLE.kinds[kind].single_valued
+    assert HAND_TABLE.kinds["ad_display_domain"].bits <= 1.0

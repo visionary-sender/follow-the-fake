@@ -98,12 +98,12 @@ class BackgroundCounts:
             and (corpus_kinds is None or corpus_kinds.get(i.id) in RARITY_KINDS)
             and any(linkable(x) and x.value is not None for x in i.indicators)
         ]
-        ctx = ScoringContext.from_dataset(corpus.model_copy(update={"incidents": kept}), chain_rule=False)
+        ctx = ScoringContext.from_dataset(corpus.model_copy(update={"incidents": _detach(kept)}), chain_rule=False)
         brand: set[str] = set()
         if must_not_link is not None:
             if must_not_link_kinds is not None:
-                must_not_link = must_not_link.model_copy(update={"incidents": [
-                    i for i in must_not_link.incidents if must_not_link_kinds.get(i.id) in MUST_NOT_LINK_KINDS]})
+                must_not_link = must_not_link.model_copy(update={"incidents": _detach([
+                    i for i in must_not_link.incidents if must_not_link_kinds.get(i.id) in MUST_NOT_LINK_KINDS])})
             real = ScoringContext.from_dataset(must_not_link, chain_rule=False)
             brand = {digest(*k) for k in real.index if k[0] is not Layer.collector}
         counts: dict[str, int] = {}
@@ -195,4 +195,16 @@ def read_corpus_kinds(dataset_path) -> dict[str, str] | None:
         if line.strip():
             row = json.loads(line)
             out[str(row["incident_id"])] = str(row.get("corpus_kind") or "")
+    return out
+
+
+def _detach(incidents: list) -> list:
+    """Kept incidents whose captures point (`duplicate_of`) at a capture of a dropped incident become their own
+    canonical capture, so a filtered corpus stays a consistent dataset."""
+    kept = {c.id for i in incidents for c in i.captures}
+    out = []
+    for inc in incidents:
+        caps = [c.model_copy(update={"duplicate_of": None}) if c.duplicate_of and c.duplicate_of not in kept else c
+                for c in inc.captures]
+        out.append(inc.model_copy(update={"captures": caps}))
     return out

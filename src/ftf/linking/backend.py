@@ -74,9 +74,9 @@ def layer_caps(weights: Any, relation: Relation) -> dict[Layer, float]:
                 best[slot] = max(best.get(slot, 0.0), entry.bits * weights.scale(kind, layer, relation))
         other = best.pop(None)
         if best:
-            # non-anchor kinds join an anchor's slot (ledger `_slot`): at most they raise the biggest one
-            top = max(best, key=lambda k: best[k])
-            best[top] = max(best[top], other)
+            # a non-anchor kind can join any anchor slot (ledger `_slot`, by its Indicator.level): upper bound
+            for k in best:
+                best[k] = max(best[k], other)
             total = sum(best.values())
         else:
             total = other

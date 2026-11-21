@@ -109,10 +109,14 @@ def _level(key: ValueKey, caps: set[str], anchor_ids: Mapping[str, Mapping[Level
     if any(not any(anchor_ids[c].values()) for c in caps):
         return None
     shown = [lv for lv in CHAIN if all(anchor_ids[c].get(lv) for c in caps)]
-    union = {lv: set().union(*(anchor_ids[c][lv] for c in caps)) for lv in shown}
-    for i, lv in enumerate(shown):
+    union = {lv: set().union(*(anchor_ids[c].get(lv, set()) for c in caps)) for lv in CHAIN}
+    for lv in shown:
         if len(union[lv]) == 1:
-            return lv if i > 0 and len(union[shown[i - 1]]) >= 2 else None
+            if lv is CHAIN[0]:
+                return None
+            # spread over the next finer level, among the carriers that show it
+            finer = CHAIN[CHAIN.index(lv) - 1]
+            return lv if len(union[finer]) >= 2 else None
     need = 2 if key[0] in (Layer.platform, Layer.kit) else 3
     if Level.tenant in shown:
         return Level.platform if len(union[Level.tenant]) >= need else None
@@ -182,6 +186,9 @@ def apply_chain_rule(cands: list[ChainRow], hierarchy: Hierarchy, platform_cap: 
                 })
                 bits = round(platform_cap, 3)
             top = ChainRow(row, bits, top.key, live_private=False, private=top.private)
+        elif any(c.live_private for c in rest) and not top.live_private:
+            # a live private id of this level still opens the strict gate through the level's one term
+            top = ChainRow(top.row, top.bits, top.key, live_private=True, private=top.private)
         kept.append(top)
         subsumed += [_subsume(c, f"one term per {name}, counted by {top.key[1]}") for c in rest]
     return kept, subsumed

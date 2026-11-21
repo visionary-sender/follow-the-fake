@@ -189,14 +189,15 @@ HAND_TABLE = WeightTable(
         # infrastructure (HACK-19 enrichment and prototype signals); shared hosting is weak
         "third_party_host": _K(L.infrastructure, 1.5),  # HACK-11: foreign host a page loads; CDNs are hubs
         "third_party_domain": _K(L.infrastructure, 1.5),  # HACK-11: its registered domain, coarser
-        # site identity (HACK-48 names, posted by the coordinator): one infrastructure layer, so the within-layer
-        # max keeps "same site" from stacking; not single-valued (domains rotate daily: a differing domain
-        # carries nothing, no conflict penalty). A CERT listing domain is the same kind of evidence.
-        "landing_host": _K(L.infrastructure, 3.0),
-        "landing_domain": _K(L.infrastructure, 2.5),
-        "ad_landing_domain": _K(L.infrastructure, 2.5),
-        "ad_display_domain": _K(L.infrastructure, 2.5),
-        "certpl_listing_domain": _K(L.infrastructure, 2.5),
+        # site identity (HACK-48 names): not single-valued (domains rotate daily: a differing domain carries
+        # nothing, no conflict penalty) and nothing about the template. The scanner puts landing_domain in the
+        # landing layer (one slot with the landing id) and ad_display_domain in the creative layer, where it
+        # only restates the landing domain, so it is kept weak; the rest share the infrastructure layer.
+        "landing_host": _K(L.infrastructure, 3.0, relations=_row(0.0, 0.0, 1.0, 1.0, 1.0)),
+        "landing_domain": _K(L.landing, 2.5, relations=_row(0.0, 0.0, 1.0, 1.0, 1.0)),
+        "ad_landing_domain": _K(L.infrastructure, 2.5, relations=_row(0.0, 0.0, 1.0, 1.0, 1.0)),
+        "ad_display_domain": _K(L.creative, 1.0, relations=_row(0.0, 0.0, 1.0, 1.0, 1.0)),
+        "certpl_listing_domain": _K(L.infrastructure, 2.5, relations=_row(0.0, 0.0, 1.0, 1.0, 1.0)),
         # redirectors and trackers on the way: can be a hub shared by unrelated operators, so not private;
         # pre-group rarity does the rest
         "chain_host": _K(L.tracker_instance, 2.0),
