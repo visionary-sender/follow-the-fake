@@ -35,7 +35,7 @@ def scan_capture(out: Path, ad_id: str, *, source: str = "meta", stamp: str = ST
         "landing_url": None if certpl else "https://shop.example.test/lp?x=1", "declared_link_url": None,
         "landing_domain": ad_id if certpl else "shop.example.test", "creative_urls": [], "collation_id": None,
         "display_format": None, "platforms": [], "start_date": "2026-11-01", "end_date": None if certpl else "2026-11-20",
-        "status": "listed" if certpl else "ACTIVE", "register_id": "730666" if certpl else None,
+        "status": "listed" if certpl else "ACTIVE", "register_id": "100001" if certpl else None,
     }
     record.update(ad or {})
     write(d / "ad.json", json.dumps(record))
