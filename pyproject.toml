@@ -25,6 +25,12 @@ app = [
 ]
 # Models and native libraries for ftf.features (OCR, embeddings, faces, video); heavy, so opt-in.
 features = [
+    "beautifulsoup4>=4.12,<5",
+    "huggingface_hub>=0.24,<2",
+    "lxml>=5,<7",
+    "onnxruntime>=1.18,<2",
+    "pillow>=10,<14",
+    "tokenizers>=0.19,<1",
 ]
 dev = [
     "packaging>=24",
