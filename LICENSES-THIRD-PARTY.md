@@ -6,6 +6,10 @@ Covers the runtime dependencies and the `dev` extra of `ftf`, recursively.
 | Package | Licence |
 |---|---|
 | annotated-types | MIT |
+| certifi | MPL-2.0 (named exception, unmodified CA bundle; see README Licence section) |
+| charset-normalizer | MIT |
+| filelock | MIT |
+| idna | BSD-3-Clause |
 | iniconfig | MIT |
 | packaging | Apache-2.0 OR BSD-2-Clause |
 | pluggy | MIT License |
@@ -13,5 +17,9 @@ Covers the runtime dependencies and the `dev` extra of `ftf`, recursively.
 | pydantic-core | MIT |
 | pygments | BSD-2-Clause |
 | pytest | MIT |
+| requests | Apache Software License |
+| requests-file | Apache Software License |
+| tldextract | BSD-3-Clause |
 | typing-extensions | PSF-2.0 |
 | typing-inspection | MIT |
+| urllib3 | MIT |

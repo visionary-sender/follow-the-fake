@@ -25,6 +25,16 @@ def test_permissive(licence):
     assert licences.is_permissive(licence)
 
 
+def test_certifi_exception_is_exact_and_narrow():
+    mpl = licences.EXCEPTIONS["certifi"]["licence"]
+    assert licences.is_allowed("certifi", mpl)
+    assert not licences.is_allowed("certifi", "GPL-3.0-only")  # the exception is the licence string, not any licence
+    assert not licences.is_allowed("some-other-mpl-package", mpl)  # MPL stays denied for everything else
+    assert not licences.is_allowed("some-other-mpl-package", "MPL-2.0")
+    assert licences.shown_licence("certifi", mpl).startswith("MPL-2.0")
+    assert licences.shown_licence("some-other-mpl-package", "MPL-2.0") == "MPL-2.0"
+
+
 @pytest.mark.parametrize(
     "licence",
     ["UNLICENSED", "UNKNOWN", "GPL-3.0-only", "MIT AND CC-BY-NC-4.0", "LGPLv3+",
