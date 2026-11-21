@@ -49,15 +49,30 @@ def test_probe_and_keyframes(raw, tmp_path):
     assert info.width == 320 and info.height == 240 and info.has_audio
     assert 5.5 < info.duration < 6.5
     frames = video.extract_keyframes(p, tmp_path / "kf", info)
-    assert video.MIN_FRAMES - 1 <= len(frames) <= video.MAX_FRAMES
+    assert 3 <= len(frames) <= video.MAX_FRAMES
     ts = [k.t for k in frames]
     assert ts == sorted(ts) and ts[0] == 0.0
     # every scene is represented
     assert any(1.5 <= t < 2.5 for t in ts) and any(3.5 <= t < 4.5 for t in ts)
     assert all(k.path.parent == tmp_path / "kf" and k.path.exists() for k in frames)
     assert sorted(x.name for x in (tmp_path / "kf").iterdir()) == sorted(k.path.name for k in frames)
-    hashes = [video._phash(k.path) for k in frames]
-    assert all(a - b > video.DEDUP_BITS for i, a in enumerate(hashes) for b in hashes[:i])
+    th = [video._thumb(k.path) for k in frames]
+    assert all(abs(a - b).mean() >= video.DEDUP_DIFF for i, a in enumerate(th) for b in th[:i])
+
+
+def _lavfi(path, src):
+    subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", src,
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", str(path)], check=True)
+
+
+def test_slow_change_is_covered_by_grid_and_still_video_dedups(tmp_path):
+    slow = tmp_path / "slow.mp4"  # a gradual zoom never scores as a cut
+    _lavfi(slow, "mandelbrot=s=160x120:r=10,trim=duration=20")
+    ts = [k.t for k in video.extract_keyframes(slow, tmp_path / "a")]
+    assert len(ts) >= 5 and max(ts) >= 15
+    still = tmp_path / "still.mp4"
+    _lavfi(still, "color=c=gray:s=160x120:r=10:d=20")
+    assert [k.t for k in video.extract_keyframes(still, tmp_path / "b")] == [0.0]
 
 
 def test_hostile_inputs_are_not_videos(raw, tmp_path):

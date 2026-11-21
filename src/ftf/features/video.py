@@ -3,8 +3,8 @@
 For every video artefact the family
 
 1. probes it with ffprobe (duration, resolution, audio present),
-2. picks keyframes with ffmpeg scene-change detection on a 2 fps stream, tops them up with evenly
-   spaced frames when a video has few cuts, drops near-identical frames (pHash) and caps the count,
+2. picks keyframes with ffmpeg on a 2 fps stream: scene cuts plus a uniform grid, minus
+   near-identical frames (grayscale thumbnails), capped at MAX_FRAMES,
 3. writes the keyframes as JPEGs under ``out_dir/keyframes/`` (never next to the raw files),
 4. runs every installed still-image family's ``features_for_image`` on each keyframe and attaches
    the features to the video's capture with ``provenance.locator = "t=<s>s"`` and
@@ -18,7 +18,7 @@ For every video artefact the family
 
 Videos are hostile input: ffmpeg and ffprobe run with a timeout, no stdin, only the ``file``
 protocol, a container whitelist and a cap on the decoded duration. Nothing here is a similarity
-threshold; the only threshold (``DEDUP_BITS``) decides which frames are worth extracting.
+threshold; the only threshold (``DEDUP_DIFF``) decides which frames are worth extracting.
 
 This module imports only the standard library and numpy at import time; Pillow, ImageHash and
 faster-whisper are imported where they are used.
@@ -56,9 +56,10 @@ EXTRACTOR = "video@0.1"
 # Keyframe selection (frame selection only; not evidence thresholds).
 SAMPLE_FPS = 2.0  # scene detection runs on this many frames per second
 SCENE = 0.3  # ffmpeg scene score that counts as a cut
-MIN_FRAMES = 4  # top up with evenly spaced frames below this
+MIN_GRID_S = 2.0  # grid frames at least this far apart
 MAX_FRAMES = 40  # keep at most this many keyframes per video
-DEDUP_BITS = 4  # a frame within this pHash distance of a kept frame is dropped
+THUMB = 64  # dedup compares grayscale thumbnails of this size
+DEDUP_DIFF = 2.0  # mean absolute grey-level difference (0-255) below which frames are duplicates
 MAX_SIDE = 1600  # longest side of a written keyframe (enough for OCR of phone recordings)
 MAX_SECONDS = 1800  # decode at most this much of any video
 TIMEOUT = 900  # seconds per ffmpeg call
@@ -182,34 +183,43 @@ def _phash(path: Path):
         return imagehash.phash(im.convert("RGB"))
 
 
+def _thumb(path: Path) -> np.ndarray:
+    from PIL import Image
+
+    with Image.open(path) as im:
+        return np.asarray(im.convert("L").resize((THUMB, THUMB)), dtype=np.float32)
+
+
 def extract_keyframes(path: Path, out: Path, info: Optional[VideoInfo] = None) -> list[Keyframe]:
-    """Scene-change keyframes of one video, deduplicated, between MIN and MAX_FRAMES (if the video
-    has that many distinct frames), sorted by time. Replaces anything already in ``out``."""
+    """Keyframes of one video, sorted by time; replaces anything already in ``out``.
+
+    One ffmpeg pass over a 2 fps stream keeps the first frame, every scene cut and a uniform grid
+    (so slow scrolls in screen recordings, which never score as cuts, are still covered). Frames
+    whose grayscale thumbnail barely differs from an already kept frame are dropped, then an evenly
+    spread subset of at most MAX_FRAMES remains. pHash is not used here: on mostly white pages it
+    hardly changes while the content does."""
     info = info or probe(path)
     if info is None:
         return []
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)
-    # The first sampled frame always counts; later frames when the picture changes.
-    scene = f"fps={SAMPLE_FPS},select='eq(n\\,0)+gt(scene\\,{SCENE})'"
-    frames = _ffmpeg_frames(path, scene, out, "s", 4 * MAX_FRAMES)
-    if len(frames) < MIN_FRAMES and info.duration > 0:
-        rate = MIN_FRAMES / min(info.duration, MAX_SECONDS)
-        frames += _ffmpeg_frames(path, f"fps={rate:.6f}", out, "u", MIN_FRAMES + 1)
-    frames.sort(key=lambda k: k.t)
+    seconds = min(info.duration, MAX_SECONDS) if info.duration > 0 else MAX_SECONDS
+    every = max(1, round(max(MIN_GRID_S, seconds / MAX_FRAMES) * SAMPLE_FPS))
+    vf = f"fps={SAMPLE_FPS},select='eq(n\\,0)+gt(scene\\,{SCENE})+not(mod(n\\,{every}))'"
+    frames = _ffmpeg_frames(path, vf, out, "k", 10 * MAX_FRAMES)
 
-    kept: list[tuple[Keyframe, object]] = []
+    kept: list[tuple[Keyframe, np.ndarray]] = []
     for k in frames:
         try:
-            h = _phash(k.path)
+            th = _thumb(k.path)
         except Exception:
             k.path.unlink(missing_ok=True)
             continue
-        if any(h - other <= DEDUP_BITS for _, other in kept):
+        if any(float(np.abs(th - other).mean()) < DEDUP_DIFF for _, other in kept):
             k.path.unlink()
             continue
-        kept.append((k, h))
+        kept.append((k, th))
     if len(kept) > MAX_FRAMES:  # keep an evenly spread subset
         idx = set(np.linspace(0, len(kept) - 1, MAX_FRAMES).round().astype(int).tolist())
         for i, (k, _) in enumerate(kept):
