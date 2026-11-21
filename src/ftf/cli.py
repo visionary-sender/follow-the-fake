@@ -30,9 +30,9 @@ from ftf.scanner.run import register as register_scan
 
 COMMANDS: list[Callable[[argparse._SubParsersAction], None]] = [
     register_analyze,
-    register_corpus,
     register_assign,
     register_build_base,
+    register_corpus,
     register_enrich_domain,
     register_eval,
     register_export,
