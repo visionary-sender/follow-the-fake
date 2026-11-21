@@ -15,7 +15,7 @@ Kinds emitted (layer / level / meaning):
 | `dom_skeleton_lsh` | kit | landing | MinHash LSH band value `bNN:<hex>` of the skeleton's tag 6-shingles; near-identical skeletons share a band |
 | `page_url_shape` | landing | platform | page URL parameter names, sorted, with value type tokens (no values) |
 | `form_action_shape` | landing | platform | the same for form actions |
-| `third_party_host` | infrastructure | platform | host referenced in HTML or HAR outside the page's registered domain |
+| `third_party_host` | infrastructure | platform | host referenced in HTML or HAR outside the page's registered domains (the landing and redirect chain from `_pages.page_chain`, shared with domains.py) |
 | `third_party_domain` | infrastructure | platform | registered domain of such a host |
 
 Levels are the coarsest plausible ones: one asset hash can name a landing build (template
@@ -43,13 +43,12 @@ from ftf import __version__
 from ftf.contract import Artefact, ArtefactType, Capture, Incident, Indicator, Layer, Level, Observed, Provenance
 from ftf.enrich.normalise import hostname, registrable_domain
 from ftf.indicators import _kitnorm as kn
+from ftf.indicators import _pages
 
 EXTRACTOR = f"kit@{__version__}"
 log = logging.getLogger(__name__)
 
 MIN_ASSET_BYTES = 100  # below this (tracking pixels, empty stubs) a hash says nothing about a kit
-MAX_FILE_BYTES = 64 * 1024 * 1024
-MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024  # HAR and MHTML carry every response body
 MIN_SKELETON_TAGS = 30
 MIN_SCRIPT_CHARS = 40
 LSH_PERM = 128
@@ -81,7 +80,7 @@ class _Found:
 
     capture_id: str
     indicators: list[Indicator] = field(default_factory=list)
-    own_urls: list[str] = field(default_factory=list)  # URLs of the page itself
+    own_urls: list[str] = field(default_factory=list)  # URLs of the page itself (from _pages.page_chain)
     hosts: list[tuple[str, Observed, str, str]] = field(default_factory=list)  # url, observed, artefact, locator
 
     def add(self, kind: str, value: str, observed: Observed, art: str, locator: str | None = None) -> None:
@@ -119,27 +118,13 @@ def extract(incident: Incident, capture: Capture, root: Path) -> Iterable[Indica
             _mhtml(found, data, art)
         elif art.type is ArtefactType.url:
             for m in kn.URL_IN_TEXT.finditer(data[:65536].decode("utf-8", "replace")):
-                url = m.group(0)
-                found.own_urls.append(url)
-                _page_shape(found, url, Observed.static, art, "url")
+                _page_shape(found, m.group(0), Observed.static, art, "url")
+    found.own_urls = [p.url for p in _pages.page_chain(capture, root)]
     _third_party(found)
     return found.indicators
 
 
-def _read(root: Path, art: Artefact) -> bytes | None:
-    if not art.path:
-        return None
-    path = root / art.path
-    try:
-        if not path.is_file():
-            return None
-        limit = MAX_ARCHIVE_BYTES if art.type in (ArtefactType.har, ArtefactType.mhtml) else MAX_FILE_BYTES
-        if path.stat().st_size > limit:
-            log.warning("kit: skipped artefact %s (%d bytes > %d)", art.id, path.stat().st_size, limit)
-            return None
-        return path.read_bytes()
-    except OSError:
-        return None
+_read = _pages.read
 
 
 # --------------------------------------------------------------------------- assets
@@ -163,7 +148,6 @@ def _document(found: _Found, data: bytes, observed: Observed, art: Artefact, loc
     where = (locator + " ") if locator else ""
     if own:
         for url, loc in kn.page_urls(data, root):
-            found.own_urls.append(url)
             _page_shape(found, url, observed, art, where + loc)
     if root is None:
         return
@@ -211,10 +195,6 @@ def _har(found: _Found, data: bytes, art: Artefact) -> None:
         entries = log.get("entries") or []
     except (ValueError, KeyError, TypeError, AttributeError):
         return
-    for page in log.get("pages") or []:
-        title = page.get("title") if isinstance(page, dict) else None
-        if isinstance(title, str) and title.startswith(("http://", "https://")):
-            found.own_urls.append(title)
     main_seen = False
     for i, entry in enumerate(entries):
         if not isinstance(entry, dict):
@@ -229,12 +209,6 @@ def _har(found: _Found, data: bytes, art: Artefact) -> None:
         mime = str(content.get("mimeType") or "").lower()
         is_doc = entry.get("_resourceType") == "document" or (not main_seen and "html" in mime)
         if is_doc:
-            # Every document of the top-level chain (tracker -> redirect -> landing) is "own";
-            # later documents (iframes) are added too, which only makes third parties stricter.
-            found.own_urls.append(url)
-            redirect = resp.get("redirectURL")
-            if isinstance(redirect, str) and redirect.startswith(("http://", "https://")):
-                found.own_urls.append(redirect)
             main_seen = True
             _page_shape(found, url, Observed.live, art, loc + ".request.url")
         body = _body(content)
@@ -290,7 +264,6 @@ def _mhtml(found: _Found, data: bytes, art: Artefact) -> None:
         where = str(part.get("Content-Location") or "")
         if part.get_content_type() == "text/html":
             if first_html and where.startswith(("http://", "https://")):
-                found.own_urls.append(where)
                 _page_shape(found, where, Observed.static, art, loc + "@content-location")
             _document(found, body, Observed.static, art, loc, own=first_html)
             first_html = False
