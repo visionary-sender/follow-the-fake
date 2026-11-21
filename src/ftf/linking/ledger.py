@@ -4,8 +4,12 @@ Rules (07 §2.2, §3 D1):
 
 - Unit = canonical capture. Captures with `duplicate_of` are collapsed onto their canonical
   capture before anything is counted, so duplicates inflate neither scores nor rarity.
-- A shared value of a kind is worth `weight × relation scale − log2(k)`, k = distinct incidents
-  whose (canonical) captures carry that value (a stand-in for distinct clusters), floored at 0.
+- A shared value of a kind is worth `weight × relation scale − log2(k)`, floored at 0, where k is
+  the number of distinct *pre-groups* among the incidents carrying the value (07 §2.2 item 2:
+  rarity over clusters, not incidents, so a big campaign's own ids are not punished). Pre-groups
+  are the connected components of incidents that share a live operator-private id (tenant,
+  owner, tracker instance, live pixel); an incident without one is its own group. HACK-23
+  replaces this with corpus counts.
   Below `hub_bits` it is `hub_subsumed` (0 bits).
 - Within a layer only the best shared kind counts (layers are dependent inside); across layers
   the bits add. A conflict on a single-valued, campaign-stable field (platform / tenant / owner)
@@ -23,6 +27,7 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from ftf.contract.models import (
@@ -89,6 +94,8 @@ class ScoringContext:
     values: dict[str, dict[Key, _Values]]  # canonical capture → (layer, kind) → values
     layers: dict[str, set[Layer]]  # canonical capture → layers it has any indicator in (vectors too)
     index: dict[tuple[Layer, str, str], set[str]]  # (layer, kind, normalised value) → incidents
+    group_of: dict[str, str]  # incident id → pre-group id (see module docstring)
+    n_groups: int
     n: int  # canonical captures
     n_incidents: int  # incidents with at least one canonical capture
 
@@ -104,6 +111,7 @@ class ScoringContext:
         values: dict[str, dict[Key, _Values]] = {c: {} for c in canon_ids}
         layers: dict[str, set[Layer]] = {c: set() for c in canon_ids}
         index: dict[tuple[Layer, str, str], set[str]] = defaultdict(set)
+        live_private: dict[tuple[Layer, str, str], set[str]] = defaultdict(set)
         for inc in ds.incidents:
             for ind in inc.indicators:
                 cap = canonical[ind.capture_id]
@@ -120,6 +128,9 @@ class ScoringContext:
                     vals.live.add(norm)
                 # rarity counts the incident of the canonical capture, never the duplicate's
                 index[(ind.layer, ind.kind, norm)].add(incident_of[cap])
+                if ind.observed is Observed.live and weights.weight(ind.kind, ind.layer).private:
+                    live_private[(ind.layer, ind.kind, norm)].add(incident_of[cap])
+        group_of = _pre_groups({incident_of[c] for c in canon_ids}, live_private.values())
         return cls(
             ds=ds,
             weights=weights,
@@ -129,9 +140,15 @@ class ScoringContext:
             values=values,
             layers=layers,
             index=dict(index),
+            group_of=group_of,
+            n_groups=len(set(group_of.values())),
             n=len(canon_ids),
             n_incidents=len({incident_of[c] for c in canon_ids}),
         )
+
+    def groups(self, key: tuple[Layer, str, str]) -> int:
+        """Distinct pre-groups among the incidents carrying this (layer, kind, value)."""
+        return len({self.group_of[i] for i in self.index.get(key, ())})
 
     def resolve(self, capture_id: str) -> str:
         try:
@@ -199,7 +216,7 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
         if common:
             best_norm, best_bits, best_k, best_live = None, -1.0, 0, False
             for norm in sorted(common):
-                k = len(ctx.index[(layer, kind, norm)])
+                k = ctx.groups((layer, kind, norm))
                 live = norm in xa.live and norm in xb.live
                 prior = entry.bits * scale
                 if entry.private and not live:
@@ -285,15 +302,23 @@ def threshold(ctx: ScoringContext, relation: Relation = Relation.campaign) -> fl
 
 
 def verdict(score: PairScore, ctx: ScoringContext) -> str:
-    """`link` at or above τ, `review` within REVIEW_BAND below it (and above 0 bits), else `no link`."""
+    """D1 edge rule: `link` if bits ≥ τ and (≥2 positive layers or a live operator-private id);
+    `review` if it clears τ without that gate, or lies within REVIEW_BAND below τ (and above 0
+    bits); else `no link`."""
     tau = threshold(ctx, score.relation)
     if score.bits >= tau:
-        return "link"
+        return "link" if score.layers_positive >= 2 or score.live_private else "review"
     return "review" if score.bits > 0 and score.bits >= tau - REVIEW_BAND else "no link"
 
 
+def _private_conflict(score: PairScore) -> bool:
+    return any(r.status is EvidenceStatus.conflict and r.layer in (Layer.tenant, Layer.owner) for r in score.rows)
+
+
 def level_of(score: PairScore) -> LinkLevel:
-    if score.live_private or score.layers_positive >= 3:
+    """strict: a live operator-private id (unless tenant/owner conflict) or ≥3 positive layers;
+    medium: ≥2 positive layers; loose: anything else."""
+    if (score.live_private and not _private_conflict(score)) or score.layers_positive >= 3:
         return LinkLevel.strict
     return LinkLevel.medium if score.layers_positive >= 2 else LinkLevel.loose
 
@@ -309,8 +334,28 @@ def to_link(score: PairScore, link_id: str, ctx: ScoringContext) -> Link:
 
 
 def _seen(ctx: ScoringContext, key: Key, norm: str) -> str:
-    k = len(ctx.index.get((key[0], key[1], norm), ()))
-    return f"{k} incident{'s' if k != 1 else ''} / {ctx.n_incidents}"
+    full = (key[0], key[1], norm)
+    k, i = ctx.groups(full), len(ctx.index.get(full, ()))
+    return f"{k} group{'s' if k != 1 else ''} ({i} incident{'s' if i != 1 else ''}) / {ctx.n_groups}"
+
+
+def _pre_groups(incidents: set[str], shared: Iterable[set[str]]) -> dict[str, str]:
+    """Connected components (union-find) of incidents linked by a shared live private id."""
+    parent = {i: i for i in incidents}
+
+    def find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for carriers in shared:
+        first, *rest = sorted(carriers)
+        for other in rest:
+            ra, rb = find(first), find(other)
+            if ra != rb:
+                parent[max(ra, rb)] = min(ra, rb)
+    return {i: find(i) for i in incidents}
 
 
 def _fmt_weight(bits: float, scale: float) -> str:

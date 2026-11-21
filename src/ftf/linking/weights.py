@@ -84,7 +84,7 @@ class WeightTable:
         entry = self.kinds.get(kind)
         if entry is not None:
             return entry
-        return KindWeight(layer=layer, bits=self.layer_defaults.get(layer, 0.0))
+        return KindWeight(layer=layer, bits=self.layer_defaults.get(layer, 0.0), private=layer in PRIVATE_LAYERS)
 
     def scale(self, kind: str, layer: Layer, relation: Relation) -> float:
         entry = self.kinds.get(kind)
@@ -113,7 +113,11 @@ HAND_TABLE = WeightTable(
         "aio_sdk_asset": _K(L.platform, 1.7),
         "uniqueizer_hue_rotate": _K(L.platform, 1.7),
         # kit
-        "kit_asset_set": _K(L.kit, 4.0),
+        # A whole identical asset set (07 §2.5 c: s 0.9, u 0.02 → template +5.5 after one bit of
+        # rarity). Deliberate deviation from 07, which counts it fully toward campaign: here it
+        # counts at 0.8, so a copied kit on another platform (−4 conflict) lands in campaign
+        # review, never in link, and a same-platform copy still needs a second layer.
+        "kit_asset_set": _K(L.kit, 6.5, relations=_row(1.0, 0.0, 0.25, 0.8, 1.0)),
         "aio_lander_template": _K(L.kit, 4.0),
         "aio_macros_file": _K(L.kit, 2.0),
         "brand_asset": _K(L.kit, 0.3),  # impersonated brand's logo/fonts: a stop-list hub
@@ -159,3 +163,6 @@ HAND_TABLE = WeightTable(
 
 # Values that record a failed lookup, not evidence (HACK-19 writes `unknown` when a source is down).
 IGNORED_VALUES = frozenset({"unknown"})
+
+# Layers whose unknown kinds are treated as operator-private ids (fallback in `WeightTable.weight`).
+PRIVATE_LAYERS = frozenset({Layer.tenant, Layer.owner, Layer.tracker_instance, Layer.tracking_account})

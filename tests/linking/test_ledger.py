@@ -69,7 +69,7 @@ def base_incidents() -> list[Incident]:
             ind(L.distribution_account, "advertiser_page_name", "page-new"),
             ind(L.infrastructure, "a_record_ip", "192.0.2.10"),
         ]),
-        # cluster B (the {48, 61}-like pair): same platform, own tenant, a creative pack and brand skin
+        # cluster B: same platform, own tenant, a creative pack and brand skin
         incident("b1", AIO + [
             ind(L.tenant, "aio_cdn_tenant", "tenant-b"),
             ind(L.creative, "image_phash", "pack-1"),
@@ -82,14 +82,14 @@ def base_incidents() -> list[Incident]:
             ind(L.creative, "image_phash", "pack-1"),
             ind(L.kit, "brand_asset", "brand-logo"),
         ]),
-        # (c) copied kit: same asset set, title and static (copied) pixel, different stacks
-        incident("p8", [
-            ind(L.platform, "tracker_script", "php-tracker-js"),
+        # (c) copied kit: same asset set, title and static (copied) pixel, on another platform
+        incident("k1", [
+            ind(L.platform, "platform_name", "stack-c"),
             ind(L.kit, "kit_asset_set", "kitset-x"),
             ind(L.creative, "page_title", "Placeholder title X"),
             ind(L.tracking_account, "meta_pixel", "pixel-x"),
         ]),
-        incident("p11", AIO + [
+        incident("k2", AIO + [
             ind(L.kit, "kit_asset_set", "kitset-x"),
             ind(L.creative, "page_title", "Placeholder title X"),
             ind(L.tracking_account, "meta_pixel", "pixel-x"),
@@ -116,7 +116,7 @@ def row(score, kind):
 
 
 def test_rows_sum_to_total(ctx):
-    for a, b in [("n/lander", "a1/lander"), ("d/lander", "b1/lander"), ("p8/lander", "p11/lander")]:
+    for a, b in [("n/lander", "a1/lander"), ("d/lander", "b1/lander"), ("k1/lander", "k2/lander")]:
         for rel in Relation:
             s = score_pair(ctx, a, b, rel)
             assert sum(r.bits for r in s.rows) == pytest.approx(s.bits, abs=1e-6)
@@ -130,7 +130,9 @@ def test_a_new_domain_assigned_to_known_campaign(ctx):
     assert s.live_private and s.layers_positive >= 3
     assert row(s, "aio_cdn_tenant").status is EvidenceStatus.shared
     assert row(s, "aio_cdn_tenant").bits > row(s, "aio_landing").bits > 0
-    assert row(s, "aio_landing").seen_in == "3 incidents / 12"
+    # the three campaign-A incidents share a live pixel: one pre-group, so no rarity penalty
+    assert row(s, "aio_landing").seen_in == "1 group (3 incidents) / 10"
+    assert row(s, "aio_landing").bits == HAND_TABLE.kinds["aio_landing"].bits
     # platform constants are everywhere: one hub row per kind, no bits
     assert row(s, "aio_sdk_asset").status is EvidenceStatus.hub_subsumed
     assert row(s, "aio_sdk_asset").bits == 0
@@ -160,11 +162,15 @@ def test_b_distractor_on_other_platform_is_new(ctx):
 
 
 def test_c_copied_kit_same_template_campaign_in_review(ctx):
-    tmpl = score_pair(ctx, "p8/lander", "p11/lander", Relation.template)
-    camp = score_pair(ctx, "p8/lander", "p11/lander", Relation.campaign)
+    tmpl = score_pair(ctx, "k1/lander", "k2/lander", Relation.template)
+    camp = score_pair(ctx, "k1/lander", "k2/lander", Relation.campaign)
     tau = threshold(ctx, Relation.campaign)
     assert tmpl.bits > 0
-    assert row(tmpl, "kit_asset_set").bits > 0
+    assert row(tmpl, "kit_asset_set").bits == pytest.approx(5.5)  # 07 §2.5 c: template +5.5
+    # clears τ for template, but on one layer only: the D1 gate keeps it in review
+    assert tmpl.bits >= threshold(ctx, Relation.template)
+    assert verdict(tmpl, ctx) == "review"
+    assert row(camp, "platform_name").status is EvidenceStatus.conflict
     assert row(tmpl, "meta_pixel").bits == 0  # a pixel says nothing about the template
     assert tau - 3 <= camp.bits < tau
     assert verdict(camp, ctx) == "review"
@@ -173,6 +179,43 @@ def test_c_copied_kit_same_template_campaign_in_review(ctx):
     assert row(camp, "meta_pixel").bits < row(
         score_pair(ctx, "n/lander", "a1/lander", Relation.campaign), "meta_pixel"
     ).bits + HAND_TABLE.static_discount
+
+
+def test_big_campaign_ids_not_punished():
+    """07 §2.2 item 2: a campaign of six incidents keeps the full weight of its own ids."""
+    members = [incident(f"a{i}", CAMPAIGN_A) for i in range(6)]
+    others = [
+        incident(f"o{i}", AIO + [ind(L.tenant, "aio_cdn_tenant", f"tenant-o{i}"),
+                                 ind(L.tracking_account, "meta_pixel", f"pixel-o{i}", live=True)])
+        for i in range(20)
+    ]
+    new = incident("n", CAMPAIGN_A[:-2] + [ind(L.creative, "ad_caption", "Placeholder caption A")])
+    ctx = ScoringContext.from_dataset(Dataset(name="big-campaign", incidents=members + others + [new]))
+    assert ctx.n_groups == 21
+    s = score_pair(ctx, "n/lander", "a0/lander")
+    assert row(s, "aio_cdn_tenant").bits == pytest.approx(5.0)  # 6 − 1 static copy prior, k = 1 group
+    assert row(s, "aio_landing").bits == pytest.approx(4.0)
+    assert row(s, "meta_pixel").bits == pytest.approx(3.0)
+    assert s.bits >= threshold(ctx, Relation.campaign) + 3
+    assert verdict(s, ctx) == "link"
+
+
+def test_verdict_needs_two_layers_or_live_private():
+    from ftf.linking.types import PairScore
+    ctx = ScoringContext.from_dataset(Dataset(name="tiny", incidents=[incident("x", []), incident("y", [])]))
+    one = PairScore(a="x/lander", b="y/lander", relation=Relation.campaign, bits=20.0, layers_positive=1)
+    assert verdict(one, ctx) == "review"
+    assert verdict(PairScore(**{**one.__dict__, "live_private": True}), ctx) == "link"
+    assert verdict(PairScore(**{**one.__dict__, "layers_positive": 2}), ctx) == "link"
+
+
+def test_no_strict_level_with_tenant_conflict(ctx):
+    from ftf.contract.models import EvidenceRow
+    from ftf.linking.ledger import level_of
+    from ftf.linking.types import PairScore
+    conflict = EvidenceRow(layer=L.tenant, kind="aio_cdn_tenant", status=EvidenceStatus.conflict, bits=-4.0)
+    s = PairScore(a="x", b="y", relation=Relation.campaign, bits=5.0, rows=[conflict], layers_positive=2, live_private=True)
+    assert level_of(s) is LinkLevel.medium
 
 
 def test_collector_traces_change_no_score(ds, ctx):
@@ -244,7 +287,7 @@ def test_duplicates_are_collapsed(ds, ctx):
 def test_to_link_levels_and_validation(ds, ctx):
     links = [
         to_link(score_pair(ctx, "n/lander", "a1/lander"), "L1", ctx),
-        to_link(score_pair(ctx, "p8/lander", "p11/lander", Relation.template), "L2", ctx),
+        to_link(score_pair(ctx, "k1/lander", "k2/lander", Relation.template), "L2", ctx),
         to_link(score_pair(ctx, "d/lander", "b1/lander"), "L3", ctx),
     ]
     assert [l.level for l in links] == [LinkLevel.strict, LinkLevel.loose, LinkLevel.loose]
@@ -305,5 +348,5 @@ def test_cli_score(tmp_path, ds, capsys):
     assert main(["score", str(path), "n/lander", "a1/lander"]) == 0
     out = capsys.readouterr().out
     assert "aio_cdn_tenant" in out and "verdict=link" in out and "level=strict" in out
-    assert main(["score", str(path), "p8/lander", "p11/lander", "--relation", "template"]) == 0
+    assert main(["score", str(path), "k1/lander", "k2/lander", "--relation", "template"]) == 0
     assert "relation=template" in capsys.readouterr().out
