@@ -218,6 +218,35 @@ def test_no_strict_level_with_tenant_conflict(ctx):
     assert level_of(s) is LinkLevel.medium
 
 
+def test_reseller_tenant_with_two_owners_is_cannot_link():
+    """07 §2.2 item 5: one live tenant id hosting two owners does not make one campaign."""
+    def side(owner: str) -> list[tuple]:
+        return [
+            ind(L.tenant, "aio_cdn_tenant", "tenant-z", live=True),
+            ind(L.owner, "aio_owner", owner, live=True),
+            ind(L.tracking_account, "meta_pixel", "pixel-z", live=True),
+            ind(L.landing, "aio_landing", "landing-z"),
+            ind(L.kit, "kit_asset_set", "kitset-z"),
+        ]
+    ds = Dataset(name="reseller", incidents=[incident("x", side("owner-1")), incident("y", side("owner-2")), incident("z", [])])
+    ctx = ScoringContext.from_dataset(ds)
+    assert ctx.group_of["x"] != ctx.group_of["y"]  # neither tenant nor pixel joins two owners
+    for rel in (Relation.campaign, Relation.operator):
+        s = score_pair(ctx, "x/lander", "y/lander", rel)
+        assert s.bits >= threshold(ctx, rel) and s.layers_positive >= 2  # would link on bits alone
+        assert row(s, "aio_owner").status is EvidenceStatus.conflict
+        assert row(s, "aio_cdn_tenant").seen_in.startswith("2 groups")
+        assert verdict(s, ctx) == "review"
+        assert to_link(s, "L", ctx).level is LinkLevel.medium
+    tmpl = score_pair(ctx, "x/lander", "y/lander", Relation.template)
+    assert not [r for r in tmpl.rows if r.status is EvidenceStatus.conflict]
+    assert verdict(tmpl, ctx) == "link"
+    # same tenant, no owner ids on either side: the tenant joins them into one pre-group
+    bare = [i for i in side("unused") if i[0] is not L.owner]
+    ctx2 = ScoringContext.from_dataset(Dataset(name="tenant-only", incidents=[incident("x", bare), incident("y", bare)]))
+    assert ctx2.group_of["x"] == ctx2.group_of["y"]
+
+
 def test_collector_traces_change_no_score(ds, ctx):
     collector = [
         ind(L.collector, "aio_fingerprint", "f" * 32),

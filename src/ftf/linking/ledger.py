@@ -7,9 +7,14 @@ Rules (07 §2.2, §3 D1):
 - A shared value of a kind is worth `weight × relation scale − log2(k)`, floored at 0, where k is
   the number of distinct *pre-groups* among the incidents carrying the value (07 §2.2 item 2:
   rarity over clusters, not incidents, so a big campaign's own ids are not punished). Pre-groups
-  are the connected components of incidents that share a live operator-private id (tenant,
-  owner, tracker instance, live pixel); an incident without one is its own group. HACK-23
-  replaces this with corpus counts.
+  are the connected components of incidents that share a live operator-private id, joined from
+  the finest level available (owner, then tracker instance / live pixel, then tenant; see
+  `_pre_groups`); an incident without one is its own group. A coarse id spanning several owners
+  is therefore counted at that coarser level (07 §2.2 item 5). HACK-23 replaces this with corpus
+  counts.
+- A conflict on a single-valued tenant/owner id is a cannot-link for the campaign and operator
+  relations (07 §3): `verdict` never says `link` for such a pair. The bits stay honest (−4 on the
+  conflict row); HACK-22 reads the conflict rows for its cannot-link constraints.
   Below `hub_bits` it is `hub_subsumed` (0 bits).
 - Within a layer only the best shared kind counts (layers are dependent inside); across layers
   the bits add. A conflict on a single-valued, campaign-stable field (platform / tenant / owner)
@@ -112,6 +117,7 @@ class ScoringContext:
         layers: dict[str, set[Layer]] = {c: set() for c in canon_ids}
         index: dict[tuple[Layer, str, str], set[str]] = defaultdict(set)
         live_private: dict[tuple[Layer, str, str], set[str]] = defaultdict(set)
+        has_owner: set[str] = set()  # incidents with any owner-level id (live or static)
         for inc in ds.incidents:
             for ind in inc.indicators:
                 cap = canonical[ind.capture_id]
@@ -128,9 +134,11 @@ class ScoringContext:
                     vals.live.add(norm)
                 # rarity counts the incident of the canonical capture, never the duplicate's
                 index[(ind.layer, ind.kind, norm)].add(incident_of[cap])
+                if ind.layer is Layer.owner:
+                    has_owner.add(incident_of[cap])
                 if ind.observed is Observed.live and weights.weight(ind.kind, ind.layer).private:
                     live_private[(ind.layer, ind.kind, norm)].add(incident_of[cap])
-        group_of = _pre_groups({incident_of[c] for c in canon_ids}, live_private.values())
+        group_of = _pre_groups({incident_of[c] for c in canon_ids}, live_private, has_owner)
         return cls(
             ds=ds,
             weights=weights,
@@ -303,11 +311,14 @@ def threshold(ctx: ScoringContext, relation: Relation = Relation.campaign) -> fl
 
 def verdict(score: PairScore, ctx: ScoringContext) -> str:
     """D1 edge rule: `link` if bits ≥ τ and (≥2 positive layers or a live operator-private id);
-    `review` if it clears τ without that gate, or lies within REVIEW_BAND below τ (and above 0
+    a tenant/owner conflict under campaign/operator is a cannot-link (at most `review`);
+    `review` if it clears τ without the gate, or lies within REVIEW_BAND below τ (and above 0
     bits); else `no link`."""
     tau = threshold(ctx, score.relation)
     if score.bits >= tau:
-        return "link" if score.layers_positive >= 2 or score.live_private else "review"
+        cannot_link = score.relation in ctx.weights.conflict_relations and _private_conflict(score)
+        gated = score.layers_positive >= 2 or score.live_private
+        return "link" if gated and not cannot_link else "review"
     return "review" if score.bits > 0 and score.bits >= tau - REVIEW_BAND else "no link"
 
 
@@ -316,12 +327,13 @@ def _private_conflict(score: PairScore) -> bool:
 
 
 def level_of(score: PairScore) -> LinkLevel:
-    """strict: a live operator-private id (unless tenant/owner conflict) or ≥3 positive layers;
-    medium: ≥2 positive layers; loose: anything else."""
-    if (score.live_private and not _private_conflict(score)) or score.layers_positive >= 3:
+    """strict: a live operator-private id or ≥3 positive layers; medium: ≥2 positive layers;
+    loose: anything else. A tenant/owner conflict caps the level at medium (cannot-link pair)."""
+    if _private_conflict(score):
+        return LinkLevel.medium if score.layers_positive >= 2 else LinkLevel.loose
+    if score.live_private or score.layers_positive >= 3:
         return LinkLevel.strict
     return LinkLevel.medium if score.layers_positive >= 2 else LinkLevel.loose
-
 
 def to_link(score: PairScore, link_id: str, ctx: ScoringContext) -> Link:
     """A contract `Link` carrying the ledger. Raises ValueError if the ledger has no rows."""
@@ -339,9 +351,20 @@ def _seen(ctx: ScoringContext, key: Key, norm: str) -> str:
     return f"{k} group{'s' if k != 1 else ''} ({i} incident{'s' if i != 1 else ''}) / {ctx.n_groups}"
 
 
-def _pre_groups(incidents: set[str], shared: Iterable[set[str]]) -> dict[str, str]:
-    """Connected components (union-find) of incidents linked by a shared live private id."""
+def _pre_groups(
+    incidents: set[str], live_private: dict[tuple[Layer, str, str], set[str]], has_owner: set[str]
+) -> dict[str, str]:
+    """Connected components (union-find) of incidents sharing a live operator-private id, finest first.
+
+    1. Owner ids join their carriers.
+    2. Tracker instance / tracking account ids (live pixel) join two components unless both
+       already hold an owner id (two different owners stay apart).
+    3. Tenant ids join two components only if neither holds an owner id: a tenant can be a
+       reseller hosting several owners (07 §2.2 item 5).
+    Other private layers (fallback kinds) are treated like tracker ids.
+    """
     parent = {i: i for i in incidents}
+    owned = {i: i in has_owner for i in incidents}  # per root: component holds an owner id
 
     def find(x: str) -> str:
         while parent[x] != x:
@@ -349,14 +372,24 @@ def _pre_groups(incidents: set[str], shared: Iterable[set[str]]) -> dict[str, st
             x = parent[x]
         return x
 
-    for carriers in shared:
-        first, *rest = sorted(carriers)
-        for other in rest:
-            ra, rb = find(first), find(other)
-            if ra != rb:
-                parent[max(ra, rb)] = min(ra, rb)
-    return {i: find(i) for i in incidents}
+    def tier(layer: Layer) -> int:
+        return 0 if layer is Layer.owner else 2 if layer is Layer.tenant else 1
 
+    for t in (0, 1, 2):
+        for key in sorted(k for k in live_private if tier(k[0]) == t):
+            first, *rest = sorted(live_private[key])
+            for other in rest:
+                ra, rb = find(first), find(other)
+                if ra == rb:
+                    continue
+                if t == 1 and owned[ra] and owned[rb]:
+                    continue
+                if t == 2 and (owned[ra] or owned[rb]):
+                    continue
+                root, child = min(ra, rb), max(ra, rb)
+                parent[child] = root
+                owned[root] = owned[ra] or owned[rb]
+    return {i: find(i) for i in incidents}
 
 def _fmt_weight(bits: float, scale: float) -> str:
     return f"{bits:g}" if scale == 1 else f"{bits:g}×{scale:g}"
