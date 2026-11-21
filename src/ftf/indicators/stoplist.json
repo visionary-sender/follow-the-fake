@@ -22,6 +22,9 @@
       "gazeta.pl", "static.im-g.pl", "im-g.pl", "tvn24.pl", "tvn.pl", "onet.pl", "wp.pl", "interia.pl", "polsatnews.pl", "rmf24.pl",
       "money.pl", "bankier.pl", "businessinsider.com.pl", "pap.pl", "tvp.info", "pkobp.pl", "pekao.com.pl", "mbank.pl", "santander.pl",
       "ing.pl", "nbp.pl", "gov.pl", "zus.pl", "inpost.pl", "orlen.pl", "amazon.com"
+    ],
+    "redirectors": [
+      "l.instagram.com", "l.messenger.com", "l.threads.net", "t.co", "lnkd.in", "out.reddit.com"
     ]
   },
   "bare_domains": {
