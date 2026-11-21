@@ -10,8 +10,12 @@ Rules (07 §2.2, §3 D1):
   are the connected components of incidents that share a live operator-private id, joined from
   the finest level available (owner, then tracker instance / live pixel, then tenant; see
   `_pre_groups`); an incident without one is its own group. A coarse id spanning several owners
-  is therefore counted at that coarser level (07 §2.2 item 5). HACK-23 replaces this with corpus
-  counts.
+  is therefore counted at that coarser level (07 §2.2 item 5). With background counts
+  (`background.py`) the rarity term is log2[(c + α)/(1 + α)], c the operators carrying the value
+  in the background corpus plus the sample's pre-groups: 0 for a value of one operator, as above.
+- Chain rule (`hierarchy.py`): values whose discovered level (platform ⊃ tenant ⊃ owner ⊃ aio
+  campaign ⊃ landing) is already counted by that level's shared id, or by a stronger value of the
+  same level, become `hub_subsumed` before the within-layer max. One term per level.
 - A conflict on a single-valued tenant/owner id is a cannot-link for the campaign and operator
   relations (07 §3): `verdict` never says `link` for such a pair. The bits stay honest (−4 on the
   conflict row); HACK-22 reads the conflict rows for its cannot-link constraints.
@@ -45,6 +49,8 @@ from ftf.contract.models import (
     Observed,
     Relation,
 )
+from ftf.linking.background import BackgroundCounts
+from ftf.linking.hierarchy import ANCHOR_KINDS, ChainRow, Hierarchy, apply_chain_rule
 from ftf.linking.types import METHOD, PairScore
 from ftf.linking.weights import HAND_TABLE, IGNORED_VALUES, WeightTable
 
@@ -103,9 +109,16 @@ class ScoringContext:
     n_groups: int
     n: int  # canonical captures
     n_incidents: int  # incidents with at least one canonical capture
+    background: BackgroundCounts | None = None  # corpus operator counts for the rarity term
+    hierarchy: Hierarchy | None = None  # discovered id levels for the chain rule (None: off)
 
     @classmethod
-    def from_dataset(cls, ds: Dataset, weights: WeightTable = HAND_TABLE) -> "ScoringContext":
+    def from_dataset(
+        cls, ds: Dataset, weights: WeightTable = HAND_TABLE, background: BackgroundCounts | None = None,
+        chain_rule: bool = True,
+    ) -> "ScoringContext":
+        """Index `ds` for scoring. `background` switches the rarity term to corpus operator counts;
+        `chain_rule` discovers the id hierarchy of `ds` and applies one term per level."""
         canonical: dict[str, str] = {}
         incident_of: dict[str, str] = {}
         for inc in ds.incidents:
@@ -139,7 +152,7 @@ class ScoringContext:
                 if ind.observed is Observed.live and weights.weight(ind.kind, ind.layer).private:
                     live_private[(ind.layer, ind.kind, norm)].add(incident_of[cap])
         group_of = _pre_groups({incident_of[c] for c in canon_ids}, live_private, owners)
-        return cls(
+        ctx = cls(
             ds=ds,
             weights=weights,
             canonical=canonical,
@@ -152,7 +165,27 @@ class ScoringContext:
             n_groups=len(set(group_of.values())),
             n=len(canon_ids),
             n_incidents=len({incident_of[c] for c in canon_ids}),
+            background=background,
         )
+        if chain_rule:
+            ctx.hierarchy = ctx.build_hierarchy()
+        return ctx
+
+    def build_hierarchy(self, anchors=ANCHOR_KINDS) -> Hierarchy:
+        caps = {
+            cap: [(layer, kind, norm) for (layer, kind), v in vals.items() if layer is not Layer.collector for norm in v.ids]
+            for cap, vals in self.values.items()
+        }
+        return Hierarchy.from_captures(caps, anchors)
+
+    def rarity(self, key: tuple[Layer, str, str], k: int) -> float:
+        """Bits taken off a shared value for being common: log2(k) over the sample's pre-groups, or with
+        background counts log2[(c + α)/(1 + α)], c = corpus operators + sample pre-groups (0 for one operator)."""
+        if self.background is None or not self.background.knows(key[0], key[1]):
+            return math.log2(max(k, 1))
+        a = self.background.alpha
+        c = self.background.count(*key) + max(k, 1)
+        return math.log2((c + a) / (1 + a))
 
     def groups(self, key: tuple[Layer, str, str]) -> int:
         """Distinct pre-groups among the incidents carrying this (layer, kind, value)."""
@@ -193,6 +226,7 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
     shared_rows: dict[Layer, list[_Candidate]] = defaultdict(list)
     conflict_rows: dict[Layer, list[_Candidate]] = defaultdict(list)
     other_rows: list[EvidenceRow] = []
+    shared_cands: list[ChainRow] = []
     live_private = False
 
     for key in sorted(set(va) | set(vb), key=lambda k: (list(Layer).index(k[0]), k[1])):
@@ -222,19 +256,21 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
                 ))
             continue
         if common:
-            best_norm, best_bits, best_k, best_live = None, -1.0, 0, False
+            best_norm, best_bits, best_k, best_live, best_rar = None, -1.0, 0, False, 0.0
             for norm in sorted(common):
                 k = ctx.groups((layer, kind, norm))
                 live = norm in xa.live and norm in xb.live
                 prior = entry.bits * scale
                 if entry.private and not live:
                     prior = max(prior - w.static_discount, 0.0)
-                bits = max(prior - math.log2(max(k, 1)), 0.0)
+                rar = ctx.rarity((layer, kind, norm), k)
+                bits = max(prior - rar, 0.0)
                 if bits > best_bits:
-                    best_norm, best_bits, best_k, best_live = norm, bits, k, live
+                    best_norm, best_bits, best_k, best_live, best_rar = norm, bits, k, live, rar
             ids = ids_of(xa, [best_norm]) + ids_of(xb, [best_norm])
             seen = _seen(ctx, key, best_norm)
             value = _short(xa.display[best_norm])
+            rarity_txt = f"log2({best_k})" if ctx.background is None else f"{best_rar:.2f} (corpus + sample)"
             if scale == 0:
                 other_rows.append(EvidenceRow(
                     layer=layer, kind=kind, status=EvidenceStatus.shared, value=value, seen_in=seen,
@@ -244,20 +280,20 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
             if best_bits < w.hub_bits:
                 other_rows.append(EvidenceRow(
                     layer=layer, kind=kind, status=EvidenceStatus.hub_subsumed, value=value, seen_in=seen,
-                    indicator_ids=ids, note=f"{_fmt_weight(entry.bits, scale)} − log2({best_k}) < {w.hub_bits} bit",
+                    indicator_ids=ids, note=f"{_fmt_weight(entry.bits, scale)} − {rarity_txt} < {w.hub_bits} bit",
                 ))
                 continue
             how = "live on both sides" if best_live else f"not live on both sides, −{w.static_discount:g} copy prior"
-            note = f"{_fmt_weight(entry.bits, scale)} − log2({best_k}) rarity"
+            note = f"{_fmt_weight(entry.bits, scale)} − {rarity_txt} rarity"
             if entry.private:
                 note += f"; operator-private, {how}"
                 live_private = live_private or best_live
             if len(common) > 1:
                 note += f"; {len(common)} values shared, best kept"
-            shared_rows[layer].append(_Candidate(EvidenceRow(
+            shared_cands.append(ChainRow(EvidenceRow(
                 layer=layer, kind=kind, status=EvidenceStatus.shared, value=value, bits=round(best_bits, 3),
                 seen_in=seen, indicator_ids=ids, note=note,
-            ), round(best_bits, 3)))
+            ), round(best_bits, 3), (layer, kind, best_norm)))
         elif entry.single_valued and scale > 0 and relation in w.conflict_relations:
             na, nb = sorted(xa.ids)[0], sorted(xb.ids)[0]
             conflict_rows[layer].append(_Candidate(EvidenceRow(
@@ -266,6 +302,12 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
                 indicator_ids=ids_of(xa, xa.ids) + ids_of(xb, xb.ids),
                 note="single-valued, campaign-stable field differs",
             ), w.conflict_bits))
+
+    if ctx.hierarchy is not None:
+        shared_cands, subsumed = apply_chain_rule(shared_cands, ctx.hierarchy, _platform_cap(w, relation))
+        other_rows += subsumed
+    for c in shared_cands:
+        shared_rows[c.key[0]].append(_Candidate(c.row, c.bits))
 
     rows: list[EvidenceRow] = []
     total = 0.0
@@ -397,3 +439,10 @@ def _pre_groups(
 def _fmt_weight(bits: float, scale: float) -> str:
     return f"{bits:g}" if scale == 1 else f"{bits:g}×{scale:g}"
 
+
+def _platform_cap(w: WeightTable, relation: Relation) -> float:
+    """Most a shared platform may contribute: the strongest platform-layer kind of the table (07 §2.5: one
+    term for all platform constants)."""
+    bits = [e.bits * w.scale(k, Layer.platform, relation) for k, e in w.kinds.items() if e.layer is Layer.platform]
+    bits.append(w.layer_defaults.get(Layer.platform, 0.0) * w.relation_scale.get(Layer.platform, {}).get(relation, 0.0))
+    return max(bits)

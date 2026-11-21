@@ -9,6 +9,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from ftf.contract.models import Dataset, Relation
+from ftf.linking.learn_commands import add_weights_argument, context_from_args
 from ftf.linking.ledger import ScoringContext, level_of, score_pair, threshold, verdict
 from ftf.linking.types import PairScore
 
@@ -27,13 +28,14 @@ def register_score(subparsers: argparse._SubParsersAction) -> None:
         "--relation", choices=[r.value for r in Relation], default=Relation.campaign.value,
         help="relation to score (default: %(default)s)",
     )
+    add_weights_argument(parser)
     parser.set_defaults(func=run_score)
 
 
 def run_score(args: argparse.Namespace) -> int:
     try:
         ds = Dataset.from_json(args.dataset.read_bytes())
-        ctx = ScoringContext.from_dataset(ds)
+        ctx = context_from_args(ds, args)
         score = score_pair(ctx, args.a, args.b, Relation(args.relation))
     except (OSError, ValidationError, KeyError, ValueError) as exc:
         msg = exc.args[0] if isinstance(exc, KeyError) and exc.args else exc
