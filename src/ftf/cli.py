@@ -1,15 +1,17 @@
 """Command-line entry point: `ftf <command> ...`.
 
-Each feature module adds its own subcommand with `subparsers.add_parser(...)` and sets
-`func` via `set_defaults(func=...)`; `main` dispatches to it.
+A feature module adds a subcommand by defining `register(subparsers)`, which calls
+`subparsers.add_parser(...)` and `set_defaults(func=...)`, and by being listed in `COMMANDS`.
 """
 
 from __future__ import annotations
 
 import argparse
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from ftf import __version__
+
+COMMANDS: list[Callable[[argparse._SubParsersAction], None]] = []
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -18,7 +20,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="Follow the Fake: group scam ads and landing pages into campaigns.",
     )
     parser.add_argument("--version", action="version", version=f"ftf {__version__}")
-    parser.add_subparsers(dest="command", metavar="<command>")
+    subparsers = parser.add_subparsers(dest="command", metavar="<command>")
+    for register in COMMANDS:
+        register(subparsers)
     return parser
 
 

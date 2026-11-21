@@ -39,11 +39,12 @@ Each call copies the worktree's tracked and untracked-but-not-ignored files (nev
 anything gitignored) to `/work/<worktree-dir-name>/src` on the VM, replacing the previous copy.
 The venv `/work/<worktree-dir-name>/venv` is pinned to the VM's base package versions and is
 rebuilt only when `pyproject.toml` changes. Different worktrees get different directories, so
-they can use the VM at the same time; set `FTF_VM_SLUG` to choose the name yourself.
+they can use the VM at the same time; set `FTF_VM_SLUG` to choose the name yourself. The script
+refuses to take over an existing `/work/<name>` that it did not create.
 
 ## Dependencies and licences
 
-Only permissively licensed open-source dependencies are allowed (MIT, BSD, Apache, PSF, ISC).
+Only permissively licensed open-source dependencies are allowed (MIT, BSD, Apache, PSF, ISC, HPND).
 `LICENSES-THIRD-PARTY.md` is generated from installed package metadata by
 `scripts/vm.sh licences`; a test fails if the table is stale or lists a licence outside the
 allowlist. After changing dependencies in `pyproject.toml`, regenerate it and commit it.

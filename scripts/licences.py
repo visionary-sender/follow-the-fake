@@ -24,8 +24,10 @@ ROOT = Path(__file__).resolve().parent.parent
 TABLE = ROOT / "LICENSES-THIRD-PARTY.md"
 EXTRAS = ("dev",)
 
-ALLOWED = ("MIT", "BSD", "APACHE", "PSF", "PYTHON SOFTWARE FOUNDATION", "ISC", "HPND", "UNLICENSE")
-DENIED = ("GPL", "MPL", "MOZILLA", "EUPL", "SSPL", "CDDL", "EPL", "PROPRIETARY", "COMMERCIAL")
+# Matched against whole words of a licence name ("MIT License", "BSD-2-Clause", "PSF-2.0").
+ALLOWED_WORDS = {"MIT", "BSD", "0BSD", "APACHE", "PSF", "ISC", "HPND"}
+DENIED_PREFIXES = ("GPL", "LGPL", "AGPL", "MPL", "EUPL", "SSPL", "CDDL", "EPL", "CC", "GNU")
+DENIED_WORDS = {"MOZILLA", "PROPRIETARY", "COMMERCIAL", "UNLICENSED"}
 
 
 def licence_of(dist: metadata.Distribution) -> str:
@@ -39,7 +41,8 @@ def licence_of(dist: metadata.Distribution) -> str:
         if c.startswith("License ::") and c.split("::")[-1].strip() != "OSI Approved"
     ]
     if classifiers:
-        return " OR ".join(sorted(set(classifiers)))
+        # Several classifiers usually mean several parts under different licences: all must pass.
+        return " AND ".join(sorted(set(classifiers)))
     text = (meta.get("License") or "").strip()
     if text and "\n" not in text and len(text) <= 80:
         return text
@@ -47,17 +50,27 @@ def licence_of(dist: metadata.Distribution) -> str:
 
 
 def is_permissive(licence: str) -> bool:
-    """Permissive if any OR-alternative is allowed and contains no denied token."""
-    for alt in re.split(r"\s+OR\s+|\s*/\s*|;", licence, flags=re.IGNORECASE):
-        upper = alt.upper()
-        if any(a in upper for a in ALLOWED) and not any(d in upper for d in DENIED):
+    """At least one OR-alternative must have every AND part permissive."""
+    expr = licence.replace("(", " ").replace(")", " ")
+    for alt in re.split(r"\s+OR\s+|\s*/\s*|;", expr, flags=re.IGNORECASE):
+        alt = re.sub(r"\s+WITH\s+\S+", "", alt.strip(), flags=re.IGNORECASE)  # exceptions only add rights
+        parts = re.split(r"\s+AND\s+", alt, flags=re.IGNORECASE)
+        if all(_part_permissive(p) for p in parts):
             return True
     return False
 
 
+def _part_permissive(part: str) -> bool:
+    words = re.split(r"[\s,\-]+", part.upper())
+    if any(w in DENIED_WORDS or w.startswith(DENIED_PREFIXES) for w in words):
+        return False
+    return any(w in ALLOWED_WORDS for w in words) or "PYTHON SOFTWARE FOUNDATION" in part.upper()
+
+
 def dependencies() -> dict[str, metadata.Distribution]:
     found: dict[str, metadata.Distribution] = {}
-    queue = [(r, set(EXTRAS)) for r in metadata.requires("ftf") or []]
+    seen: set[tuple[str, frozenset[str]]] = set()
+    queue = [(r, frozenset(EXTRAS)) for r in metadata.requires("ftf") or []]
     while queue:
         raw, extras = queue.pop()
         req = Requirement(raw)
@@ -65,11 +78,16 @@ def dependencies() -> dict[str, metadata.Distribution]:
         if req.marker and not any(req.marker.evaluate(env) for env in envs):
             continue
         name = canonicalize_name(req.name)
-        if name in found:
+        key = (name, frozenset(req.extras))
+        if key in seen:
             continue
-        dist = metadata.distribution(req.name)
+        seen.add(key)
+        try:
+            dist = metadata.distribution(req.name)
+        except metadata.PackageNotFoundError:
+            raise SystemExit(f"required package not installed: {req.name} (install .[dev])")
         found[name] = dist
-        queue.extend((r, set(req.extras)) for r in dist.requires or [])
+        queue.extend((r, frozenset(req.extras)) for r in dist.requires or [])
     return found
 
 

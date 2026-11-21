@@ -39,14 +39,22 @@ set -euo pipefail
 slug=$1; mode=$2; shift 2
 w=/work/$slug
 mkdir -p "$w"
+# Never take over a directory someone made by hand (the workbench guide also uses /work/<name>).
+if [ ! -e "$w/.vm-sh" ] && [ ! -e "$w/venv/.pyproject-hash" ] && [ -n "$(ls -A "$w")" ]; then
+  echo "vm.sh: $w exists and was not created by vm.sh; set FTF_VM_SLUG to another name" >&2
+  exit 2
+fi
+touch "$w/.vm-sh"
 exec 9>"$w/.lock"
-flock 9
+flock -w 60 9 || { echo "vm.sh: $w is busy (another vm.sh call holds the lock)" >&2; exit 75; }
 rm -rf "$w/src.new"
 mkdir "$w/src.new"
 tar --warning=no-unknown-keyword -xzf - -C "$w/src.new"
 rm -rf "$w/src"
 mv "$w/src.new" "$w/src"
-hash=$(sha256sum "$w/src/pyproject.toml" | cut -d' ' -f1)
+# Rebuild the venv when the package metadata or the base venv's pins change.
+hash=$( { cat "$w/src/pyproject.toml" "$w/src/src/ftf/__init__.py"; /opt/venv-base/bin/pip freeze; } \
+  | sha256sum | cut -d' ' -f1)
 if [ ! -x "$w/venv/bin/python" ] || [ "$(cat "$w/venv/.pyproject-hash" 2>/dev/null)" != "$hash" ]; then
   echo "vm.sh: (re)installing venv $w/venv" >&2
   rm -rf "$w/venv"
@@ -84,9 +92,9 @@ echo "vm.sh: $VM:/work/$slug ($mode)" >&2
 if [ "$mode" = licences ]; then
   out=$(mktemp)
   trap 'rm -f "$out"' EXIT
-  files | COPYFILE_DISABLE=1 tar -czf - --null -T - | ssh_vm "$remote_cmd" > "$out"
+  files | COPYFILE_DISABLE=1 tar -czf - --no-recursion --null -T - | ssh_vm "$remote_cmd" > "$out"
   cat "$out" > LICENSES-THIRD-PARTY.md
   echo "vm.sh: wrote LICENSES-THIRD-PARTY.md" >&2
 else
-  files | COPYFILE_DISABLE=1 tar -czf - --null -T - | ssh_vm "$remote_cmd"
+  files | COPYFILE_DISABLE=1 tar -czf - --no-recursion --null -T - | ssh_vm "$remote_cmd"
 fi
