@@ -1,24 +1,33 @@
 """Package scanner items, fetcher captures and hand-picked real pages into one contract dataset.
 
-Layout of a corpus directory (`root`), all artefact paths in the output are relative to it:
+Layout of a corpus directory (`root`); all artefact paths in the output are relative to it:
 
     scanner/            snapshot of the scanner's data dir: queue.jsonl, runs/, creatives/
     fetch-*/            `ftf fetch` output for queue targets: <capture_id>/capture.json + files
-    picked-fetch/       `ftf fetch` output for the hand-picked must-not-link list
+    picked-*/           `ftf fetch` output for the hand-picked must-not-link lists
     dataset.json        written here: contract Dataset, incidents only
-    manifest.jsonl      written here: one flat row per incident
+    manifest.jsonl      written here: one flat row per incident, keyed by incident id
     summary.json        written here: counts per corpus_kind and source, sizes, fetch outcomes
 
-Every incident gets a `corpus_kind` and a `corpus_source` indicator on each capture. Both sit
-in the collector layer: they describe how the corpus was gathered, not the scam, so they can
-never contribute to a link. See docs/corpus.md.
+Ids follow the cross-project scheme (HACK-9 `ftf.ingest.ids`, HACK-41):
+
+- ad-library ads: incident `adlib:<ad archive id>`, captures `adlib:<id>:ad` and, when the
+  landing URL was fetched, `adlib:<id>:lander` (the fetcher's capture, re-keyed);
+- fetched pages without an ad (CERT Polska domains that loaded, must-not-link pages): the
+  fetcher's own incident, ids unchanged (`fetch:<capture_id>`, capture `fetch:<capture_id>:c1`);
+- CERT Polska entries with no live page: incident `certpl:<register id>`, capture `...:c1`.
+
+Every capture carries `corpus_kind` and `corpus_source` indicators in the collector layer: they
+describe how the corpus was gathered, not the scam, so they can never contribute to a link.
+The same fields sit in manifest.jsonl. See docs/corpus.md.
 """
 
 from __future__ import annotations
 
 import json
 import re
-from collections import Counter
+import unicodedata
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,7 +36,7 @@ from ftf.corpus.targets import QueueRow, read_picked, read_queue, target_url
 
 EXTRACTOR = "ftf-corpus@0.1.0"
 
-# corpus_kind values (incident level and capture level).
+# corpus_kind values.
 AD_RECORD = "ad_record"
 FETCHED_LANDING = "fetched_landing"
 BARE_DOMAIN = "bare_domain"
@@ -37,6 +46,15 @@ KINDS = (AD_RECORD, FETCHED_LANDING, BARE_DOMAIN, MUST_NOT_LINK)
 # Sources with an ad behind the queue row; everything else (CERT Polska) is a bare domain list.
 AD_SOURCES = {"meta", "google_atc"}
 PICKED_SOURCE = "hand_picked_must_not_link"
+
+
+def sanitise(part: str) -> str:
+    """Id part as in `ftf.ingest.ids.sanitise` (HACK-9): NFC, ASCII fold, [A-Za-z0-9_.-] only."""
+    s = unicodedata.normalize("NFKD", unicodedata.normalize("NFC", str(part)).replace("ł", "l").replace("Ł", "L"))
+    s = s.encode("ascii", "ignore").decode("ascii")
+    s = re.sub(r"[^A-Za-z0-9_.-]+", "-", s)
+    s = re.sub(r"-{2,}", "-", s).strip("-")
+    return s or "x"
 
 
 @dataclass
@@ -60,12 +78,18 @@ class FetchedCapture:
 
     @property
     def is_page(self) -> bool:
-        """A page was rendered: worth treating as a landing page (live or a cloaked variant)."""
+        """The fetcher rendered a real page (its own `category`, never an outcome list here)."""
         return self.category == "live"
 
-    @property
     def incident(self) -> m.Incident:
-        return m.Incident.model_validate(self.manifest["incident"])
+        """The fetcher's incident with artefact paths made relative to the corpus root."""
+        inc = m.Incident.model_validate(self.manifest["incident"])
+        base = self.rel_dir.rsplit("/", 1)[0]  # fetcher paths are "<capture_id>/<file>" under --out
+        caps = []
+        for c in inc.captures:
+            arts = [a.model_copy(update={"path": f"{base}/{a.path}"}) if a.path else a for a in c.artefacts]
+            caps.append(c.model_copy(update={"artefacts": arts}))
+        return inc.model_copy(update={"captures": caps})
 
 
 def read_fetch_dirs(root: Path, subdirs: list[str]) -> dict[str, FetchedCapture]:
@@ -89,14 +113,9 @@ def read_fetch_dirs(root: Path, subdirs: list[str]) -> dict[str, FetchedCapture]
     return out
 
 
-def _slug(s: str, n: int = 40) -> str:
-    s = re.sub(r"[^A-Za-z0-9._-]+", "-", s).strip("-.")
-    return (s or "x")[:n]
-
-
-def _tag(capture_id: str, kind: str, value: str, n: int) -> m.Indicator:
+def _tag(capture_id: str, kind: str, value: str) -> m.Indicator:
     return m.Indicator(
-        id=f"{capture_id}/{kind}/{n}",
+        id=f"{capture_id}:{kind}",
         capture_id=capture_id,
         layer=m.Layer.collector,
         kind=kind,
@@ -108,52 +127,41 @@ def _tag(capture_id: str, kind: str, value: str, n: int) -> m.Indicator:
     )
 
 
-def _tags(capture_id: str, corpus_kind: str, source: str) -> list[m.Indicator]:
-    return [_tag(capture_id, "corpus_kind", corpus_kind, 0), _tag(capture_id, "corpus_source", source, 0)]
+def _tags(capture_id: str, corpus_kind: str, source: str, **extra: str) -> list[m.Indicator]:
+    out = [_tag(capture_id, "corpus_kind", corpus_kind), _tag(capture_id, "corpus_source", source)]
+    out += [_tag(capture_id, f"corpus_{k}", v) for k, v in extra.items()]
+    return out
 
 
-def lander_capture(
-    fc: FetchedCapture, prefix: str, stage: m.Stage, duplicate_of: str | None
-) -> tuple[m.Capture, list[m.Indicator]]:
-    """Re-key the fetcher's capture under `prefix` (ids must be unique per dataset), with paths
-    made relative to the corpus root. Returns the capture and its re-keyed indicators."""
-    inc = fc.incident
-    src = inc.captures[0]
-    cid = f"{prefix}/lander"
-    old_art = {}
-    arts = []
-    for a in src.artefacts:
-        new_id = f"{cid}/{a.type.value}"
-        if new_id in old_art.values():
-            new_id = f"{new_id}-{len(old_art)}"
-        old_art[a.id] = new_id
-        path = a.path
-        if path:
-            # Fetcher paths are "<capture_id>/<file>" relative to its --out dir.
-            path = f"{fc.rel_dir.rsplit('/', 1)[0]}/{path}"
-        arts.append(a.model_copy(update={"id": new_id, "path": path}))
-    cap = m.Capture(
-        id=cid,
-        stage=stage,
-        observed=src.observed,
-        captured_on=src.captured_on,
-        artefacts=arts,
-        missing=list(src.missing),
-        duplicate_of=duplicate_of,
-    )
+def _rekey(inc: m.Incident, new_inc: str, cap_ids: dict[str, str]) -> tuple[list[m.Capture], list[m.Indicator]]:
+    """Move captures (old id -> new id per `cap_ids`) and their indicators to new ids.
+
+    Artefact ids become `<capture>:<n>`, indicator ids `<capture>:<kind>:<n>`; provenance follows.
+    """
+    art_ids: dict[str, str] = {}
+    caps = []
+    for c in inc.captures:
+        if c.id not in cap_ids:
+            continue
+        cid = cap_ids[c.id]
+        arts = []
+        for n, a in enumerate(c.artefacts):
+            art_ids[a.id] = f"{cid}:{a.type.value}:{n}"
+            arts.append(a.model_copy(update={"id": art_ids[a.id]}))
+        caps.append(c.model_copy(update={"id": cid, "artefacts": arts}))
     inds = []
+    per_kind: Counter = Counter()
     for ind in inc.indicators:
-        if ind.capture_id != src.id:
+        cid = cap_ids.get(ind.capture_id)
+        if cid is None:
             continue
         prov = ind.provenance
         if prov.artefact_id is not None:
-            prov = prov.model_copy(update={"artefact_id": old_art.get(prov.artefact_id)})
-        inds.append(
-            ind.model_copy(
-                update={"id": f"{cid}/{ind.kind}/{len(inds)}", "capture_id": cid, "provenance": prov}
-            )
-        )
-    return cap, inds
+            prov = prov.model_copy(update={"artefact_id": art_ids.get(prov.artefact_id)})
+        n = per_kind[(cid, ind.kind)]
+        per_kind[(cid, ind.kind)] += 1
+        inds.append(ind.model_copy(update={"id": f"{cid}:{ind.kind}:{n}", "capture_id": cid, "provenance": prov}))
+    return caps, inds
 
 
 def _rehome_scanner(inc: m.Incident, scanner: str) -> m.Incident:
@@ -172,6 +180,8 @@ def _source_label(row: QueueRow) -> str:
 def _bytes(root: Path, inc: m.Incident) -> int:
     total = 0
     for c in inc.captures:
+        if c.duplicate_of is not None:
+            continue  # the same files are counted on the canonical capture
         for a in c.artefacts:
             if a.size is not None:
                 total += a.size
@@ -180,28 +190,80 @@ def _bytes(root: Path, inc: m.Incident) -> int:
     return total
 
 
+def _ad_incident(base: m.Incident, row: QueueRow, fc: FetchedCapture | None, label: str) -> m.Incident:
+    ref = sanitise(base.source_ref or row.incident_id)
+    iid = f"adlib:{ref}"
+    ad_caps = [c for c in base.captures if c.stage is m.Stage.ad] or base.captures[:1]
+    names = {c.id: f"{iid}:ad" if i == 0 else f"{iid}:ad{i}" for i, c in enumerate(ad_caps)}
+    caps, inds = _rekey(base, iid, names)
+    for c in caps:
+        inds += _tags(c.id, AD_RECORD, label)
+    if fc is not None:
+        finc = fc.incident()
+        lander = finc.captures[0]
+        lcaps, linds = _rekey(finc, iid, {lander.id: f"{iid}:lander"})
+        lcap = lcaps[0].model_copy(update={"stage": m.Stage.lander})
+        caps.append(lcap)
+        inds += linds + _tags(lcap.id, FETCHED_LANDING if fc.is_page else BARE_DOMAIN, label)
+    return m.Incident(id=iid, source=base.source, source_ref=base.source_ref, captures=caps, indicators=inds)
+
+
+def _fetch_incident(fc: FetchedCapture, source: str, source_ref: str, kind: str, label: str, **extra: str) -> m.Incident:
+    inc = fc.incident()
+    inds = list(inc.indicators)
+    for c in inc.captures:
+        inds += _tags(c.id, kind, label, **extra)
+    return inc.model_copy(update={"source": source, "source_ref": source_ref, "indicators": inds})
+
+
+def _bare_incident(base: m.Incident, label: str) -> m.Incident:
+    ref = sanitise(base.source_ref or base.id)
+    iid = f"certpl:{ref}"
+    names = {c.id: f"{iid}:c{i + 1}" for i, c in enumerate(base.captures)}
+    caps, inds = _rekey(base, iid, names)
+    for c in caps:
+        inds += _tags(c.id, BARE_DOMAIN, label)
+    return m.Incident(id=iid, source=base.source, source_ref=base.source_ref, captures=caps, indicators=inds)
+
+
+def _mark_duplicates(incidents: list[m.Incident], url_of: dict[str, str]) -> list[m.Incident]:
+    """Captures of the same requested URL in several incidents (ads sharing one landing page):
+    the lexicographically smallest capture id is canonical, the others point at it."""
+    groups: dict[str, list[str]] = defaultdict(list)
+    for cid, url in url_of.items():
+        groups[url].append(cid)
+    dup = {cid: min(ids) for ids in groups.values() if len(ids) > 1 for cid in ids if cid != min(ids)}
+    if not dup:
+        return incidents
+    out = []
+    for inc in incidents:
+        caps = [c.model_copy(update={"duplicate_of": dup[c.id]}) if c.id in dup else c for c in inc.captures]
+        out.append(inc.model_copy(update={"captures": caps}))
+    return out
+
+
 def build_corpus(
     root: Path,
     scanner: str | None,
     runs: list[str] | None,
     fetch_dirs: list[str],
-    picked: Path | None,
+    picked: list[Path] | Path | None,
     picked_fetch_dirs: list[str],
     name: str = "corpus",
 ) -> dict:
     root = Path(root)
     incidents: list[m.Incident] = []
     rows_out: list[dict] = []
-    canonical_lander: dict[str, str] = {}  # requested URL -> first capture id that holds it
+    lander_url: dict[str, str] = {}  # capture id -> requested URL, for duplicate marking
+    seen_ids: set[str] = set()
 
-    def attach(prefix: str, url: str | None, fc: FetchedCapture | None, stage: m.Stage, kind: str, label: str):
-        if fc is None:
-            return None, []
-        dup = canonical_lander.get(url) if url else None
-        cap, inds = lander_capture(fc, prefix, stage, dup)
-        if url and dup is None:
-            canonical_lander[url] = cap.id
-        return cap, inds + _tags(cap.id, kind, label)
+    def add(inc: m.Incident, row: dict) -> bool:
+        if inc.id in seen_ids:  # e.g. one CERT domain listed twice, one fetch shared by two rows
+            return False
+        seen_ids.add(inc.id)
+        incidents.append(inc)
+        rows_out.append({"incident_id": inc.id, **row})
+        return True
 
     if scanner:
         fetched = read_fetch_dirs(root, fetch_dirs)
@@ -213,88 +275,84 @@ def build_corpus(
             base = files[row.incidents_file].get(row.incident_id)
             if base is None:
                 continue
-            inc = _rehome_scanner(base, scanner)
+            base = _rehome_scanner(base, scanner)
             label = _source_label(row)
             url = target_url(row)
             fc = fetched.get(url) if url else None
-            is_ad = row.source in AD_SOURCES
-            if is_ad:
+            if row.source in AD_SOURCES:
+                inc = _ad_incident(base, row, fc, label)
                 kind = AD_RECORD
-                first_kind = AD_RECORD
+                if fc is not None:
+                    lander_url[f"{inc.id}:lander"] = url
+            elif fc is not None and fc.is_page:
+                inc = _fetch_incident(fc, base.source, base.source_ref or row.incident_id, FETCHED_LANDING, label)
+                kind = FETCHED_LANDING
             else:
-                kind = FETCHED_LANDING if fc is not None and fc.is_page else BARE_DOMAIN
-                first_kind = BARE_DOMAIN  # the list entry itself
-            captures = list(inc.captures)
-            indicators = list(inc.indicators)
-            for c in captures:
-                indicators += _tags(c.id, first_kind, label)
-            lander_kind = FETCHED_LANDING if fc is not None and fc.is_page else BARE_DOMAIN
-            cap, inds = attach(inc.id, url, fc, m.Stage.lander, lander_kind, label)
-            if cap is not None:
-                captures.append(cap)
-                indicators += inds
-            inc = inc.model_copy(update={"captures": captures, "indicators": indicators})
-            incidents.append(inc)
-            rows_out.append(
+                inc = _bare_incident(base, label)
+                kind = BARE_DOMAIN
+            add(
+                inc,
                 {
-                    "incident_id": inc.id,
                     "corpus_kind": kind,
                     "source": row.source,
                     "query": row.keyword,
                     "source_label": label,
+                    "source_ref": base.source_ref,
                     "scanner_key": row.key,
                     "scanner_run": row.run_id,
                     "target_url": url,
+                    "fetch_capture_id": fc.manifest.get("capture_id") if fc else None,
                     "fetch_outcome": fc.outcome if fc else None,
                     "fetch_category": fc.category if fc else None,
                     "final_url": fc.manifest.get("final_url") if fc else None,
                     "has_landing_page": bool(fc and fc.is_page),
-                    "lander_duplicate_of": cap.duplicate_of if cap is not None else None,
                     "creatives": sum(
                         1 for c in inc.captures for a in c.artefacts if a.type is m.ArtefactType.ad_screenshot
                     ),
-                }
+                },
             )
 
-    if picked:
+    lists = [picked] if isinstance(picked, (str, Path)) else list(picked or [])
+    if lists:
         pfetched = read_fetch_dirs(root, picked_fetch_dirs)
-        for n, p in enumerate(read_picked(picked)):
-            fc = pfetched.get(p.url)
-            if fc is None:
-                continue
-            inc_id = f"mnl-{_slug(p.brand, 24)}-{n:03d}"
-            label = f"picked:{p.brand}:{p.page_kind}"
-            cap, inds = attach(inc_id, p.url, fc, m.Stage.unknown, MUST_NOT_LINK, label)
-            inds.append(_tag(cap.id, "corpus_brand", p.brand, 0))
-            inds.append(_tag(cap.id, "corpus_page_kind", p.page_kind, 0))
-            incidents.append(m.Incident(id=inc_id, source=PICKED_SOURCE, source_ref=p.url, captures=[cap], indicators=inds))
-            rows_out.append(
-                {
-                    "incident_id": inc_id,
-                    "corpus_kind": MUST_NOT_LINK,
-                    "source": PICKED_SOURCE,
-                    "query": None,
-                    "source_label": label,
-                    "brand": p.brand,
-                    "page_kind": p.page_kind,
-                    "target_url": p.url,
-                    "fetch_outcome": fc.outcome,
-                    "fetch_category": fc.category,
-                    "final_url": fc.manifest.get("final_url"),
-                    "has_landing_page": fc.is_page,
-                    "capture_id": cap.id,
-                    "note": p.note,
-                }
-            )
+        for lst in lists:
+            for p in read_picked(Path(lst)):
+                fc = pfetched.get(p.url)
+                if fc is None:
+                    continue
+                label = f"picked:{p.brand}:{p.page_kind}"
+                inc = _fetch_incident(fc, PICKED_SOURCE, p.url, MUST_NOT_LINK, label, brand=p.brand, page_kind=p.page_kind)
+                add(
+                    inc,
+                    {
+                        "corpus_kind": MUST_NOT_LINK,
+                        "source": PICKED_SOURCE,
+                        "query": None,
+                        "source_label": label,
+                        "brand": p.brand,
+                        "page_kind": p.page_kind,
+                        "target_url": p.url,
+                        "fetch_capture_id": fc.manifest.get("capture_id"),
+                        "fetch_outcome": fc.outcome,
+                        "fetch_category": fc.category,
+                        "final_url": fc.manifest.get("final_url"),
+                        "has_landing_page": fc.is_page,
+                        "capture_ids": [c.id for c in inc.captures],
+                        "note": p.note,
+                    },
+                )
 
+    incidents = _mark_duplicates(incidents, lander_url)
     ds = m.Dataset(
         name=name,
         description="Background corpus (HACK-18): scanner ads, fetched landing pages, bare domains, must-not-link real pages.",
         incidents=incidents,
     )
-    sizes = {i.id: _bytes(root, i) for i in incidents}
+    by_id = {i.id: i for i in ds.incidents}
     for r in rows_out:
-        r["bytes"] = sizes[r["incident_id"]]
+        inc = by_id[r["incident_id"]]
+        r["bytes"] = _bytes(root, inc)
+        r["lander_duplicate_of"] = next((c.duplicate_of for c in inc.captures if c.duplicate_of), None)
     (root / "dataset.json").write_text(ds.to_json(), encoding="utf-8")
     with open(root / "manifest.jsonl", "w", encoding="utf-8") as fh:
         for r in rows_out:

@@ -15,7 +15,7 @@ from urllib.parse import urldefrag, urljoin, urlsplit
 # Site-specific article URL shapes; anything else falls back to the generic rule.
 _ARTICLE = {
     "gazeta.pl": re.compile(r"/7,\d+,\d+,[^/]+\.html$"),
-    "tvn24.pl": re.compile(r"-ra\d+$"),
+    "tvn24.pl": re.compile(r"-(?:ra|st)\d+$"),
     "interia.pl": re.compile(r",nId,\d+$"),
     "polsatnews.pl": re.compile(r"/wiadomosc/\d{4}-\d{2}-\d{2}/[^/]+/?$"),
     "fakt.pl": re.compile(r"/[a-z0-9-]+/[a-z0-9-]+/\w+-\w+$"),

@@ -45,15 +45,18 @@ def _articles(args: argparse.Namespace) -> int:
     from ftf.corpus.articles import article_rows
     from ftf.corpus.build import read_fetch_dirs
 
-    root = Path(args.fetch)
-    fetched = read_fetch_dirs(root.parent, [root.name])
+    dirs = [Path(d) for d in args.fetch]
+    root = dirs[0].parent
+    if any(d.parent != root for d in dirs):
+        raise SystemExit("corpus articles: all --fetch dirs must share one parent")
+    fetched = read_fetch_dirs(root, [d.name for d in dirs])
     rows: list[str] = []
     seen: set[str] = set()
     for p in read_picked(Path(args.picked)):
         fc = fetched.get(p.url)
         if p.page_kind not in ("home", "section") or fc is None or not fc.is_page:
             continue
-        html = root.parent / fc.rel_dir / "page.html"
+        html = root / fc.rel_dir / "page.html"
         if not html.is_file():
             continue
         base = fc.manifest.get("final_url") or p.url
@@ -75,7 +78,7 @@ def _build(args: argparse.Namespace) -> int:
         scanner=args.scanner,
         runs=args.run or None,
         fetch_dirs=args.fetch or [],
-        picked=Path(args.picked) if args.picked else None,
+        picked=[Path(p) for p in args.picked or []],
         picked_fetch_dirs=args.picked_fetch or [],
         name=args.name,
     )
@@ -98,7 +101,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
     a = sub.add_parser("articles", help="article URLs linked from fetched real home pages")
     a.add_argument("--picked", required=True, help="hand-picked TSV list of home/section pages")
-    a.add_argument("--fetch", required=True, help="`ftf fetch` output dir for that list")
+    a.add_argument("--fetch", required=True, action="append", help="`ftf fetch` output dir(s) for that list (repeatable)")
     a.add_argument("--per-page", type=int, default=3, help="articles per home/section page (default 3)")
     a.add_argument("--out", required=True, help="output TSV (a picked list)")
     a.set_defaults(func=_articles)
@@ -109,6 +112,6 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     b.add_argument("--scanner", help="subdir with the scanner snapshot (queue.jsonl, runs/, creatives/)")
     b.add_argument("--run", action="append", help="keep only these scanner run ids (repeatable)")
     b.add_argument("--fetch", action="append", help="subdir of `ftf fetch` output for queue targets")
-    b.add_argument("--picked", help="hand-picked must-not-link TSV list")
+    b.add_argument("--picked", action="append", help="hand-picked must-not-link TSV list (repeatable)")
     b.add_argument("--picked-fetch", action="append", help="subdir of `ftf fetch` output for --picked")
     b.set_defaults(func=_build)

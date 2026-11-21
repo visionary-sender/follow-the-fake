@@ -1,0 +1,6 @@
+# tvn24.pl alternatives (HACK-18 batch 1): tvn24.pl home and /biznes answered 403 to the sandbox.
+# Real articles found by web search (2026-11-21), each fetched once, slowly. Columns: url, brand, page_kind, note.
+https://fakty.tvn24.pl/	tvn24.pl	section	"Fakty" programme site; Fakty po Faktach is named in case 48 and p-cases
+https://tvn24.pl/polska/piec-rzeczy-ktore-warto-dzis-wiedziec-najwazniejsze-informacje-20-listopada-2026-roku-st9348291	tvn24.pl	article	real daily news article
+https://tvn24.pl/polska/szesc-rzeczy-ktore-warto-dzis-wiedziec-najwazniejsze-informacje-19-listopada-2026-roku-st9346254	tvn24.pl	article	real daily news article
+https://tvn24.pl/polska/piec-rzeczy-ktore-warto-dzis-wiedziec-najwazniejsze-informacje-18-listopada-2026-roku-st9344301	tvn24.pl	article	real daily news article

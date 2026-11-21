@@ -186,33 +186,51 @@ def test_build(corpus):
     rows = {r["incident_id"]: r for r in map(json.loads, (root / "manifest.jsonl").read_text().splitlines())}
 
     assert summary["by_corpus_kind"] == {"ad_record": 3, "bare_domain": 2, "fetched_landing": 1, "must_not_link": 1}
-    assert "c-7" not in inc
+    assert "certpl:c-7" not in inc
 
-    # Two ads share one landing URL: the later (live) capture wins, the second ad's copy is a duplicate.
-    m1, m2 = inc["meta-1"], inc["meta-2"]
+    # Ids follow the cross-project scheme.
+    assert set(inc) == {
+        "adlib:meta-1", "adlib:meta-2", "adlib:g-3", "fetch:cap-live", "certpl:c-5", "certpl:c-6", "fetch:cap-gz",
+    }
+
+    # Two ads share one landing URL: the later (live) capture wins; the larger capture id is the duplicate.
+    m1, m2 = inc["adlib:meta-1"], inc["adlib:meta-2"]
+    assert [c.id for c in m1.captures] == ["adlib:meta-1:ad", "adlib:meta-1:lander"]
     assert [c.stage for c in m1.captures] == [m.Stage.ad, m.Stage.lander]
     assert m1.captures[1].duplicate_of is None
-    assert m2.captures[1].duplicate_of == m1.captures[1].id
+    assert m2.captures[1].duplicate_of == "adlib:meta-1:lander"
     assert {a.path for a in m1.captures[1].artefacts} == {"fetch-2/cap-lp/url.txt", "fetch-2/cap-lp/page.html"}
     assert m1.captures[0].artefacts[1].path == "scanner/creatives/a.jpg"
-    assert rows["meta-1"]["has_landing_page"] and rows["meta-1"]["creatives"] == 1
+    assert rows["adlib:meta-1"]["has_landing_page"] and rows["adlib:meta-1"]["creatives"] == 1
+    assert rows["adlib:meta-1"]["fetch_capture_id"] == "cap-lp"
+    assert rows["adlib:meta-2"]["lander_duplicate_of"] == "adlib:meta-1:lander"
+    # Duplicate lander bytes are counted once.
+    assert rows["adlib:meta-2"]["bytes"] == 0 and rows["adlib:meta-1"]["bytes"] == 10 + 125
+    # Every artefact referenced by an indicator exists in its incident.
+    for i in ds.incidents:
+        arts = {a.id for c in i.captures for a in c.artefacts}
+        assert all(x.provenance.artefact_id in arts for x in i.indicators if x.provenance.artefact_id)
 
     def tags(i, cap):
         return {x.kind: x.value for x in i.indicators if x.capture_id == cap.id and x.kind.startswith("corpus_")}
 
     assert tags(m1, m1.captures[0]) == {"corpus_kind": "ad_record", "corpus_source": "meta:Brzoska"}
     assert tags(m1, m1.captures[1])["corpus_kind"] == "fetched_landing"
-    g = inc["g-3"]
-    assert rows["g-3"]["fetch_category"] == "cloaked" and not rows["g-3"]["has_landing_page"]
+    g = inc["adlib:g-3"]
+    assert rows["adlib:g-3"]["fetch_category"] == "cloaked" and not rows["adlib:g-3"]["has_landing_page"]
     assert tags(g, g.captures[1])["corpus_kind"] == "bare_domain"
 
-    assert rows["c-4"]["corpus_kind"] == "fetched_landing"
-    assert rows["c-5"]["corpus_kind"] == "bare_domain" and rows["c-5"]["fetch_outcome"] == "dns_failure"
-    assert rows["c-6"]["corpus_kind"] == "bare_domain" and rows["c-6"]["fetch_outcome"] is None
-    assert len(inc["c-6"].captures) == 1
+    live = inc["fetch:cap-live"]
+    assert live.source == "scanner_certpl" and live.source_ref == "c-4"
+    assert [c.id for c in live.captures] == ["fetch:cap-live:c1"]
+    assert rows["fetch:cap-live"]["corpus_kind"] == "fetched_landing"
+    assert rows["certpl:c-5"]["corpus_kind"] == "bare_domain" and rows["certpl:c-5"]["fetch_outcome"] == "dns_failure"
+    assert rows["certpl:c-6"]["corpus_kind"] == "bare_domain" and rows["certpl:c-6"]["fetch_outcome"] is None
+    assert [c.id for c in inc["certpl:c-6"].captures] == ["certpl:c-6:c1"]
 
     mnl = [i for i in ds.incidents if i.source == "hand_picked_must_not_link"]
-    assert len(mnl) == 1 and mnl[0].source_ref == "https://www.gazeta.pl/a1"
+    assert len(mnl) == 1 and mnl[0].source_ref == "https://www.gazeta.pl/a1" and mnl[0].id == "fetch:cap-gz"
+    assert rows["fetch:cap-gz"]["capture_ids"] == ["fetch:cap-gz:c1"]
     assert tags(mnl[0], mnl[0].captures[0]) == {
         "corpus_kind": "must_not_link",
         "corpus_source": "picked:gazeta.pl:article",
@@ -226,6 +244,14 @@ def test_build(corpus):
             if x.kind.startswith("corpus_") or x.kind == "fetch_outcome":
                 assert not m.linkable(x)
     assert summary["bytes_referenced"] == sum(r["bytes"] for r in rows.values())
+
+
+def test_sanitise():
+    from ftf.corpus.build import sanitise
+
+    assert sanitise("Glapiński łódź") == "Glapinski-lodz"
+    assert sanitise("CR123") == "CR123"
+    assert sanitise("a/b::c") == "a-b-c"
 
 
 def test_read_picked_rejects_bad_line(tmp_path):
