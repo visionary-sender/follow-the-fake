@@ -14,7 +14,7 @@ from pathlib import Path
 
 from ftf import __version__
 from ftf.contract import ArtefactType, Capture, Incident, Indicator, Layer, Level, Observed, Provenance
-from ftf.ingest.manifests import FETCH_TOOL, MANIFEST, MAX_MANIFEST_BYTES, profile_name, safe_parts
+from ftf.ingest.manifests import FETCH_TOOL, MANIFEST, MAX_MANIFEST_BYTES, file_under, profile_name
 
 EXTRACTOR = f"manifest@{__version__}"
 
@@ -23,12 +23,11 @@ def _manifest(capture: Capture, root: Path) -> tuple[str, dict] | None:
     for a in capture.artefacts:
         if a.type is not ArtefactType.other or not a.path or Path(a.path).name != MANIFEST:
             continue
-        parts = safe_parts(a.path)
-        if parts is None:
+        path = file_under(root, a.path)
+        if path is None:
             continue
-        path = Path(root).joinpath(*parts)
         try:
-            if path.is_symlink() or path.stat().st_size > MAX_MANIFEST_BYTES:
+            if path.stat().st_size > MAX_MANIFEST_BYTES:
                 continue
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, ValueError):

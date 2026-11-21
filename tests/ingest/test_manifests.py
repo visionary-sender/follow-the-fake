@@ -14,7 +14,7 @@ from ftf.ingest import ingest, load_inputs
 from ftf.ingest.adlib import load_ad
 from ftf.ingest.manifests import artefact_file, safe_parts
 
-from .conftest import write
+from .conftest import har, write
 from .test_ingest import fetcher_capture
 
 STAMP = "20261121T224558Z"
@@ -311,3 +311,82 @@ def test_cli_ingests_scanner_run(tmp_path, capsys):
     ds = Dataset.from_json(out.read_text())
     assert len(ds.incidents) == 4
     assert not any(i.kind == "fetch_profile" for i in ds.indicators())  # scanner manifests carry no fetch profile
+
+
+# -- loud CLI -------------------------------------------------------------------------------------
+
+
+def test_cli_fails_when_page_captures_yield_no_indicators(tmp_path, monkeypatch, capsys):
+    import ftf.indicators as ind
+
+    fetcher_capture(tmp_path / "captures", "20261121T220000Z-phi.example.test-00000001", "https://phi.example.test/")
+    monkeypatch.setattr(ind, "extractors", lambda: [])
+    out = tmp_path / "out" / "dataset.json"
+    assert cli_main(["ingest", str(tmp_path / "captures"), "--out", str(out)]) == 1
+    err = capsys.readouterr().err
+    assert "yielded no indicators" in err and "--allow-empty" in err and not out.exists()
+    assert cli_main(["ingest", str(tmp_path / "captures"), "--out", str(out), "--allow-empty"]) == 0
+    assert "indicators per layer: none" in capsys.readouterr().err
+    assert cli_main(["ingest", str(tmp_path / "captures"), "--out", str(out), "--no-indicators"]) == 0
+
+
+def test_cli_prints_layers_and_warns_about_unopened_artefacts(tmp_path, monkeypatch, capsys):
+    import ftf.ingest.commands as commands
+    from ftf.ingest import _unopened, run
+
+    d = fetcher_capture(tmp_path / "captures", "20261121T220000Z-chi.example.test-00000001", "https://chi.example.test/")
+    real = run([d], indicators=False)
+    assert _unopened(real.dataset, real.root) == []
+    assert len(_unopened(real.dataset, tmp_path / "elsewhere")) == 4  # url, har, html, manifest
+
+    def vanished(*args, **kwargs):
+        result = run(*args, **kwargs)
+        (d / "page.html").unlink()  # e.g. a file removed while the run was being written
+        result.unopened = _unopened(result.dataset, result.root)
+        return result
+
+    monkeypatch.setattr(commands, "run", vanished)
+    assert cli_main(["ingest", str(d), "--out", str(tmp_path / "d.json")]) == 0
+    err = capsys.readouterr().err
+    assert "WARNING: 1 artefacts could not be opened under root" in err and "page.html" in err
+    assert "indicators per layer: collector" in err
+
+
+def test_dead_refetch_keeps_its_own_profile(tmp_path):
+    out = tmp_path / "captures"
+    first = "20261121T220000Z-kappa.example.test-00000001"
+    for cid, prof in ((first, None), ("20261121T220100Z-kappa.example.test-00000002", "victim-pl-mobile")):
+        d = fetcher_capture(out, cid, "https://kappa.example.test/", profile=prof)
+        (d / "page.har").write_text(har("https://kappa.example.test/", "2026-11-21T22:00:00.000Z"))  # same bytes in both
+    ds = ingest([out])
+    (inc,) = ds.incidents
+    assert [c.duplicate_of for c in inc.captures] == [None, None]
+    assert {i.value for i in inc.indicators if i.kind == "fetch_profile"} == {"default", "victim-pl-mobile"}
+
+
+def test_unreadable_folder_in_a_run_is_skipped(tmp_path, monkeypatch):
+    from ftf.ingest import manifests
+
+    out = tmp_path / "captures"
+    fetcher_capture(out, "20261121T220000Z-lambda.example.test-00000001", "https://lambda.example.test/")
+    bad = fetcher_capture(out, "20261121T220100Z-mu.example.test-00000002", "https://mu.example.test/")
+    real = manifests.to_raw
+
+    def flaky(m):
+        if m.folder == bad:
+            raise PermissionError("denied")
+        return real(m)
+
+    monkeypatch.setattr(manifests, "to_raw", flaky)
+    assert [i.id for i in load_inputs([out]).incidents] == ["fetch:20261121T220000Z-lambda.example.test-00000001"]
+
+
+def test_load_ad_does_not_follow_a_symlinked_directory(tmp_path):
+    d = scan_capture(tmp_path / "scanner", "1000000000000009")
+    (inc,) = load_inputs([d], root=tmp_path).incidents
+    cap = inc.captures[0]
+    real = tmp_path / "scanner"
+    moved = tmp_path / "moved"
+    real.rename(moved)
+    (tmp_path / "scanner").symlink_to(moved, target_is_directory=True)
+    assert load_ad(cap, tmp_path) == {}

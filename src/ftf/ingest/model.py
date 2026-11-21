@@ -36,6 +36,7 @@ class RawCapture:
     notes: list[str] = field(default_factory=list)
     fixed_id: str | None = None
     seconds: float = 0.0  # extra load time not attributed to an artefact
+    dedup_salt: str = ""  # joins the exact-duplicate key (a fetch's profile: our visit, not content)
 
     def types(self) -> set[ArtefactType]:
         return {a.type for a in self.artefacts}

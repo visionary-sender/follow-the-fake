@@ -137,6 +137,7 @@ def build(raw: list[RawIncident], root: Path, name: str, description: str | None
     incidents: list[Incident] = []
     records: list[CaptureRecord] = []
     used_incidents: set[str] = set()
+    salts: dict[str, str] = {}
     for inc in raw:
         inc.captures = [c for c in inc.captures if c.artefacts or c.missing]
         if not inc.captures:
@@ -170,17 +171,24 @@ def build(raw: list[RawIncident], root: Path, name: str, description: str | None
                 path = _relpath(a.path, root) if a.path is not None else None
                 arts.append(Artefact(id=aid, type=a.type, path=path, sha256=a.sha256, size=a.size))
             observed = _observed(cap)
+            if cap.dedup_salt:
+                salts[cap_id] = cap.dedup_salt
             caps.append(Capture(id=cap_id, stage=cap.stage, observed=observed, captured_on=_captured_on(cap),
                                 artefacts=arts, missing=_missing(cap, has_ad)))
             records.append(CaptureRecord(incident_id=inc_id, capture_id=cap_id, stage=cap.stage.value, duplicate_of=None,
                                          artefacts=len(arts), load_seconds=cap.load_seconds(), notes=list(dict.fromkeys(cap.notes))))
         incidents.append(Incident(id=inc_id, source=inc.source, source_ref=inc.source_ref, captures=caps))
-    incidents = _collapse_duplicates(incidents, records)
+    incidents = _collapse_duplicates(incidents, records, salts)
     return Dataset(name=name, description=description, incidents=incidents), records
 
 
-def _collapse_duplicates(incidents: list[Incident], records: list[CaptureRecord]) -> list[Incident]:
-    """Captures whose artefact contents (sha256 multiset) are identical point at the smallest id."""
+def _collapse_duplicates(incidents: list[Incident], records: list[CaptureRecord], salts: dict[str, str] | None = None) -> list[Incident]:
+    """Captures whose artefact contents (sha256 multiset) are identical point at the smallest id.
+
+    ``salts`` keeps apart captures of the same content made differently on purpose (a default and a
+    victim-profile fetch of a dead page), so each keeps its own collector indicators.
+    """
+    salts = salts or {}
     groups: dict[tuple[str, ...], list[str]] = {}
     for inc in incidents:
         for cap in inc.captures:
@@ -188,6 +196,7 @@ def _collapse_duplicates(incidents: list[Incident], records: list[CaptureRecord]
             content = [a for a in cap.artefacts if not (a.type is ArtefactType.other and a.id.endswith(MANIFEST_SUFFIX))]
             digests = tuple(sorted(a.sha256 for a in content if a.sha256))
             if digests and len(digests) == len(content):
+                digests += (salts.get(cap.id, ""),)
                 groups.setdefault(digests, []).append(cap.id)
     dup_of: dict[str, str] = {}
     for members in groups.values():

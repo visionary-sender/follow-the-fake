@@ -59,10 +59,10 @@ from __future__ import annotations
 import os
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from ftf.contract import Dataset
+from ftf.contract import ArtefactType, Dataset
 from ftf.ingest import adapters, manifests
 from ftf.ingest.build import CaptureRecord, build
 from ftf.ingest.model import RawIncident
@@ -75,6 +75,22 @@ class IngestResult:
     dataset: Dataset
     captures: list[CaptureRecord]
     seconds: float
+    root: Path | None = None
+    unopened: list[str] = field(default_factory=list)  # artefact paths that are not a file under ``root``
+
+    def indicators_by_layer(self) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for ind in self.dataset.indicators():
+            counts[ind.layer.value] = counts.get(ind.layer.value, 0) + 1
+        return dict(sorted(counts.items()))
+
+    def empty_pages(self) -> int:
+        """Non-duplicate captures with an HTML or HAR artefact, when none of them yielded an indicator (else 0)."""
+        pages = {c.id for i in self.dataset.incidents for c in i.captures
+                 if not c.duplicate_of and c.modalities & {ArtefactType.html, ArtefactType.har}}
+        if any(ind.capture_id in pages for ind in self.dataset.indicators()):
+            return 0
+        return len(pages)
 
     def summary(self) -> dict:
         times = [c.seconds for c in self.captures]
@@ -84,6 +100,8 @@ class IngestResult:
             "duplicates": sum(1 for c in self.captures if c.duplicate_of),
             "artefacts": sum(c.artefacts for c in self.captures),
             "indicators": len(self.dataset.indicators()),
+            "indicators_by_layer": self.indicators_by_layer(),
+            "unopened_artefacts": len(self.unopened),
             "seconds_total": round(self.seconds, 3),
             "seconds_per_capture_mean": round(sum(times) / len(times), 4) if times else 0.0,
             "seconds_per_capture_max": round(max(times), 4) if times else 0.0,
@@ -146,7 +164,14 @@ def run(
     dataset, records = build(raw, Path(root), name)
     if indicators:
         dataset = _extract(dataset, Path(root).resolve(), records)
-    return IngestResult(dataset=dataset, captures=records, seconds=time.perf_counter() - t0)
+    return IngestResult(dataset=dataset, captures=records, seconds=time.perf_counter() - t0, root=Path(root).resolve(),
+                        unopened=_unopened(dataset, Path(root).resolve()))
+
+
+def _unopened(dataset: Dataset, root: Path) -> list[str]:
+    """Artefact paths that extractors cannot open as ``root / path``."""
+    return [a.path for i in dataset.incidents for c in i.captures for a in c.artefacts
+            if a.path is not None and not (root / a.path).is_file()]
 
 
 def _extract(dataset: Dataset, root: Path, records: list[CaptureRecord]) -> Dataset:

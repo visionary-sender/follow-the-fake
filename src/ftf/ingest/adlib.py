@@ -17,7 +17,7 @@ import json
 from pathlib import Path
 
 from ftf.contract import Artefact, ArtefactType, Capture
-from ftf.ingest.manifests import AD_RECORD, safe_parts
+from ftf.ingest.manifests import AD_RECORD, file_under
 
 MAX_AD_BYTES = 4 * 1024 * 1024
 
@@ -40,12 +40,11 @@ def ad_artefact(capture: Capture) -> Artefact | None:
 
 def load_ad(capture: Capture, root: Path) -> dict:
     a = ad_artefact(capture)
-    parts = safe_parts(a.path) if a is not None else None
-    if parts is None:
+    path = file_under(root, a.path) if a is not None else None
+    if path is None:
         return {}
-    path = Path(root).joinpath(*parts)
     try:
-        if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_AD_BYTES:
+        if path.stat().st_size > MAX_AD_BYTES:
             return {}
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, ValueError):

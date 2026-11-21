@@ -39,6 +39,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -133,17 +134,24 @@ def safe_parts(path: object) -> tuple[str, ...] | None:
 
 
 def _inside(folder: Path, parts: tuple[str, ...]) -> Path | None:
-    cand = folder
-    for part in parts:
-        cand = cand / part
-        if cand.is_symlink():
-            return None
+    """``folder/parts`` if it is a regular file inside ``folder`` with no symlink on the way."""
     try:
+        cand = folder
+        for part in parts:
+            cand = cand / part
+            if cand.is_symlink():
+                return None
         if not cand.is_file() or not cand.resolve().is_relative_to(folder.resolve()):
             return None
-    except OSError:
+    except (OSError, ValueError):
         return None
     return cand
+
+
+def file_under(root: Path, path: object) -> Path | None:
+    """A manifest or Dataset artefact path as a regular file under ``root`` (same checks as for manifests)."""
+    parts = safe_parts(path)
+    return None if parts is None else _inside(Path(root), parts)
 
 
 def artefact_file(folder: Path, path: object) -> Path | None:
@@ -189,11 +197,11 @@ def certpl_raw(m: Manifest) -> RawIncident:
     cap = inc.captures[0]
     record = {}
     p = artefact_file(m.folder, AD_RECORD)
-    if p is not None and p.stat().st_size <= MAX_MANIFEST_BYTES:
-        try:
+    try:
+        if p is not None and p.stat().st_size <= MAX_MANIFEST_BYTES:
             record = json.loads(p.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, ValueError):
-            record = {}
+    except (OSError, UnicodeDecodeError, ValueError):
+        record = {}
     record = record if isinstance(record, dict) else {}
     domain = inc.id[len(CERTPL_PREFIX):]
     value = next((v for v in (record.get("landing_url"), record.get("landing_domain")) if isinstance(v, str) and v), domain)
@@ -226,6 +234,8 @@ def to_raw(m: Manifest) -> RawIncident:
                 p = artefact_file(folder, a.path)
                 atype = _scan_type(p, a.type) if (m.tool == "scan" and p is not None) else a.type
             if p is None or p in used:
+                if a.path is None and p is not None:
+                    continue  # a second pathless stand-in for the same ad.json
                 if a.path is not None or m.tool == "scan":
                     notes.append(f"{a.id}: artefact file missing or outside the capture folder; skipped")
                 continue
@@ -244,6 +254,8 @@ def to_raw(m: Manifest) -> RawIncident:
                                    captured_on=c.captured_on, missing=missing, notes=notes, fixed_id=c.id))
     raw = RawIncident(source=inc.source, source_ref=inc.source_ref, captures=captures, fixed_id=inc.id)
     if m.tool == "fetch":
+        for c in captures:
+            c.dedup_salt = f"profile={m.profile}"
         raw.fetch_url = m.requested_url
         raw.fetch_rank = (m.profile != DEFAULT_PROFILE, m.started, folder.name)
         raw.origin = str(folder.resolve())
@@ -269,7 +281,16 @@ def _unlisted_scan_files(folder: Path, capture_id: str, used: set[Path]) -> list
 
 
 def load_folder(folder: Path) -> RawIncident:
-    return to_raw(read_manifest(folder))
+    t0 = time.perf_counter()
+    m = read_manifest(folder)
+    spent = time.perf_counter() - t0
+    try:
+        raw = to_raw(m)
+    except OSError as e:
+        raise ValueError(f"{folder}: unreadable capture folder ({e.__class__.__name__})") from None
+    if raw.captures:
+        raw.captures[0].seconds += spent
+    return raw
 
 
 # -- a run folder -------------------------------------------------------------------------------
@@ -375,8 +396,14 @@ def load_run(run: Path) -> list[RawIncident]:
     for folder in capture_folders(run):
         try:
             m = read_manifest(folder)
-        except ValueError as e:
+        except (ValueError, OSError) as e:
             log.warning("ftf ingest: skipping %s", e)
             continue
         (fetches if m.tool == "fetch" else scans).append(m)
-    return [to_raw(m) for m in fetches] + [to_raw(m) for m in _newest_scans(scans)]
+    out = []
+    for m in fetches + _newest_scans(scans):
+        try:
+            out.append(load_folder(m.folder))
+        except (ValueError, OSError) as e:
+            log.warning("ftf ingest: skipping %s", e)
+    return out
