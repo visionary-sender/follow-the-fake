@@ -7,7 +7,8 @@ Supported inputs, each also accepted on its own:
 3. a saved HTML page, with its ``<stem>_files/`` resource folder if present;
 4. a HAR file; 5. an MHTML file (kept as one ``mhtml`` artefact; only its MIME headers are read);
 6. a bare ``http(s)://`` URL (fetched only with ``fetch=True`` and the HACK-17 fetcher installed);
-7. a fetcher capture folder (``capture.json`` inside) or a fetcher output root holding several.
+7. a fetcher or scanner capture folder (``capture.json`` inside) or a run folder holding several
+   (:mod:`ftf.ingest.manifests`).
 
 Any other single file (a screenshot, a video, a yt-dlp ``.info.json``) becomes a one-artefact capture.
 File names are untrusted: they are only ever used as path components and sanitised ids.
@@ -16,22 +17,19 @@ File names are untrusted: they are only ever used as path components and sanitis
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import time
 import unicodedata
 from collections.abc import Callable
 from pathlib import Path
 
-from ftf.contract import ArtefactType, Incident, MissingModality, Observed, Stage
+from ftf.contract import ArtefactType, MissingModality, Stage
 from ftf.indicators import redact
 from ftf.ingest import files as F
-from ftf.ingest import ids
+from ftf.ingest import ids, manifests
 from ftf.ingest.model import RawArtefact, RawCapture, RawIncident
 
 ORGANISER_SOURCES = {"do_udostepnienia", "BACKUP"}
-FETCH_MANIFEST = "capture.json"
-AD_RECORD = "ad.json"
 URL_MISSING_REASON = "not fetched"
 # A `<stem>_files` folder whose stem matches no saved page joins the page sharing at least this
 # many leading characters (browsers truncate long stems), else it stays its own unit.
@@ -248,103 +246,7 @@ def fetched_url(url: str, fetch_dir: Path, fetcher: Callable | None = None) -> R
     if fetcher is None:
         from ftf.fetch import fetch_url as fetcher
     result = fetcher(url, fetch_dir)
-    return fetcher_folder(Path(result.capture_dir))
-
-
-# -- fetcher capture folders -------------------------------------------------------------------
-
-
-def is_fetcher_folder(path: Path) -> bool:
-    return path.is_dir() and (path / FETCH_MANIFEST).is_file()
-
-
-def is_fetcher_root(path: Path) -> bool:
-    return path.is_dir() and any(is_fetcher_folder(p) for p in _listdir(path) if p.is_dir())
-
-
-def _manifest_file(folder: Path, path: str) -> Path | None:
-    """A manifest artefact path (relative to the fetch root, or to the folder) as a file inside ``folder``."""
-    base = folder.resolve()
-    for cand in (folder.parent / path, folder / path):
-        try:
-            full = cand.resolve()
-        except OSError:
-            continue
-        if full.is_relative_to(base) and full != base and cand.is_file() and not cand.is_symlink():
-            return folder / full.relative_to(base)
-    return None
-
-
-def fetcher_folder(folder: Path) -> RawIncident:
-    """Read ``<out>/<capture_id>/`` written by ``ftf.fetch``; ids are kept, artefact paths re-rooted.
-
-    The manifest's Incident is provisional (``ftf.fetch``) and its collector indicator is dropped:
-    ``load_inputs`` returns captures and artefacts only.
-    """
-    t0 = time.perf_counter()
-    manifest = json.loads((folder / FETCH_MANIFEST).read_text(encoding="utf-8"))
-    inc = Incident.model_validate(manifest["incident"])
-    captures = []
-    known: set[str] = {FETCH_MANIFEST}
-    for c in inc.captures:
-        arts = []
-        for a in c.artefacts:
-            if a.path is None:
-                continue
-            p = _manifest_file(folder, a.path)
-            if p is None:
-                continue
-            known.add(_rel(p, folder))
-            art = load_file(p, folder, ad_side=False, in_assets=False)
-            art.type, art.fixed_id = a.type, a.id
-            arts.append(art)
-        present = {a.type for a in arts}
-        missing = [m for m in c.missing if m.modality not in present]
-        captures.append(RawCapture(key=c.id.rsplit(":", 1)[-1], artefacts=arts, stage=c.stage, observed=c.observed,
-                                   captured_on=c.captured_on, missing=missing, fixed_id=c.id))
-    incident = RawIncident(source=inc.source, source_ref=inc.source_ref, captures=captures, fixed_id=inc.id)
-    if captures:
-        captures[0].seconds += time.perf_counter() - t0 - sum(a.seconds for c in captures for a in c.artefacts)
-    if (folder / AD_RECORD).is_file():
-        incident = _with_ad_record(folder, incident, known)
-    return incident
-
-
-_AD_ID_KEYS = ("ad_archive_id", "adArchiveID", "ad_archive", "library_id", "id")
-
-
-def _with_ad_record(folder: Path, incident: RawIncident, known: set[str]) -> RawIncident:
-    """HOOK (provisional): a scanned ad-library record next to a fetched lander.
-
-    The External data project will write ``ad.json`` plus creative files into a fetcher folder;
-    the final layout is not posted yet (HACK-17 / HACK-20). Until it is, this reads ``ad.json`` as
-    an ``ad_library`` artefact, every other unknown file in the folder as a creative
-    (images ``ad_screenshot``, videos ``video``), and re-keys the incident to the agreed
-    ``adlib:<ad archive id>`` with captures ``:ad`` and ``:lander``. Adjust once the layout lands.
-    """
-    try:
-        record = json.loads((folder / AD_RECORD).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        record = {}
-    archive_id = next((str(record[k]) for k in _AD_ID_KEYS if isinstance(record, dict) and record.get(k) not in (None, "")), None)
-    ad_files = [p for p in _walk(folder) if _rel(p, folder) not in known]
-    ad = RawCapture(key="ad", artefacts=[load_file(p, folder, ad_side=True) for p in ad_files], stage=Stage.ad, observed=Observed.static)
-    if archive_id is None or not ids.sanitise(archive_id):
-        ad.notes.append("ad.json has no ad archive id; kept under the fetch incident")
-        incident.captures.append(ad)
-        return incident
-    inc_id = ids.adlib_incident_id(archive_id)
-    ad.fixed_id = ids.capture_id(inc_id, "ad")
-    for a in ad.artefacts:
-        a.fixed_id = ids.artefact_id(ad.fixed_id, a.rel)
-    for n, c in enumerate(incident.captures, start=1):
-        c.key = "lander" if n == 1 else f"lander-{n}"
-        c.fixed_id = ids.capture_id(inc_id, c.key)
-        for a in c.artefacts:
-            a.fixed_id = ids.artefact_id(c.fixed_id, a.rel)
-        if c.stage is Stage.unknown and n == 1:
-            c.stage = Stage.lander
-    return RawIncident(source="ad_library", source_ref=archive_id, captures=[ad, *incident.captures], fixed_id=inc_id)
+    return manifests.load_folder(Path(result.capture_dir))
 
 
 # -- dispatch ----------------------------------------------------------------------------------
@@ -357,8 +259,6 @@ def anchor(path: Path) -> Path:
             return path.parent
         if organiser_source(path.parent):
             return path.parent.parent
-        if is_fetcher_folder(path):
-            return path.parent
         return path.parent
     return path.parent
 
@@ -379,10 +279,13 @@ def load(item: str | Path, *, fetch: bool = False, fetch_dir: Path | None = None
         src = organiser_source(path)
         if src:
             return organiser_root(path, src)
-        if is_fetcher_folder(path):
-            return [fetcher_folder(path)]
-        if is_fetcher_root(path):
-            return [fetcher_folder(p) for p in _listdir(path) if is_fetcher_folder(p)]
+        if manifests.has_manifest(path):
+            return [manifests.load_folder(path)]
+        if manifests.is_run(path):
+            return manifests.load_run(path)
+        if manifests.is_legacy_scanner_root(path):
+            raise ValueError(f"{path}: pre-v1 scanner output (runs/*/incidents-*.json, no capture folders) is not read; "
+                             "expected the v1 layout (HACK-20): <out>/<stamp>-<source>-<id>/{capture.json,ad.json,creative-<n>.<ext>}")
         subs = [p for p in _listdir(path) if p.is_dir()]
         if subs and all(organiser_source(p) for p in subs):  # the raw data root itself
             return [inc for p in subs for inc in organiser_root(p, organiser_source(p))]
