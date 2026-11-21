@@ -309,3 +309,24 @@ def test_cli_articles(tmp_path, capsys):
     assert [r[0] for r in rows] == ["https://tvn24.pl/polska/a-ra1", "https://tvn24.pl/swiat/b-ra2"]
     assert all(r[1:3] == ["tvn24.pl", "article"] for r in rows)
     assert len(read_picked(out)) == 2
+
+
+def test_wayback_picked(tmp_path):
+    from ftf.corpus.build import wayback_original
+
+    orig = "https://tvn24.pl/polska/x-st1"
+    snap = f"https://web.archive.org/web/20261118061622if_/{orig}"
+    assert wayback_original(snap) == ("20261118061622", orig)
+    assert wayback_original(orig) is None
+    root = tmp_path / "b"
+    _capture(root / "wb", "cap-wb", snap, "live", "live", "2026-11-21T23:00:00Z")
+    lst = tmp_path / "wb.tsv"
+    lst.write_text(f"{snap}\ttvn24.pl\tarticle\n")
+    build_corpus(root, None, None, [], [lst], ["wb"])
+    ds = m.Dataset.from_json((root / "dataset.json").read_bytes())
+    (inc,) = ds.incidents
+    assert inc.source == "wayback" and inc.source_ref == orig and inc.id == "fetch:cap-wb"
+    tags = {x.kind: x.value for x in inc.indicators if x.kind.startswith("corpus_")}
+    assert tags["corpus_kind"] == "must_not_link" and tags["corpus_wayback_snapshot"] == "20261118061622"
+    row = json.loads((root / "manifest.jsonl").read_text())
+    assert row["source"] == "wayback" and row["source_ref"] == orig

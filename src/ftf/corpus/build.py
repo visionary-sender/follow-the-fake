@@ -46,6 +46,14 @@ KINDS = (AD_RECORD, FETCHED_LANDING, BARE_DOMAIN, MUST_NOT_LINK)
 # Sources with an ad behind the queue row; everything else (CERT Polska) is a bare domain list.
 AD_SOURCES = {"meta", "google_atc"}
 PICKED_SOURCE = "hand_picked_must_not_link"
+WAYBACK_SOURCE = "wayback"
+_WAYBACK = re.compile(r"^https?://web\.archive\.org/web/(\d{4,14})[a-z_]*/(https?://.+)$")
+
+
+def wayback_original(url: str) -> tuple[str, str] | None:
+    """(snapshot timestamp, original URL) for an Internet Archive snapshot URL, else None."""
+    mt = _WAYBACK.match(url)
+    return (mt.group(1), mt.group(2)) if mt else None
 
 
 def sanitise(part: str) -> str:
@@ -321,12 +329,21 @@ def build_corpus(
                 if fc is None:
                     continue
                 label = f"picked:{p.brand}:{p.page_kind}"
-                inc = _fetch_incident(fc, PICKED_SOURCE, p.url, MUST_NOT_LINK, label, brand=p.brand, page_kind=p.page_kind)
+                wb = wayback_original(p.url)
+                source, ref, extra = PICKED_SOURCE, p.url, {}
+                if wb:  # a real page served by the Internet Archive because the outlet blocked us
+                    source, ref, extra = WAYBACK_SOURCE, wb[1], {"wayback_snapshot": wb[0]}
+                    label = f"wayback:{p.brand}:{p.page_kind}"
+                inc = _fetch_incident(
+                    fc, source, ref, MUST_NOT_LINK, label, brand=p.brand, page_kind=p.page_kind, **extra
+                )
                 add(
                     inc,
                     {
                         "corpus_kind": MUST_NOT_LINK,
-                        "source": PICKED_SOURCE,
+                        "source": source,
+                        "source_ref": ref,
+                        "wayback_snapshot": wb[0] if wb else None,
                         "query": None,
                         "source_label": label,
                         "brand": p.brand,

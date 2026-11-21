@@ -1,0 +1,6 @@
+# Real tvn24.pl articles via Internet Archive snapshots (tvn24.pl answers HTTP 403 to the sandbox).
+# `if_` hides the Wayback toolbar. The corpus builder sets source=wayback, source_ref=original URL.
+https://web.archive.org/web/20261118061622if_/https://tvn24.pl/polska/piec-rzeczy-ktore-warto-dzis-wiedziec-najwazniejsze-informacje-17-listopada-2026-roku-st9342209	tvn24.pl	article	wayback snapshot
+https://web.archive.org/web/20261116081929if_/https://tvn24.pl/polska/szesc-rzeczy-ktore-warto-dzis-wiedziec-najwazniejsze-informacje-15-listopada-2026-roku-st9339553	tvn24.pl	article	wayback snapshot
+https://web.archive.org/web/20261114064950if_/https://tvn24.pl/polska/szesc-rzeczy-ktore-warto-dzis-wiedziec-najwazniejsze-informacje-14-listopada-2026-roku-st9338640	tvn24.pl	article	wayback snapshot
+https://web.archive.org/web/20261113093613if_/https://tvn24.pl/polska/piec-rzeczy-ktore-warto-dzis-wiedziec-najwazniejsze-informacje-12-listopada-2026-roku-st9334821	tvn24.pl	article	wayback snapshot
