@@ -14,6 +14,7 @@ Challenge data lives in a private bucket and never in this repository.
 |---|---|
 | `src/ftf/` | the Python package; `ftf` is the command-line entry point |
 | `tests/` | pytest suite |
+| `scripts/spend.py` | read-only cloud spend report (see Cloud spend) |
 | `scripts/vm.sh` | cloud dev loop (sync to the workbench VM, run tests or commands there) |
 | `scripts/licences.py` | generates and checks `LICENSES-THIRD-PARTY.md` |
 | `Dockerfile`, `.dockerignore` | container image that runs the `ftf` command |
@@ -76,6 +77,34 @@ gcloud compute ssh ftf-workbench --project follow-the-fake --zone europe-central
 
 Docker on the VM is a one-time setup: `sudo apt-get install -y docker.io`.
 Remove dangling images afterwards with `sudo docker image prune -f`.
+
+## Cloud spend
+
+```bash
+python3 -I scripts/spend.py
+```
+
+Read-only report of what GCP itself records (resource state plus the admin-activity and
+system-event audit logs), per project, since 2026-11-21: every VM and disk of ours, including
+deleted ones, with run intervals, an estimated cost in USD and PLN, the total against the
+100 PLN cap, the split by the issue label, unlabelled resources as a warning, and everything
+still running with the time its automatic stop fires. It only lists and reads; it never
+creates, changes or deletes anything. Standard library only; it runs on the laptop because it
+is just gcloud calls plus arithmetic.
+
+- Costs are an **estimate**: pinned on-demand list prices (`VM_USD_PER_HOUR`,
+  `DISK_USD_PER_GB_MONTH` at the top of the script) and a fixed USD to PLN rate of 4.00, so the
+  same inputs give the same numbers. Buckets, egress and taxes are not included. A machine or
+  disk type missing from the table is flagged and counted as 0 until it is added.
+- `follow-the-fake` is read with gcloud configuration `follow-the-fake`; launches carry the
+  label `ftf-issue=hack-<n>`.
+- `attic-212115` is read with gcloud configuration `default` (override with
+  `FTF_ATTIC_GCLOUD_CONFIG`). Nothing there may name this project, so our resources use names
+  in the numeric range `8xxxxxxx` (e.g. `vm-80000034-1`) and the label `k=<issue number>`
+  (e.g. `k=34`); only resources matching either are counted. This convention is provisional
+  and set in one place (`ATTIC_LABEL_KEY`, `ATTIC_NAME_PATTERN`).
+- Backstop: billing data lags by hours, no BigQuery billing export is set up and no GCP budget
+  alert is known on the billing account (the Budget API is not readable here), so the script is the primary check.
 
 ## Methods
 
