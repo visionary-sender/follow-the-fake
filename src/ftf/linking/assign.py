@@ -137,6 +137,8 @@ class _Setup:
     # Indexed mode: the campaigns to score first, the campaigns of a capture, and sorted ids.
     reachable: Optional[Callable[[list[str]], set[str]]] = None
     campaigns_of: Optional[Callable[[str], Sequence[str]]] = None
+    # Real ledger only: False if the two captures may get a conflict row under the relation.
+    conflict_free: Optional[Callable[[str, str], bool]] = None
 
 
 def _reweighted(be: Backend, weights: WeightTable) -> Backend:
@@ -179,6 +181,7 @@ def _indexed_setup(
         modalities=modalities,
         campaigns=index.campaigns.get(relation, []),
         reachable=lambda extra: index.reachable(keys, relation, informative=informative or (lambda key: True), captures=extra),
+        conflict_free=None if backend is not None else _conflict_free(ctx, relation),
         campaigns_of=lambda cap: of.get(cap, ()),
     )
 
@@ -221,7 +224,19 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
     else:
         assert setup.campaigns_of is not None
         dup_ids = {cid for d in dup_of for cid in setup.campaigns_of(d)}
-        scored = _select(campaigns, setup.reachable(dup_of) | dup_ids, score)
+        quick = None
+        if setup.conflict_free is not None and probe:
+            cf = setup.conflict_free
+
+            def quick(camp: Any):
+                # An unreachable campaign shares no informative value, so with no conflict row its
+                # score is exactly 0 and the linear scan keeps the first pair (first probe, first member).
+                members = sorted(_members(camp, canon, stage))
+                if all(cf(x, m) for m in members for x in probe):
+                    return camp, be.score(probe[0], members[0], relation), {}
+                return None
+
+        scored = _select(campaigns, setup.reachable(dup_of) | dup_ids, score, quick)
         dup_camps = [camp for camp in campaigns if camp.id in dup_ids]
     scored.sort(key=_order)
 
@@ -309,7 +324,10 @@ def _order(t: tuple[Any, Optional[PairScore], dict]) -> tuple[float, str]:
 
 
 def _select(
-    campaigns: Sequence[Any], reachable: set[str], score: Callable[[Any], tuple[Any, Optional[PairScore], dict]]
+    campaigns: Sequence[Any],
+    reachable: set[str],
+    score: Callable[[Any], tuple[Any, Optional[PairScore], dict]],
+    quick: Optional[Callable[[Any], Optional[tuple[Any, Optional[PairScore], dict]]]] = None,
 ) -> list[tuple[Any, Optional[PairScore], dict]]:
     """Score the reachable campaigns, then just enough others to rank the top as the linear scan does.
 
@@ -318,6 +336,8 @@ def _select(
     `TOP_CANDIDATES` campaigns score above 0 does the candidate list reach into them: they are
     then walked in id order (the scan's tie order) until the zero-bit places are settled, or
     all of them are scored. Everything that decides assign / new / review is reachable.
+    `quick(camp)` returns a campaign's exact entry without scoring all its pairs when it can
+    prove the score is 0 (no conflict possible), else None.
     """
     by_id = {c.id: c for c in campaigns}
     out = [score(by_id[cid]) for cid in sorted(reachable) if cid in by_id]
@@ -330,7 +350,7 @@ def _select(
     for camp in campaigns:
         if camp.id in reachable:
             continue
-        t = score(camp)
+        t = (quick(camp) if quick is not None else None) or score(camp)
         out.append(t)
         if t[1] is None:
             return out  # no probe capture: nothing gets a score
@@ -338,6 +358,36 @@ def _select(
         if bisect.bisect_right(zero_r, camp.id) + zero_walked >= need:
             break
     return out
+
+
+def _conflict_free(ctx: ScoringContext, relation: Relation) -> Callable[[str, str], bool]:
+    """True if `score_pair(x, m)` can have no conflict row: the ledger's conflict test, without the ledger.
+
+    A conflict row needs a single-valued kind (scale > 0, relation in `conflict_relations`)
+    on both captures with no value in common.
+    """
+    w = ctx.weights
+    if relation not in w.conflict_relations:
+        return lambda x, m: True
+    single = {}
+
+    def risky(key) -> bool:
+        if key not in single:
+            layer, kind = key
+            single[key] = layer is not Layer.collector and w.weight(kind, layer).single_valued and w.scale(kind, layer, relation) > 0
+        return single[key]
+
+    def ok(x: str, m: str) -> bool:
+        va, vb = ctx.values[x], ctx.values[m]
+        if len(vb) < len(va):
+            va, vb = vb, va
+        for key, xa in va.items():
+            xb = vb.get(key)
+            if xb is not None and risky(key) and not (xa.ids.keys() & xb.ids.keys()):
+                return False
+        return True
+
+    return ok
 
 
 def _rank(ps: PairScore) -> tuple[bool, float]:
