@@ -58,3 +58,14 @@ Covers the runtime dependencies and the `app`, `dev` and `fetch` extras of `ftf`
 | uvicorn | BSD-3-Clause |
 | watchdog | Apache-2.0 |
 | websockets | BSD-3-Clause |
+
+## Browser binaries of the `fetch` extra (`playwright==1.64.1`)
+
+Downloaded into the container image by `playwright install` for `ftf fetch` (live page capture).
+Named exception, owner decision 2026-11-21: Playwright and its browser binaries are allowed,
+including Chromium's bundled unmodified LGPL-2.1 FFmpeg.
+
+| Component | Licence |
+|---|---|
+| Playwright driver (Node.js, inside the playwright wheel) | Apache-2.0; bundled Node.js runtime MIT |
+| Chromium headless shell (`playwright install --only-shell chromium`) | BSD-3-Clause; bundles unmodified FFmpeg (LGPL-2.1) and other components under their own licences |
