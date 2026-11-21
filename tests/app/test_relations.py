@@ -108,6 +108,8 @@ def test_defang():
     ("scam。example", "scam[.]example"),  # ideographic full stop separates labels too
     ("a．b．example", "a[.]b[.]example"),  # full-width full stop
     ("नमस्ते.उदाहरण", "नमस्ते[.]उदाहरण"),  # combining marks inside labels
+    ("„shop.example”", "„shop[.]example”"),  # quotes stay outside the host
+    ("see shop.example… now", "see shop[.]example… now"),
 ])
 def test_defang_idn(raw, want):
     assert R.defang(raw) == want

@@ -92,6 +92,30 @@ def test_har_page_url_is_enriched_offline(tmp_path, monkeypatch):
     assert not (tmp_path / "data").exists()
 
 
+def test_fallback_id_already_in_base_is_not_linked_again(tmp_path, monkeypatch):
+    calls = []
+    _stub_linking(monkeypatch, calls)
+    url = "https://lander.shop.example/x"
+    inc_id = S.adhoc_ids(url)[0]
+    text = synthetic_base().to_json().replace('"s-1"', f'"{inc_id}"').replace('"s-1/', f'"{inc_id}/')
+    base = Dataset.model_validate(json.loads(text))
+    res = analyze(AnalysisInput(kind="url", text=url), base, run_dir=tmp_path)
+    assert res.from_base and res.incident.id == inc_id and not calls
+    assert [i.id for i in res.to_dataset().incidents].count(inc_id) == 1
+
+
+def test_fallback_artefact_ids_stay_unique(tmp_path, monkeypatch):
+    monkeypatch.setattr(S, "_optional", lambda module, name: None)
+    case = tmp_path / "case"
+    case.mkdir()
+    (case / "a b.png").write_bytes(b"one")
+    (case / "a-b.png").write_bytes(b"two")
+    res = analyze(AnalysisInput(kind="dataset_item", path=case), synthetic_base(), run_dir=tmp_path / "run")
+    arts = [a.id for c in res.incident.captures for a in c.artefacts]
+    assert len(arts) == 2 and len(set(arts)) == 2
+    res.to_dataset()
+
+
 def test_har_file_url_is_not_enriched(tmp_path):
     har = {"log": {"pages": [{"title": "file:///home/someone/page.html"}], "entries": []}}
     src = tmp_path / "local.har"
