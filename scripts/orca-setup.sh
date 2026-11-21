@@ -130,12 +130,12 @@ fi
 
 # ---- 6. Branch <-> Linear issue ---------------------------------------------------------
 issue="$(printf '%s\n' "$branch" | tr '[:upper:]' '[:lower:]' \
-  | sed -n -E 's#^(.*/)?(vis)-([0-9]+)(-.*)?$#\2-\3#p' | tr '[:lower:]' '[:upper:]')"
+  | sed -n -E 's#^(.*/)?(hack)-([0-9]+)(-.*)?$#\2-\3#p' | tr '[:lower:]' '[:upper:]')"
 if [ -z "$branch" ]; then
   warn "branch: detached HEAD; one issue = one branch"
 elif [ -z "$issue" ]; then
   if [ "$branch" = main ]; then info "branch: main (no issue)"
-  else warn "branch: '$branch' has no vis-<n>; one issue = one branch"; fi
+  else warn "branch: '$branch' has no hack-<n>; one issue = one branch"; fi
 elif ! have orca; then
   warn "issue $issue: orca CLI not found, cannot look it up"
 else
