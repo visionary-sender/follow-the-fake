@@ -27,10 +27,13 @@ app = [
 features = [
     "beautifulsoup4>=4.12,<5",
     "huggingface_hub>=0.24,<2",
+    "imagehash>=4.3,<5",
     "lxml>=5,<7",
     "onnxruntime>=1.18,<2",
     "pillow>=10,<14",
     "tokenizers>=0.19,<1",
+    "torch>=2.4",
+    "transformers>=4.50",
 ]
 dev = [
     "packaging>=24",
