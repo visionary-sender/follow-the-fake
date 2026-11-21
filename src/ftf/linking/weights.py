@@ -120,10 +120,13 @@ HAND_TABLE = WeightTable(
         # flow: template-level config (sold/copied with the kit): full template, weak campaign
         "aio_flow": _K(L.tenant, 3.0, relations=_row(1.0, 0.0, 0.25, 0.25, 1.0)),
         "aio_owner": _K(L.owner, 6.0, single_valued=True, private=True),  # one owner per page
-        # campaign id sits in Ingestion's owner layer, so it only matters when the owner id is absent;
-        # not single-valued: one owner runs several campaigns, and a differing campaign is no cannot-link
-        "aio_campaign": _K(L.owner, 5.0, private=True),
-        "aio_campaign_name": _K(L.owner, 3.0),  # owner-chosen label, names repeat more than ids
+        # campaign id (Ingestion files it in the owner layer, level campaign): one per page, so a differing
+        # id under one owner is a different campaign of the same operator. Single-valued and campaign-only:
+        # a conflict row under the campaign relation, nothing under operator, and never a cannot-link
+        # (cannot-link stays tenant/owner ids, `ledger.has_private_conflict`).
+        "aio_campaign": _K(L.owner, 4.0, single_valued=True, private=True, relations=_row(0.0, 0.0, 0.0, 1.0, 1.0)),
+        # owner-chosen label of the campaign: names repeat more than ids, so no conflict; campaign-only too
+        "aio_campaign_name": _K(L.owner, 3.0, relations=_row(0.0, 0.0, 0.0, 1.0, 1.0)),
         "aio_landing": _K(L.landing, 4.0),  # landing id; multi-valued (a capture can show several)
         "aio_landing_name": _K(L.landing, 3.0),  # label of the landing, weaker than its id
         # platform constants: one term for all of them (layer max), never a private id

@@ -17,6 +17,7 @@ from ftf.contract.models import (
     Relation,
 )
 from ftf.linking import HAND_TABLE, ScoringContext, score_pair
+from ftf.linking.ledger import has_private_conflict
 
 L = Layer
 
@@ -72,9 +73,9 @@ def test_entries_are_sane():
         if w.relations is not None:
             assert set(w.relations) == set(Relation), kind
             assert all(0.0 <= s <= 1.0 for s in w.relations.values()), kind
-    # single-valued ids are exactly the per-page platform, tenant and owner
+    # single-valued ids are exactly the per-page platform, tenant, owner and aio campaign
     singles = {k for k, w in HAND_TABLE.kinds.items() if w.single_valued}
-    assert singles == {"platform_name", "aio_cdn_tenant", "aio_owner"}
+    assert singles == {"platform_name", "aio_cdn_tenant", "aio_owner", "aio_campaign"}
 
 
 def _pair(a: list[tuple], b: list[tuple]) -> ScoringContext:
@@ -94,11 +95,14 @@ def test_aio_owner_conflict_is_cannot_link():
     assert row(s, "aio_owner").bits == HAND_TABLE.conflict_bits
 
 
-def test_differing_aio_campaign_under_one_owner_is_no_conflict():
+def test_differing_aio_campaign_under_one_owner_is_a_campaign_conflict_but_no_cannot_link():
     owner = [ind(L.owner, "aio_owner", "owner-1"), ind(L.tenant, "aio_cdn_tenant", "tenant-1")]
     ctx = _pair(owner + [ind(L.owner, "aio_campaign", "camp-1")], owner + [ind(L.owner, "aio_campaign", "camp-2")])
     s = score_pair(ctx, "x/lander", "y/lander", Relation.campaign)
-    assert not [r for r in s.rows if r.status is EvidenceStatus.conflict]
+    assert [r.kind for r in s.rows if r.status is EvidenceStatus.conflict] == ["aio_campaign"]
+    assert not has_private_conflict(s)  # same owner: a different campaign, never a cannot-link
+    op = score_pair(ctx, "x/lander", "y/lander", Relation.operator)
+    assert not [r for r in op.rows if r.status is EvidenceStatus.conflict]
     assert row(s, "aio_owner").bits == pytest.approx(4.0)  # 6 − 1 static copy prior − log2(2 groups)
 
 

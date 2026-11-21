@@ -378,8 +378,14 @@ def verdict(score: PairScore, ctx: ScoringContext) -> str:
 
 
 def has_private_conflict(score: PairScore) -> bool:
-    """A tenant or owner conflict: the two captures belong to different operators (cannot-link)."""
-    return any(r.status is EvidenceStatus.conflict and r.layer in (Layer.tenant, Layer.owner) for r in score.rows)
+    """A tenant or owner conflict: the two captures belong to different operators (cannot-link). A differing
+    chain id finer than the owner (an aio campaign id, which Ingestion files in the owner layer) is a
+    conflict row for the campaign relation, never a cannot-link: one owner runs several campaigns."""
+    return any(
+        r.status is EvidenceStatus.conflict and r.layer in (Layer.tenant, Layer.owner)
+        and ANCHOR_KINDS.get(r.kind, Level.operator) in (Level.tenant, Level.operator)
+        for r in score.rows
+    )
 
 
 _private_conflict = has_private_conflict

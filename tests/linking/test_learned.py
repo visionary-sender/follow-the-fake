@@ -46,11 +46,11 @@ def chain(tenant: str, owner: str, campaign: str | None = None, landing: str | N
 PLATFORM = [ind(L.platform, "platform_name", "stack-a"), ind(L.platform, "aio_sdk_asset", "sdk-const-1")]
 EXTRA_CONSTANTS = [
     ind(L.kit, "aio_macros_file", "macros-const"),
-    ind(L.kit, "aio_lander_template", "template-const"),
+    ind(L.kit, "kit_asset_set", "kitset-const"),
+    ind(L.kit, "asset_sha256", "asset-const"),
+    ind(L.offer, "contact_email", "desk@mail.example"),
     ind(L.offer, "form_field_set", "fields-const"),
     ind(L.platform, "aio_action_files", "actions-const"),
-    ind(L.kit, "kit_shared_script", "script-const"),
-    ind(L.offer, "form_endpoint", "https://endpoint.example/submit"),
 ]
 
 
@@ -79,18 +79,18 @@ def test_shared_platform_is_one_small_term_however_many_constants():
     const_rows = [r for r in many.rows if r.kind in kinds]
     assert len(const_rows) == len(kinds)  # every constant itemised: one term, the rest 0 bits and explained
     chained = [r for r in const_rows if r.status is EvidenceStatus.hub_subsumed and "chain rule" in r.note]
-    assert len(chained) >= 3 and all(r.bits == 0 and "platform" in r.note for r in chained)
+    assert len(chained) >= 2 and all(r.bits == 0 and "platform" in r.note for r in chained)
     # without the chain rule the same constants add up across layers
     off = score_pair(ScoringContext.from_dataset(platform_ds(PLATFORM + EXTRA_CONSTANTS), chain_rule=False),
                      "x1/lander", "x2/lander")
-    assert sum(platform_bits(off, kinds)) > sum(platform_bits(many, kinds))
+    assert sum(platform_bits(off, kinds)) > sum(platform_bits(many, kinds)) + 2
     assert sum(r.bits for r in many.rows) == pytest.approx(many.bits, abs=1e-6)
 
 
 def test_platform_constant_in_another_layer_is_capped_without_a_platform_row():
-    consts = [ind(L.kit, "aio_lander_template", "template-const"), ind(L.offer, "form_field_set", "fields-const")]
+    consts = [ind(L.kit, "kit_asset_set", "kitset-const"), ind(L.offer, "contact_email", "desk@mail.example")]
     score = score_pair(ScoringContext.from_dataset(platform_ds(consts)), "x1/lander", "x2/lander")
-    kept = platform_bits(score, {"aio_lander_template", "form_field_set"})
+    kept = platform_bits(score, {"kit_asset_set", "contact_email"})
     assert len(kept) == 1 and kept[0] <= HAND_TABLE.kinds["platform_name"].bits
 
 
@@ -104,9 +104,9 @@ def hierarchy_ds() -> Dataset:
         incident("a2", PLATFORM + chain("tenant-1", "owner-1", "camp-1", "landing-1") + [
             ind(L.creative, "ad_caption", "Caption one"), ind(L.tracking_account, "meta_pixel", "pixel-1", live=True)]),
         incident("a3", PLATFORM + chain("tenant-1", "owner-1", "camp-2", "landing-3") + [
-            ind(L.tracking_account, "meta_pixel", "pixel-1", live=True), ind(L.tenant, "aio_flow", "flow-1")]),
-        incident("r1", PLATFORM + chain("tenant-2", "owner-2", "camp-3", "landing-4") + [ind(L.tenant, "aio_flow", "flow-2")]),
-        incident("r2", PLATFORM + chain("tenant-2", "owner-3", "camp-4", "landing-5") + [ind(L.tenant, "aio_flow", "flow-2")]),
+            ind(L.tracking_account, "meta_pixel", "pixel-1", live=True), ind(L.tenant, "aio_handle_key", "handle-1")]),
+        incident("r1", PLATFORM + chain("tenant-2", "owner-2", "camp-3", "landing-4") + [ind(L.tenant, "aio_handle_key", "handle-2")]),
+        incident("r2", PLATFORM + chain("tenant-2", "owner-3", "camp-4", "landing-5") + [ind(L.tenant, "aio_handle_key", "handle-2")]),
     ])
 
 
@@ -114,10 +114,10 @@ def test_levels_and_level_graph():
     h = Hierarchy.from_dataset(hierarchy_ds())
     lv = {kind: h.level((layer, kind, value)) for layer, kind, value, _ in
           [ind(L.creative, "ad_caption", "caption one"), ind(L.tracking_account, "meta_pixel", "pixel-1"),
-           ind(L.platform, "aio_sdk_asset", "sdk-const-1"), ind(L.tenant, "aio_flow", "flow-2"),
+           ind(L.platform, "aio_sdk_asset", "sdk-const-1"), ind(L.tenant, "aio_handle_key", "handle-2"),
            ind(L.landing, "aio_landing", "landing-1")]}
     assert lv == {"ad_caption": None, "meta_pixel": Level.operator, "aio_sdk_asset": Level.platform,
-                  "aio_flow": Level.tenant, "aio_landing": Level.landing}
+                  "aio_handle_key": Level.tenant, "aio_landing": Level.landing}
     assert h.parents == {Level.landing: Level.campaign, Level.campaign: Level.operator,
                          Level.operator: Level.tenant, Level.tenant: None}
     assert h.summary()["level_graph"]["landing"] == "aio campaign"
@@ -134,10 +134,10 @@ def test_values_explained_by_a_shared_level_id_count_zero():
     assert pixel.status is EvidenceStatus.hub_subsumed and pixel.bits == 0 and "owner" in pixel.note
     (owner,) = [r for r in s.rows if r.kind == "aio_owner"]
     assert owner.status is EvidenceStatus.shared and owner.bits > 0
-    # a reseller's flow spanning two owners of one tenant is tenant-level, explained by the shared tenant
+    # a reseller's handle key spanning two owners of one tenant is tenant-level, explained by the shared tenant
     s2 = score_pair(ctx, "r1/lander", "r2/lander", Relation.operator)
-    (flow,) = [r for r in s2.rows if r.kind == "aio_flow"]
-    assert flow.status is EvidenceStatus.hub_subsumed and "tenant" in flow.note
+    (handle,) = [r for r in s2.rows if r.kind == "aio_handle_key"]
+    assert handle.status is EvidenceStatus.hub_subsumed and "tenant" in handle.note
 
 
 # ---- acceptance 2: rarity over operators, not incidents ----
@@ -300,8 +300,8 @@ def test_shared_owner_and_campaign_are_two_terms_and_alias_is_not():
     assert campaign_terms[0] == 0 and campaign_terms[1] > 0  # the campaign level counts once
 
 
-def test_learned_table_makes_a_different_aio_campaign_a_cannot_link_under_campaign_only():
-    from ftf.linking.ledger import verdict
+def test_a_different_aio_campaign_is_a_campaign_conflict_but_no_cannot_link():
+    from ftf.linking.ledger import has_private_conflict
 
     table, rep = learn_weights(owner_campaign_ds())
     entry = table.kinds["aio_campaign"]
@@ -309,6 +309,8 @@ def test_learned_table_makes_a_different_aio_campaign_a_cannot_link_under_campai
     ctx = ScoringContext.from_dataset(owner_campaign_ds(), weights=table)
     camp = score_pair(ctx, "m1/lander", "m3/lander", Relation.campaign)
     assert any(r.kind == "aio_campaign" and r.status is EvidenceStatus.conflict for r in camp.rows)
-    assert verdict(camp, ctx) != "link"
+    assert not has_private_conflict(camp)  # cannot-link stays tenant/owner ids
+    hand = score_pair(ScoringContext.from_dataset(owner_campaign_ds()), "m1/lander", "m3/lander", Relation.campaign)
+    assert any(r.kind == "aio_campaign" and r.status is EvidenceStatus.conflict for r in hand.rows)
     op = score_pair(ctx, "m1/lander", "m3/lander", Relation.operator)
     assert not any(r.status is EvidenceStatus.conflict for r in op.rows)
