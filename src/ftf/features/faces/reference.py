@@ -107,10 +107,13 @@ def _load(d: Path) -> Reference:
 
 
 def _get(url: str, params: Optional[dict] = None, timeout: int = 60) -> bytes:
+    # Commons serves thumbnails from thumb.wikimedia.org; the old upload.wikimedia.org thumb path
+    # is heavily throttled for scripts, so use the same path on the thumbnail host.
+    url = url.replace("https://upload.wikimedia.org/wikipedia/commons/thumb/", "https://thumb.wikimedia.org/wikipedia/commons/thumb/")
     if params:
         url = f"{url}?{urllib.parse.urlencode(params)}"
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    tries = 7
+    tries = 4
     for attempt in range(tries):
         time.sleep(PACE_S)  # Wikimedia rate-limits bursts; stay well under it
         try:
@@ -121,6 +124,7 @@ def _get(url: str, params: Optional[dict] = None, timeout: int = 60) -> bytes:
                 raise
             retry_after = e.headers.get("Retry-After", "")
             wait = int(retry_after) if retry_after.isdigit() else 5 * 2**attempt
+            print(f"HTTP {e.code} from {urllib.parse.urlparse(url).netloc}, retry in {min(wait, 120)} s", file=sys.stderr)
             time.sleep(min(wait, 120))
     raise AssertionError("unreachable")
 
@@ -171,6 +175,8 @@ def load_reference() -> Optional[Reference]:
     ``model_dir()/faces-reference/<manifest sha>``, then a fresh build from Wikimedia unless
     ``FTF_OFFLINE=1``. Returns None if none of that works; faces are then still embedded.
     """
+    if not MANIFEST_PATH.exists():
+        return None
     sha = manifest_sha()
     candidates = []
     if os.environ.get("FTF_FACES_REFERENCE"):
@@ -195,8 +201,9 @@ def load_reference() -> Optional[Reference]:
 # ---------------------------------------------------------------- drafting a manifest
 
 
-def _wikidata_person(name: str) -> Optional[dict]:
-    hits = json.loads(
+def _wikidata_person(name: str, qid: Optional[str] = None) -> Optional[dict]:
+    """The Wikidata human for a name (first human among the search hits), or the pinned ``qid``."""
+    hits = [{"id": qid}] if qid else json.loads(
         _get(
             WIKIDATA_API,
             {"action": "wbsearchentities", "search": name, "language": "pl", "type": "item",
@@ -288,10 +295,12 @@ def select(names: list[str], per_person: int, work: Path, min_face: int = 60) ->
     engine = FaceEngine(det_threshold=0.9)
     work.mkdir(parents=True, exist_ok=True)
     people, skipped = [], []
-    for name in names:
-        wd = _wikidata_person(name)
+    for spec in names:
+        name, _, qid = spec.partition("=")  # "Name=Q123" pins an ambiguous name
+        wd = _wikidata_person(name, qid or None)
         if not wd:
             skipped.append({"name": name, "reason": "no Wikidata human"})
+            print(f"skipped: {skipped[-1]}", file=sys.stderr)
             continue
         titles = [f"File:{t}" for t in wd["p18"]]
         if wd["commons_category"]:
@@ -319,6 +328,7 @@ def select(names: list[str], per_person: int, work: Path, min_face: int = 60) ->
             cands.append((info, e))
         if not cands:
             skipped.append({"name": name, "qid": wd["qid"], "reason": f"{len(infos)} licensed files, none with one clear face"})
+            print(f"skipped: {skipped[-1]}", file=sys.stderr)
             continue
         mat = np.stack([e for _, e in cands])
         anchors = [k for k, (i, _) in enumerate(cands) if i["is_p18"]]
@@ -341,6 +351,7 @@ def select(names: list[str], per_person: int, work: Path, min_face: int = 60) ->
             people.append({"name": name, "wikidata": wd["qid"], "description": wd["description"], "images": imgs})
         else:
             skipped.append({"name": name, "qid": wd["qid"], "reason": "no consistent face"})
+            print(f"skipped: {skipped[-1]}", file=sys.stderr)
         print(f"{name}: {wd['qid']} {wd['description']!r}: {len(infos)} licensed, {len(cands)} one-face, {len(imgs)} kept", file=sys.stderr)
     return {
         "about": "Reference faces of public figures impersonated in scam ads. Images are not "

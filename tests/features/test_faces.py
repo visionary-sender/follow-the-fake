@@ -19,8 +19,8 @@ def names(text):
 def test_brand_gazetteer():
     assert names("Czytaj więcej na www.onet.pl") == ["Onet"]
     assert names("TVN24 | Fakty") == ["TVN24"]
-    assert names("Gość Wydarzeń – Polsat News") == ["Polsat News"]
-    assert names("«Wiem, kto strzelał» — Gazeta.pl") == ["Gazeta.pl"]
+    assert names("Wywiad dnia – Polsat News") == ["Polsat News"]
+    assert names("«Przykładowy nagłówek» — Gazeta.pl") == ["Gazeta.pl"]
     assert names("Bank Pekao S.A. i PKO BP") == ["Bank Pekao", "PKO Bank Polski"]
     assert names("Odbierz paczkę z Paczkomatu InPost") == ["InPost"]
     # common words and lowercase short names do not count
@@ -38,10 +38,10 @@ def test_brands_in_merges_sources():
 def test_html_title_is_read_inert(tmp_path):
     p = tmp_path / "page.html"
     p.write_bytes(
-        b"<html><head><script>alert(1)</script><title>Wiem, kto strzela&#322; &mdash; Gazeta.pl</title>"
+        b"<html><head><script>alert(1)</script><title>Przyk&#322;adowy tytu&#322; &mdash; Gazeta.pl</title>"
         b'<meta property="og:site_name" content="Gazeta.pl"></head><body>x</body></html>'
     )
-    assert html_title_text(p) == "Wiem, kto strzelał — Gazeta.pl | Gazeta.pl"
+    assert html_title_text(p) == "Przykładowy tytuł — Gazeta.pl | Gazeta.pl"
     (tmp_path / "none.html").write_bytes(b"<p>no title</p>")
     assert html_title_text(tmp_path / "none.html") is None
 
@@ -72,7 +72,7 @@ def test_manifest_records_licence_and_attribution():
         for im in person["images"]:
             assert licence_ok(im["licence"]), im["title"]
             assert im["author"] and im["source"].startswith("https://commons.wikimedia.org/")
-            assert im["thumb_url"].startswith("https://upload.wikimedia.org/")
+            assert im["thumb_url"].startswith(("https://upload.wikimedia.org/", "https://thumb.wikimedia.org/"))
 
 
 class StubEngine:
@@ -82,11 +82,11 @@ class StubEngine:
 
 @pytest.fixture
 def stubbed(monkeypatch):
-    ref = Reference(["Rafał Brzoska", "Tomasz Lis"], ["f1", "f2"], np.eye(3, dtype=np.float32)[:2], "abc")
+    ref = Reference(["Person A", "Person B"], ["f1", "f2"], np.eye(3, dtype=np.float32)[:2], "abc")
     monkeypatch.setattr(faces, "_engine_cache", StubEngine())
     monkeypatch.setattr(models, "load_bgr", lambda p: np.zeros((4, 4, 3), np.uint8))
     monkeypatch.setattr(reference, "load_reference", lambda: ref)
-    monkeypatch.setattr(faces, "ocr_text", lambda p, timeout=120: "Kanał Zero ujawnia")
+    monkeypatch.setattr(faces, "ocr_text", lambda p, timeout=120: "Tekst testowy Kanał Zero")
 
 
 def test_apply_emits_faces_people_and_brands(tmp_path, stubbed):
@@ -102,15 +102,15 @@ def test_apply_emits_faces_people_and_brands(tmp_path, stubbed):
     inc = Incident(id="i1", source="t", captures=[cap])
     inc.indicators.append(
         Indicator(id="c1/page_text/0", capture_id="c1", layer=Layer.creative, kind="page_text",
-                  level=Level.campaign, value="Bank Pekao zaprasza", observed=Observed.static,
+                  level=Level.campaign, value="Tekst testowy Bank Pekao", observed=Observed.static,
                   provenance=Provenance(artefact_id="c1/a1"), extractor="text@0.1")
     )
     ds = Dataset(name="t", incidents=[inc])
     out = tmp_path / "out"
     ds = faces.apply(ds, raw, out)
     inds = {(i.kind, i.value or "") : i for i in ds.incidents[0].indicators if i.extractor == faces.EXTRACTOR}
-    pf = inds[("person_face", "Tomasz Lis")]
-    assert pf.provenance.note.startswith("sface_cosine=1.0000;top3=Tomasz Lis:1.0000|Rafał Brzoska:0.0000")
+    pf = inds[("person_face", "Person B")]
+    assert pf.provenance.note.startswith("sface_cosine=1.0000;top3=Person B:1.0000|Person A:0.0000")
     assert pf.provenance.locator == "face=0;bbox=1,2,30,40"
     emb = inds[("face_embedding", "")]
     keys, mat = load_vectors(out, emb.vector_ref.store)

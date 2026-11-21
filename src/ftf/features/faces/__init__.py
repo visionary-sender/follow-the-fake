@@ -160,25 +160,25 @@ def apply(ds: Dataset, raw_root: Path, out_dir: Path) -> Dataset:
 
     # Brands per capture, from text indicators, saved-page titles and fallback OCR.
     for inc in ds.incidents:
-        text_by_art: dict[Optional[str], list[tuple[str, str]]] = defaultdict(list)
+        # (capture id, artefact id or None for whole-capture text) -> [(kind, text)]
+        texts_of: dict[tuple[str, Optional[str]], list[tuple[str, str]]] = defaultdict(list)
         for ind in inc.indicators:
             if ind.kind in TEXT_KINDS and ind.value and not ind.extractor.startswith("faces@"):
-                text_by_art[ind.provenance.artefact_id].append((ind.kind, ind.value))
+                texts_of[(ind.capture_id, ind.provenance.artefact_id)].append((ind.kind, ind.value))
         for cap in inc.captures:
             if cap.duplicate_of:
                 continue
-            sources: list[tuple[str, str]] = []
+            sources: list[tuple[str, str]] = list(texts_of.get((cap.id, None), []))
             first_art = {}
             for art in cap.artefacts:
-                texts = list(text_by_art.get(art.id, []))
+                texts = list(texts_of.get((cap.id, art.id), []))
                 if art.path:
                     texts += _own_texts(art, raw_root, has_ocr=any(k == "ocr_text" for k, _ in texts), stats=stats)
                 for src, text in texts:
                     sources.append((src, text))
                     for name in brands_in([(src, text)]):
                         first_art.setdefault(name, art)
-            # text indicators without an artefact (whole-capture text) still count
-            for feat in _brand_features(brands_in(sources + text_by_art.get(None, []))):
+            for feat in _brand_features(brands_in(sources)):
                 w.add(inc, cap, first_art.get(feat.value), feat)
     w.save()
     _write_stats(Path(out_dir), stats, ref)

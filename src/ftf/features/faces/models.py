@@ -136,7 +136,11 @@ class FaceEngine:
         h, w = img.shape[:2]
         self.det.setInputSize((w, h))
         _, faces = self.det.detect(img)
-        return faces if faces is not None else np.zeros((0, 15), np.float32)
+        if faces is None:
+            return np.zeros((0, 15), np.float32)
+        # YuNet occasionally returns NaN boxes on flat or odd inputs; drop those and empty boxes.
+        ok = np.isfinite(faces).all(axis=1) & (faces[:, 2] > 0) & (faces[:, 3] > 0)
+        return faces[ok]
 
     def faces(self, bgr: np.ndarray) -> list[Face]:
         h, w = bgr.shape[:2]
