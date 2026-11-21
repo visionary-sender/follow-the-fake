@@ -126,13 +126,14 @@ def run(args: argparse.Namespace) -> int:
     invalid: list[dict[str, str]] = []
     seen: set[str] = set()
     for raw in domains:
+        name = enricher.registrable(raw)
+        if name is not None and name in seen:  # checked before any lookup, so no duplicate requests
+            invalid.append({"input": raw, "error": f"duplicate of {name}; already enriched"})
+            continue
         try:
             result = enricher.enrich(raw, captured_on=args.captured_on)
         except ValueError as exc:
             invalid.append({"input": raw, "error": str(exc)})
-            continue
-        if result.domain in seen:  # two inputs with one registrable domain would duplicate incident ids
-            invalid.append({"input": raw, "error": f"duplicate of {result.domain}; already enriched"})
             continue
         seen.add(result.domain)
         results.append(result)

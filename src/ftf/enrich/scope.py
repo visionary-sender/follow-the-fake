@@ -41,7 +41,9 @@ def page_urls(har: Any) -> list[str]:
     except (KeyError, TypeError):
         return []
     pages = log.get("pages") if isinstance(log, dict) else None
-    titles = [p.get("title") for p in pages or [] if isinstance(p, dict)]
+    if not isinstance(pages, list):
+        pages = []
+    titles = [p.get("title") for p in pages if isinstance(p, dict)]
     urls = [t for t in titles if isinstance(t, str) and t.lower().startswith(("http://", "https://"))]
     if urls:
         return urls
@@ -50,7 +52,8 @@ def page_urls(har: Any) -> list[str]:
         return []
     documents = [e for e in entries if isinstance(e, dict) and e.get("_resourceType") == "document"]
     chosen = documents[0] if documents else (entries[0] if entries and isinstance(entries[0], dict) else None)
-    url = ((chosen or {}).get("request") or {}).get("url") if isinstance(chosen, dict) else None
+    request = chosen.get("request") if isinstance(chosen, dict) else None
+    url = request.get("url") if isinstance(request, dict) else None
     return [url] if isinstance(url, str) else []
 
 
@@ -89,7 +92,12 @@ def organiser_domains(root: Path, *, tld_cache: Path | None = None) -> Scope:
                 if har is None:
                     scope.skipped.append(str(path.relative_to(root)))
                     continue
-                for url in page_urls(har):
+                try:
+                    urls = page_urls(har)
+                except (TypeError, AttributeError, KeyError):
+                    scope.skipped.append(str(path.relative_to(root)))
+                    continue
+                for url in urls:
                     add(url, "har_page")
             elif lower.startswith("scam_links") and lower.endswith(".txt"):
                 text = _read_text(path)

@@ -59,3 +59,20 @@ def test_malformed_source_is_dropped_with_warning(tmp_path):
     assert cache.get("rdap", "example.com") is None
     assert cache.warnings and "rdap" in cache.warnings[0]
     assert cache.get("dns_doh", "example.com") is None  # record without timestamps is ignored, not fatal
+
+
+def test_damaged_file_is_not_overwritten_by_a_save(tmp_path):
+    path = tmp_path / "c.json"
+    original = "{damaged"
+    path.write_text(original, encoding="utf-8")
+    cache = Cache(path)
+    cache.put("dns_doh", "example.com", status="ok", data={}, fetched_at=T0, ttl=timedelta(days=1))
+    cache.save()
+    assert path.read_text(encoding="utf-8") == original  # the only copy survives an offline run
+
+
+def test_non_object_data_is_a_miss(tmp_path):
+    path = tmp_path / "c.json"
+    path.write_text(json.dumps({"schema": 1, "entries": {"rdap": {"example.com": {
+        "status": "ok", "data": "oops", "fetched_at": "2026-11-21T12:00:00Z", "expires_at": "2026-12-21T12:00:00Z"}}}}), encoding="utf-8")
+    assert Cache(path).get("rdap", "example.com") is None

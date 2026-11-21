@@ -106,6 +106,8 @@ UNKNOWN_KINDS = {
     SRC_CRT: ("cert_issuer", "cert_first_seen", "cert_san_sibling"),
     SRC_CERT_PL: ("cert_pl_listed",),
 }
+# Linking must skip indicators whose value is UNKNOWN_VALUE: they record a failed lookup, not evidence.
+UNKNOWN_VALUE = "unknown"
 
 
 @dataclass(frozen=True)
@@ -146,6 +148,7 @@ class Enricher:
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._failures: Counter[str] = Counter()
         self._cert_pl_index: dict[str, dict[str, Any]] | None = None
+        self._cert_pl_error: str | None = None
 
     def registrable(self, value: str) -> str | None:
         return registrable_domain(value, tld_cache=self.tld_cache)
@@ -217,7 +220,13 @@ class Enricher:
 
     def _fetch_cert_pl(self, domain: str) -> Fetched:
         if self._cert_pl_index is None:
-            self._cert_pl_index = fetch_cert_pl_index(self.client)  # one bulk download per run
+            if self._cert_pl_error is not None:  # a failed bulk download is not repeated in this run
+                raise Unavailable(self._cert_pl_error)
+            try:
+                self._cert_pl_index = fetch_cert_pl_index(self.client)  # one bulk download per run
+            except Unavailable as exc:
+                self._cert_pl_error = str(exc)
+                raise
         rec = self._cert_pl_index.get(domain, {"listed": False, "listed_date": None, "rows": 0})
         return Fetched(OK, {"listed": rec["listed"], "listed_date": rec["listed_date"], "rows": rec["rows"]}, CERT_PL_URL)
 
@@ -256,7 +265,7 @@ class _Indicators:
 
     def unknown(self, lookup: Lookup, kinds: tuple[str, ...]) -> None:
         for kind in kinds:
-            self.add(kind, "unknown", lookup, locator=None, note=f"reason={lookup.reason or 'no answer'}")
+            self.add(kind, UNKNOWN_VALUE, lookup, locator=None, note=f"reason={lookup.reason or 'no answer'}")
 
 
 def _indicators(

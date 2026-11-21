@@ -48,6 +48,7 @@ class Cache:
         self.path = path
         self.warnings: list[str] = []
         self._entries: dict[str, dict[str, dict[str, Any]]] = {}
+        self._may_save = True  # a file that failed to load is left untouched on disk
         if path is not None and path.exists():
             try:
                 raw = json.loads(path.read_text(encoding="utf-8"))
@@ -62,8 +63,9 @@ class Cache:
                     else:
                         self.warnings.append(f"cache source {source!r} ignored: malformed")
             except (OSError, ValueError, KeyError, TypeError) as exc:
-                self.warnings.append(f"cache {path} ignored: {exc}")
+                self.warnings.append(f"cache {path} ignored: {exc}; not overwritten by this run")
                 self._entries = {}
+                self._may_save = False
 
     def __len__(self) -> int:
         return sum(len(by_domain) for by_domain in self._entries.values() if isinstance(by_domain, dict))
@@ -73,12 +75,15 @@ class Cache:
         record = by_domain.get(domain) if isinstance(by_domain, dict) else None
         if not isinstance(record, dict):
             return None
+        data = record.get("data") or {}
+        if not isinstance(data, dict):
+            return None
         try:
             return Entry(
                 source=source,
                 domain=domain,
                 status=record["status"],
-                data=record.get("data") or {},
+                data=data,
                 fetched_at=parse_utc(record["fetched_at"]),
                 expires_at=parse_utc(record["expires_at"]),
                 url=record.get("url"),
@@ -107,7 +112,7 @@ class Cache:
 
     def save(self) -> None:
         """Write the cache atomically. Does nothing for an in-memory cache."""
-        if self.path is None:
+        if self.path is None or not self._may_save:
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=".cache-", suffix=".tmp")

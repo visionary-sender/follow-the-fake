@@ -33,7 +33,7 @@ def _extractor(cache_dir: str) -> tldextract.TLDExtract:
 
 def hostname(value: str) -> str | None:
     """Return the lower-case ASCII host of a domain or URL, or None if it is not a host name."""
-    text = value.strip()
+    text = value.strip().replace("\\", "/")  # browsers treat backslash as a slash
     if not text:
         return None
     if "://" not in text:

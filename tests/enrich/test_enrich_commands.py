@@ -62,3 +62,23 @@ def test_missing_scope_directory_is_a_usage_error(tmp_path, capsys):
     code = main(["enrich-domain", "--from-raw", str(tmp_path / "nope"), "--offline", "--cache", str(tmp_path / "c.json")])
     assert code == 2
     assert "not a directory" in capsys.readouterr().err
+
+
+def test_duplicate_is_skipped_before_any_lookup(tmp_path, capsys, monkeypatch):
+    from ftf.enrich import commands
+    from enrich_support import FakeNet, client_for, NOW
+    from ftf.enrich.domain import Enricher as RealEnricher
+
+    net = FakeNet()
+
+    def make(cache, **kwargs):
+        return RealEnricher(cache, client=client_for(net), clock=lambda: NOW, **kwargs)
+
+    monkeypatch.setattr(commands, "Enricher", make)
+    summary = tmp_path / "s.json"
+    assert main(["enrich-domain", "example.com", "https://www.example.com/x", "--cache", str(tmp_path / "c.json"),
+                 "--tld-cache", str(tmp_path), "--summary", str(summary)]) == 0
+    report = json.loads(summary.read_text(encoding="utf-8"))
+    assert report["domains_enriched"] == 1
+    assert report["invalid_inputs"][0]["input"] == "https://www.example.com/x"
+    assert len([u for u in net.calls if "example.com" in u and "dns.google" in u]) == 3  # one lookup set, not two

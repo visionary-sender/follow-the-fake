@@ -7,6 +7,7 @@ from enrich_support import LOOKUP_HOSTS, NOW, FakeNet, client_for, example_route
 from ftf.contract import Dataset, Layer, Observed
 from ftf.enrich.cache import Cache
 from ftf.enrich.domain import Enricher, build_dataset
+from ftf.enrich.http import Unavailable
 from ftf.enrich.sources import POLICY
 
 UNKNOWN_KINDS = {
@@ -177,3 +178,20 @@ def test_capture_before_registration_gives_no_negative_age():
     kinds = by_kind(result)
     assert kinds["created_date"][0].value == "1995-08-14"
     assert "domain_age_days_at_capture" not in kinds
+
+
+def test_failed_cert_pl_download_is_not_repeated_within_a_run():
+    class Broken(FakeNet):
+        def __call__(self, url, headers, timeout, max_bytes):
+            if url.startswith("https://hole.cert.pl/"):
+                self.calls.append(url)
+                raise Unavailable("list unreachable (test)")
+            return super().__call__(url, headers, timeout, max_bytes)
+
+    net = Broken()
+    enricher = Enricher(Cache(None), client=client_for(net), clock=lambda: NOW)
+    for name in ("example.com", "rifutnuota.store"):
+        enricher.enrich(name)
+    list_calls = [u for u in net.calls if u.startswith("https://hole.cert.pl/")]
+    # one attempt for the first domain (with retries), none for the second
+    assert len(list_calls) == 3  # POLICY["cert_pl"].retries + 1

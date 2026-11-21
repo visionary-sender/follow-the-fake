@@ -50,3 +50,13 @@ def test_page_urls_prefer_the_document_request_without_page_titles():
         {"request": {"url": "https://landing.example/offer"}, "_resourceType": "document"},
     ]}}
     assert page_urls(data) == ["https://landing.example/offer"]
+
+
+def test_malformed_har_structure_is_skipped_not_fatal(tmp_path):
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "odd.har").write_text(json.dumps({"log": {"pages": "not-a-list", "entries": [{"request": "text"}]}}), encoding="utf-8")
+    (raw / "good.har").write_text(json.dumps(har("https://landing-ok.live/x")), encoding="utf-8")
+    scope = organiser_domains(raw)
+    assert scope.domains == ["landing-ok.live"]
+    assert scope.skipped == []  # a page list that is not a list gives no pages; the entry is not a dict request
