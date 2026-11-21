@@ -55,18 +55,33 @@ def layer_caps(weights: Any, relation: Relation) -> dict[Layer, float]:
     """Most bits one shared value of each layer can add under `relation`, read from a `WeightTable`.
 
     Per layer: the largest `bits * scale` over the table's kinds in that layer and the layer
-    default (the fallback for unknown kinds). Rarity only lowers a weight, so this is an upper bound.
+    default (the fallback for unknown kinds). Under the chain relations a layer holding several chain
+    ids (owner and aio campaign in the owner layer) counts one term per chain level, as the ledger
+    does, so the cap is the sum of the best per level. Rarity only lowers a weight: an upper bound.
     """
+    from ftf.linking.hierarchy import ANCHOR_KINDS
+    from ftf.linking.ledger import CHAIN_RELATIONS
+
     caps: dict[Layer, float] = {}
     for layer in Layer:
         if layer is Layer.collector:
             continue
-        best = weights.layer_defaults.get(layer, 0.0) * weights.relation_scale.get(layer, {}).get(relation, 0.0)
+        default = weights.layer_defaults.get(layer, 0.0) * weights.relation_scale.get(layer, {}).get(relation, 0.0)
+        best: dict = {None: default}
         for kind, entry in weights.kinds.items():
             if entry.layer is layer:
-                best = max(best, entry.bits * weights.scale(kind, layer, relation))
-        if best > 0:
-            caps[layer] = best
+                slot = ANCHOR_KINDS.get(kind) if relation in CHAIN_RELATIONS else None
+                best[slot] = max(best.get(slot, 0.0), entry.bits * weights.scale(kind, layer, relation))
+        other = best.pop(None)
+        if best:
+            # non-anchor kinds join an anchor's slot (ledger `_slot`): at most they raise the biggest one
+            top = max(best, key=lambda k: best[k])
+            best[top] = max(best[top], other)
+            total = sum(best.values())
+        else:
+            total = other
+        if total > 0:
+            caps[layer] = total
     return caps
 
 

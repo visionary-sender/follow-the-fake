@@ -38,15 +38,17 @@ from ftf.linking.background import ALPHA, TYPE_PRIOR_SHARE, BackgroundCounts, un
 from ftf.linking.weights import HAND_TABLE, PRIVATE_LAYERS, KindWeight, WeightTable
 
 KAPPA = 4.0  # Beta prior strength (pseudo-observations) toward the prior / layer estimate
+MAX_NEG_PAIRS = 20000  # negatives only feed report counts
 S_CLIP = (0.02, 0.98)
 LABELS: dict[Relation, str] = {Relation.campaign: "aio_campaign", Relation.operator: "aio_owner"}
 NEGATIVE_LABEL = "aio_owner"
 FORMAT = "ftf-weights"
 VERSION = 1
 METHOD = "learned@0.1"
-# Chain ids that are single-valued per capture and campaign-stable: a different value is a conflict (cannot-link)
-# under the relations they name, and they say nothing about the relations listed (an owner runs several
-# aio campaigns, so a different campaign id is no evidence against the same owner).
+# Chain ids that are single-valued per capture and campaign-stable: a different value is a conflict row
+# (never a cannot-link, see `ledger.has_private_conflict`) under the relations they name. They say
+# nothing about the relations listed: an owner runs several aio campaigns, so a different campaign id
+# is no evidence against the same owner.
 SINGLE_VALUED_CHAIN: dict[str, frozenset] = {
     "aio_campaign": frozenset({Relation.operator, Relation.tracking_account, Relation.template}),
 }
@@ -128,6 +130,8 @@ def learn_weights(
     # negatives: capture pairs of two different owners
     owners = labels_of(NEGATIVE_LABEL)
     neg_pairs = [(a, b) for a, b in combinations(sorted(owners), 2) if not owners[a] & owners[b]]
+    if len(neg_pairs) > MAX_NEG_PAIRS:  # report-only counts: a deterministic subsample bounds the cost
+        neg_pairs = neg_pairs[:: -(-len(neg_pairs) // MAX_NEG_PAIRS)]
 
     learned_s: dict[Relation, dict[str, float]] = {}
     learned_n: dict[Relation, dict[str, float]] = {}

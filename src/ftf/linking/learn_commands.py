@@ -13,7 +13,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from ftf.contract.models import Dataset
-from ftf.linking.background import BackgroundCounts
+from ftf.linking.background import BackgroundCounts, read_corpus_kinds
 from ftf.linking.learned import dump_weights, learn_weights, load_weights
 from ftf.linking.ledger import ScoringContext
 from ftf.linking.weights import HAND_TABLE
@@ -36,15 +36,27 @@ def register_learn_weights(subparsers: argparse._SubParsersAction) -> None:
 
 
 def run_learn_weights(args: argparse.Namespace) -> int:
+    if args.must_not_link and not args.background:
+        print("ftf learn-weights: --must-not-link needs --background (the stop-list lives with the corpus counts)", file=sys.stderr)
+        return 2
     try:
         ds = Dataset.from_json(args.dataset.read_bytes())
-        mnl = Dataset.from_json(args.must_not_link.read_bytes()) if args.must_not_link else None
-        bg = BackgroundCounts.from_dataset(Dataset.from_json(args.background.read_bytes()), must_not_link=mnl) if args.background else None
-    except (OSError, ValidationError, ValueError) as exc:
+        bg = None
+        if args.background:
+            mnl = Dataset.from_json(args.must_not_link.read_bytes()) if args.must_not_link else None
+            bg = BackgroundCounts.from_dataset(
+                Dataset.from_json(args.background.read_bytes()), must_not_link=mnl,
+                corpus_kinds=read_corpus_kinds(args.background),
+                must_not_link_kinds=read_corpus_kinds(args.must_not_link) if args.must_not_link else None,
+            )
+        table, report = learn_weights(ds, background=bg)
+        dump_weights(args.out, table, report, bg)
+    except (OSError, ValidationError, ValueError, KeyError) as exc:
         print(f"ftf learn-weights: {exc}", file=sys.stderr)
         return 2
-    table, report = learn_weights(ds, background=bg)
-    dump_weights(args.out, table, report, bg)
+    if bg is not None:
+        print(f"background: {bg.n_operators} operators from {bg.n_incidents} incidents ({bg.sources}); "
+              f"brand stop-list {len(bg.brand)} values")
     print(f"learned weights -> {args.out}")
     for rel, info in report["relations"].items():
         if "layers" not in info:

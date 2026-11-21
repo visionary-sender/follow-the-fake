@@ -13,8 +13,10 @@ with N_kind the operators carrying any value of the kind and V_kind its distinct
 are unique by construction (UUIDs, 15–16-digit pixel ids, xid machine ids) get a type prior
 u ≈ 1/N_kind instead (07 §2.2 item 2): their observed frequency says only which level they name.
 
-Values are stored as salted-free SHA-256 digests of (layer, kind, value): the counts file can be
-shipped and logged without carrying raw indicator values (tracker ids, tokens in URLs).
+Values are stored as truncated, unkeyed SHA-256 digests of (layer, kind, value): the counts file
+carries no raw indicator values (tracker ids, tokens in URLs) in plain text. Unkeyed hashes of
+low-entropy values can be confirmed by hashing a guessed value, so the file stays a private
+bucket artefact like the data it was counted from.
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
-from ftf.contract.models import Dataset, Layer
+from ftf.contract.models import Dataset, Layer, linkable
 
 ALPHA = 0.5
 FORMAT = "ftf-background"
@@ -37,6 +39,9 @@ UNIQUE_ID = re.compile(
 )
 # Corpus sources without page indicators (CERT domain listings): left out, they would dilute the denominator.
 SKIP_SOURCES = ("certpl",)
+# corpus_kind.jsonl tags (HACK-18): which corpus incidents are rarity evidence, which are real outlet pages.
+RARITY_KINDS = frozenset({"fetched_landing", "ad_record", "ad_library", "scanned_ad"})
+MUST_NOT_LINK_KINDS = frozenset({"must_not_link", "must_not_link_blocked"})
 
 # Share of a kind's values that must look unique by construction for the type prior to apply.
 TYPE_PRIOR_SHARE = 0.8
@@ -74,20 +79,31 @@ class BackgroundCounts:
 
     @classmethod
     def from_dataset(
-        cls, corpus: Dataset, alpha: float = ALPHA, must_not_link: Dataset | None = None
+        cls, corpus: Dataset, alpha: float = ALPHA, must_not_link: Dataset | None = None,
+        corpus_kinds: dict[str, str] | None = None, must_not_link_kinds: dict[str, str] | None = None,
     ) -> "BackgroundCounts":
         """Count distinct operators (pre-groups) per value of a background corpus dataset.
 
-        Incidents of `SKIP_SOURCES` (no page indicators) are left out. Several captures of one
+        Incidents of `SKIP_SOURCES` (no page indicators), incidents without any linkable indicator and,
+        when `corpus_kinds` (incident id → corpus_kind) is given, incidents not tagged with a
+        `RARITY_KINDS` kind (bare CERT domains, untagged) are left out: only they are operators. Several captures of one
         incident (a cloaked URL fetched twice) are one sighting: counts are per pre-group. Real outlet
         pages (`must_not_link`) never enter the counts or the denominator; their values only form a
         brand stop-list (a scam value also seen on a real page is brand skin, a hub)."""
         from ftf.linking.ledger import ScoringContext  # local: ledger imports this module
 
-        kept = [i for i in corpus.incidents if not any(s in i.source or i.id.startswith(f"{s}:") for s in SKIP_SOURCES)]
+        kept = [
+            i for i in corpus.incidents
+            if not any(s in i.source or i.id.startswith(f"{s}:") for s in SKIP_SOURCES)
+            and (corpus_kinds is None or corpus_kinds.get(i.id) in RARITY_KINDS)
+            and any(linkable(x) and x.value is not None for x in i.indicators)
+        ]
         ctx = ScoringContext.from_dataset(corpus.model_copy(update={"incidents": kept}), chain_rule=False)
         brand: set[str] = set()
         if must_not_link is not None:
+            if must_not_link_kinds is not None:
+                must_not_link = must_not_link.model_copy(update={"incidents": [
+                    i for i in must_not_link.incidents if must_not_link_kinds.get(i.id) in MUST_NOT_LINK_KINDS]})
             real = ScoringContext.from_dataset(must_not_link, chain_rule=False)
             brand = {digest(*k) for k in real.index if k[0] is not Layer.collector}
         counts: dict[str, int] = {}
@@ -164,3 +180,19 @@ class BackgroundCounts:
             sources={str(k): int(v) for k, v in doc.get("sources", {}).items()}, alpha=float(doc["alpha"]),
             brand={str(x) for x in doc.get("brand", [])},
         )
+
+
+def read_corpus_kinds(dataset_path) -> dict[str, str] | None:
+    """incident id → corpus_kind from `corpus_kind.jsonl` beside a corpus dataset, or None if absent."""
+    import json
+    from pathlib import Path
+
+    path = Path(dataset_path).with_name("corpus_kind.jsonl")
+    if not path.exists():
+        return None
+    out: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            row = json.loads(line)
+            out[str(row["incident_id"])] = str(row.get("corpus_kind") or "")
+    return out

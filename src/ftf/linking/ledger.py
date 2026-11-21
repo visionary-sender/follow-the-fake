@@ -11,8 +11,8 @@ Rules (07 §2.2, §3 D1):
   the finest level available (owner, then tracker instance / live pixel, then tenant; see
   `_pre_groups`); an incident without one is its own group. A coarse id spanning several owners
   is therefore counted at that coarser level (07 §2.2 item 5). With background counts
-  (`background.py`) the rarity term is log2[(c + α)/(1 + α)], c the operators carrying the value
-  in the background corpus plus the sample's pre-groups: 0 for a value of one operator, as above.
+  (`background.py`) the rarity term is log2[(c + α)/(1 + α)], c the larger of the corpus operators
+  carrying the value and the sample's pre-groups: 0 for a value of one operator, as above.
 - Chain rule (`hierarchy.py`): values whose discovered level (platform ⊃ tenant ⊃ owner ⊃ aio
   campaign ⊃ landing) is already counted by that level's shared id, or by a stronger value of the
   same level, become `hub_subsumed` before the within-layer max. One term per level.
@@ -305,7 +305,7 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
             shared_cands.append(ChainRow(EvidenceRow(
                 layer=layer, kind=kind, status=EvidenceStatus.shared, value=value, bits=round(best_bits, 3),
                 seen_in=seen, indicator_ids=ids, note=note,
-            ), round(best_bits, 3), (layer, kind, best_norm), live_private=entry.private and best_live))
+            ), round(best_bits, 3), (layer, kind, best_norm), live_private=entry.private and best_live, private=entry.private))
         elif entry.single_valued and scale > 0 and relation in w.conflict_relations:
             na, nb = sorted(xa.ids)[0], sorted(xb.ids)[0]
             conflict_rows[layer].append(_Candidate(EvidenceRow(
@@ -323,7 +323,7 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
     # a live operator-private id counts for the strict gate only if it still carries bits after the chain rule
     live_private = any(c.live_private and c.bits > 0 for c in shared_cands)
 
-    slots = _chain_slots(ctx)
+    slots = _chain_slots(ctx) if relation in CHAIN_RELATIONS else {}
     rows: list[EvidenceRow] = []
     total = 0.0
     layers_positive = 0

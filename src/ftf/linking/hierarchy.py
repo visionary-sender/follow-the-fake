@@ -7,15 +7,15 @@ level and span at least two ids of the next finer level:
 
 - one campaign, several landings → campaign level; one owner, several campaigns → operator; one
   tenant, several owners → tenant; a value inside one landing is no constant and keeps its weight;
-- spanning ≥2 tenants (or ≥2 owners where no tenant is visible) → platform level (a shared
+- no level agreeing, spanning ≥3 tenants (≥2 for platform- and kit-layer kinds; owners where no tenant
+  is visible) → platform level; operator-private kinds are never demoted to platform (a shared
   main.js spanning three owners is a platform constant, a tenant id spanning two owners is a
   reseller's tenant, not an operator id);
-- no carrier with any anchor id (other stacks) → no level; the chain rule leaves it alone.
+- a carrier without any chain id (another stack) → no level; the chain rule leaves it alone.
 
 Chain rule: when two captures share ids at several levels of one chain the evidence is one term
-per level, Σ_levels log2(1/u_level|parent). The anchor rows are those terms. A non-anchor value
-at level L counts 0 once level L is counted: by the shared L anchor if the pair shares one, else
-by the best value at that level (one term per level). Platform-level values form one term, capped
+per level, Σ_levels log2(1/u_level|parent): the strongest of the level's shared id and the values
+that are constants of that level; the others count 0. Platform-level values form one term, capped
 at the platform layer's weight, however many platform constants match.
 
 The level graph (`parents`) records, for each anchor level, the coarser anchor level its ids
@@ -72,7 +72,7 @@ class Hierarchy:
             if key[1] in anchors:
                 level_of[key] = anchors[key[1]]
                 continue
-            level = _level(caps, anchor_ids)
+            level = _level(key, caps, anchor_ids)
             if level is not None:
                 level_of[key] = level
         return cls(level_of=level_of, parents=_parents(anchor_ids), anchors=dict(anchors))
@@ -97,19 +97,27 @@ class Hierarchy:
         }
 
 
-def _level(caps: set[str], anchor_ids: Mapping[str, Mapping[Level, set[str]]]) -> Level | None:
-    """The level a value is a *constant* of: its carriers agree on one id of that level and span at least
-    two ids of the next finer level present. A value inside one landing (or one id of the finest level
-    its carriers show) is no constant: it stays its own evidence. No agreement at any level: platform."""
-    union = {lv: set().union(*(anchor_ids[c].get(lv, set()) for c in caps)) for lv in CHAIN}
-    present = [lv for lv in CHAIN if union[lv]]
-    for i, lv in enumerate(present):
+def _level(key: ValueKey, caps: set[str], anchor_ids: Mapping[str, Mapping[Level, set[str]]]) -> Level | None:
+    """The level a value is a *constant* of, or None.
+
+    Only levels that *every* carrier shows count (a carrier without chain ids, e.g. a page of another
+    stack, makes the value no constant of the chain). The value is a constant of the finest such
+    level on which all carriers agree, if they span at least two ids of the next finer such level.
+    It is a platform constant if no such level agrees and it spans ≥3 tenants (≥2 for platform- and
+    kit-layer kinds, the platform's own code), or the same in owners where no tenant is visible.
+    """
+    if any(not any(anchor_ids[c].values()) for c in caps):
+        return None
+    shown = [lv for lv in CHAIN if all(anchor_ids[c].get(lv) for c in caps)]
+    union = {lv: set().union(*(anchor_ids[c][lv] for c in caps)) for lv in shown}
+    for i, lv in enumerate(shown):
         if len(union[lv]) == 1:
-            return lv if i > 0 and len(union[present[i - 1]]) >= 2 else None
-    # no level agrees: a platform constant only if it spans several tenants, or several owners where no
-    # tenant is visible; carriers that differ only in landing or campaign ids say nothing about the platform
-    if len(union[Level.tenant]) >= 2 or (not union[Level.tenant] and len(union[Level.operator]) >= 2):
-        return Level.platform
+            return lv if i > 0 and len(union[shown[i - 1]]) >= 2 else None
+    need = 2 if key[0] in (Layer.platform, Layer.kit) else 3
+    if Level.tenant in shown:
+        return Level.platform if len(union[Level.tenant]) >= need else None
+    if Level.operator in shown:
+        return Level.platform if len(union[Level.operator]) >= need else None
     return None
 
 
@@ -138,17 +146,19 @@ class ChainRow:
     bits: float
     key: ValueKey
     live_private: bool = False  # a live operator-private id (feeds the strict gate while it keeps bits)
+    private: bool = False  # an operator-private kind (never demoted to a platform constant)
 
 
 def apply_chain_rule(cands: list[ChainRow], hierarchy: Hierarchy, platform_cap: float) -> tuple[list[ChainRow], list[EvidenceRow]]:
-    """Split shared candidate rows into (kept, subsumed). Subsumed rows are `hub_subsumed`, 0 bits,
-    with a note naming the level that explains them. Kept platform-level rows are capped at
-    `platform_cap` bits."""
+    """Split shared candidate rows into (kept, subsumed): one term per chain level, the strongest of the
+    level's shared id and its constants. Subsumed rows are `hub_subsumed`, 0 bits, with a note naming the
+    level. The platform term is capped at `platform_cap` and never opens the live-private gate.
+    Operator-private ids are never demoted to platform constants."""
     by_level: dict[Level, list[ChainRow]] = defaultdict(list)
     kept: list[ChainRow] = []
     for c in cands:
         level = hierarchy.level(c.key)
-        if level is None:
+        if level is None or (level is Level.platform and c.private):
             kept.append(c)
         else:
             by_level[level].append(c)
@@ -156,26 +166,24 @@ def apply_chain_rule(cands: list[ChainRow], hierarchy: Hierarchy, platform_cap: 
     subsumed: list[EvidenceRow] = []
     for level, rows in by_level.items():
         name = LEVEL_NAMES.get(level, level.value)
-        anchors = [c for c in rows if hierarchy.anchors.get(c.key[1]) == level]
-        others = [c for c in rows if hierarchy.anchors.get(c.key[1]) != level]
-        if anchors:
-            kept += anchors
-            why = f"explained by the shared {name} id ({anchors[0].key[1]})"
-            subsumed += [_subsume(c, why) for c in others]
-            continue
         if level is Level.platform:
-            # one term for all platform constants; prefer a platform-layer row, then the strongest
-            others.sort(key=lambda c: (c.key[0] is not Layer.platform, -c.bits, c.key[1]))
+            # prefer a platform-layer row, then the strongest
+            rows.sort(key=lambda c: (c.key[0] is not Layer.platform, -c.bits, c.key[1]))
         else:
-            others.sort(key=lambda c: (-c.bits, c.key[1]))
-        top, rest = others[0], others[1:]
-        if level is Level.platform and 0 < platform_cap < top.bits:
-            top = ChainRow(top.row.model_copy(update={
-                "bits": round(platform_cap, 3),
-                "note": f"{top.row.note}; platform-level value, capped at the platform term {platform_cap:g}",
-            }), round(platform_cap, 3), top.key, top.live_private)
+            # the strongest; on a tie the level's own id
+            rows.sort(key=lambda c: (-c.bits, hierarchy.anchors.get(c.key[1]) != level, c.key[1]))
+        top, rest = rows[0], rows[1:]
+        if level is Level.platform:
+            row, bits = top.row, top.bits
+            if 0 < platform_cap < bits:
+                row = row.model_copy(update={
+                    "bits": round(platform_cap, 3),
+                    "note": f"{row.note}; platform-level value, capped at the platform term {platform_cap:g}",
+                })
+                bits = round(platform_cap, 3)
+            top = ChainRow(row, bits, top.key, live_private=False, private=top.private)
         kept.append(top)
-        subsumed += [_subsume(c, f"{name}-level value, the {name} is already counted by {top.key[1]}") for c in rest]
+        subsumed += [_subsume(c, f"one term per {name}, counted by {top.key[1]}") for c in rest]
     return kept, subsumed
 
 
