@@ -1,0 +1,6 @@
+# Orca worktree hooks for follow-the-fake. Orca runs scripts.setup in every new worktree
+# (after a one-time trust prompt) to set the right accounts, link the workflow hooks and
+# report what it checked. Details: scripts/README.md.
+scripts:
+  setup: |
+    bash scripts/orca-setup.sh

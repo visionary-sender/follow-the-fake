@@ -1,0 +1,47 @@
+# Data never goes into git: it lives in gs://follow-the-fake-data (private bucket).
+# Pull it with: gcloud storage rsync -r gs://follow-the-fake-data/raw/2026-11-21/ .
+/BACKUP/
+/do_udostępnienia/
+/data/
+*.pdf
+*.har
+*.html.pobrane
+scam_links*.txt
+# common data/artifact formats anywhere in the tree
+*.jpg
+*.jpeg
+*.JPG
+*.JPEG
+*.png
+*.PNG
+*.webp
+*.gif
+*.mp4
+*.webm
+*.zip
+*.parquet
+*.csv
+*.jsonl
+*.pkl
+*.npy
+*.npz
+*.db
+*.sqlite
+
+# environments / tooling
+venv/
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.DS_Store
+.env
+.claude/settings.local.json
+.playwright-mcp/
+
+# model weights
+*.pt
+*.pth
+*.onnx
+*.safetensors
+*.ckpt
