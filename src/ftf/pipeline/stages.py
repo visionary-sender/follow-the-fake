@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import json
 import os
 import re
 import shutil
@@ -269,9 +270,14 @@ def ingest(ctx: RunContext) -> tuple[str, str]:
     if not incidents:
         ctx.incident = _fallback_incident(ctx)
         return "error", "ingestion returned no incident; the input is stored as one capture"
-    ctx.incident = incidents[0]
     ctx.input_root = root
     extra = f"; {len(incidents) - 1} further incident(s) ignored" if len(incidents) > 1 else ""
+    known = next((inc for inc in ctx.base.incidents if inc.id == incidents[0].id), None)
+    if known is not None:  # the base already holds this case: linking it again would compare it with itself
+        ctx.incident = known
+        ctx.from_base = True
+        return "ok", f"ingested as {known.id}, which the base already holds: its precomputed indicators, links and assignment are used{extra}"
+    ctx.incident = incidents[0]
     return "ok", f"ingested by ftf.ingest: {len(ctx.incident.captures)} capture(s), {len(ctx.incident.indicators)} indicator(s){extra}"
 
 
@@ -296,10 +302,32 @@ def refang(text: str) -> str:
     return text.replace("[.]", ".").replace("[:]", ":")
 
 
-def _domains(ctx: RunContext) -> list[str]:
+MAX_HAR_BYTES = 100 * 1024 * 1024
+
+
+def _har_page_urls(path: Path) -> list[str]:
+    """http(s) page URLs a HAR names (`ftf.enrich.scope.page_urls`); the HAR is parsed as JSON data only."""
+    from ftf.enrich.scope import page_urls
+
+    try:
+        if path.stat().st_size > MAX_HAR_BYTES:
+            return []
+        har = json.loads(path.read_bytes().decode("utf-8", "replace"))
+    except (OSError, ValueError):
+        return []
+    return [u for u in page_urls(har) if u.lower().startswith(("http://", "https://"))]
+
+
+def _domains(ctx: RunContext) -> list[tuple[str, str]]:
+    """(capture id, URL or domain) pairs to enrich: a URL input, else the page URLs of the incident's HARs."""
     if ctx.inp.kind == "url":
-        return [refang(ctx.inp.text)]
-    return []
+        return [(ctx.incident.captures[0].id, refang(ctx.inp.text))]
+    out: list[tuple[str, str]] = []
+    for cap in ctx.incident.captures:
+        for art in cap.artefacts:
+            if art.type is ArtefactType.har and art.path and ctx.input_root is not None:
+                out += [(cap.id, u) for u in _har_page_urls(ctx.input_root / art.path)]
+    return list(dict.fromkeys(out))
 
 
 def enrichment(ctx: RunContext) -> tuple[str, str]:
@@ -307,7 +335,7 @@ def enrichment(ctx: RunContext) -> tuple[str, str]:
         return "skipped", "precomputed indicators from the base"
     domains = _domains(ctx)
     if not domains:
-        return "skipped", "no domain known for this input (URL inputs only until ingestion lands)"
+        return "skipped", "no domain known for this input (needs a URL or a HAR with an http(s) page URL)"
     try:
         from ftf.enrich import Cache, Enricher
         from ftf.enrich.commands import DEFAULT_CACHE
@@ -316,15 +344,16 @@ def enrichment(ctx: RunContext) -> tuple[str, str]:
     cache_path = Path(DEFAULT_CACHE)
     cache = Cache(cache_path if cache_path.is_file() else None)  # never create a cache file as a side effect
     enricher = Enricher(cache, offline=ctx.offline)
-    cap_id = ctx.incident.captures[0].id
     added: list[Indicator] = []
     origins: Counter[str] = Counter()
     unknown = 0
-    for dom in domains:
-        try:
-            res = enricher.enrich(dom)
-        except ValueError as exc:
-            return "skipped", f"not a registrable domain: {exc}"
+    done: set[tuple[str, str]] = set()
+    for cap_id, dom in domains:
+        name = enricher.registrable(dom)
+        if name is None or (cap_id, name) in done:
+            continue
+        done.add((cap_id, name))
+        res = enricher.enrich(name)
         origins.update(look.origin for look in res.lookups.values())
         for ind in res.incident.indicators:
             unknown += ind.value == "unknown"
@@ -333,6 +362,8 @@ def enrichment(ctx: RunContext) -> tuple[str, str]:
                 "capture_id": cap_id,
                 "provenance": ind.provenance.model_copy(update={"artefact_id": None}),
             }))
+    if not done:
+        return "skipped", "no registrable domain in this input"
     ctx.incident = _add_indicators(ctx.incident, added)
     mode = "offline (cache only)" if ctx.offline else "online"
     where = ", ".join(f"{k}: {v}" for k, v in sorted(origins.items()))
@@ -349,6 +380,7 @@ def link_assign(ctx: RunContext) -> tuple[str, str]:
             ctx.assignment = _review(inc, "the base holds no assignment for this incident")
         return "ok", f"precomputed in the base: {len(ctx.links)} link(s), decision {ctx.assignment.decision.value}"
     # Linking (HACK-21/22); Evaluation's baseline uses the same call shape.
+    # link_incident(base, incident, relation=campaign) -> IncidentResult(assignment, links)
     link_incident = _optional("ftf.linking", "link_incident")
     if link_incident is None:
         ctx.assignment = _review(inc, "linking engine (HACK-21/22) not available: no link was scored, so this item needs review")
@@ -356,7 +388,8 @@ def link_assign(ctx: RunContext) -> tuple[str, str]:
     result = link_incident(ctx.base, inc)
     ctx.links = list(result.links)
     ctx.assignment = result.assignment
-    return "ok", f"{len(ctx.links)} link(s), decision {ctx.assignment.decision.value}"
+    extra = "" if ctx.base.campaigns else "; the base has no campaigns (build it with `ftf link`)"
+    return "ok", f"{len(ctx.links)} link(s), decision {ctx.assignment.decision.value}{extra}"
 
 
 def _review(incident: Incident, note: str) -> Assignment:
