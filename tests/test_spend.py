@@ -1,6 +1,7 @@
 """Pure arithmetic of scripts/spend.py on canned gcloud JSON (no network)."""
 
 import importlib.util
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import pytest
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "spend.py"
 _spec = importlib.util.spec_from_file_location("spend", SCRIPT)
 spend = importlib.util.module_from_spec(_spec)
+sys.modules["spend"] = spend
 _spec.loader.exec_module(spend)
 
 FTF, ATTIC = spend.PROJECTS
