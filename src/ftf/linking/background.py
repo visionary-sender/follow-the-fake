@@ -35,6 +35,9 @@ UNIQUE_ID = re.compile(
     r"^(?:[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}|[0-9]{15,16}|[0-9a-v]{20})$",
     re.IGNORECASE,
 )
+# Corpus sources without page indicators (CERT domain listings): left out, they would dilute the denominator.
+SKIP_SOURCES = ("certpl",)
+
 # Share of a kind's values that must look unique by construction for the type prior to apply.
 TYPE_PRIOR_SHARE = 0.8
 
@@ -66,14 +69,27 @@ class BackgroundCounts:
     n_operators: int = 0
     n_incidents: int = 0
     sources: dict[str, int] = field(default_factory=dict)  # incident source → incidents (for the report)
+    brand: set[str] = field(default_factory=set)  # digests of values seen on must-not-link real pages (brand skin)
     alpha: float = ALPHA
 
     @classmethod
-    def from_dataset(cls, corpus: Dataset, alpha: float = ALPHA) -> "BackgroundCounts":
-        """Count distinct operators (pre-groups) per value of a background corpus dataset."""
+    def from_dataset(
+        cls, corpus: Dataset, alpha: float = ALPHA, must_not_link: Dataset | None = None
+    ) -> "BackgroundCounts":
+        """Count distinct operators (pre-groups) per value of a background corpus dataset.
+
+        Incidents of `SKIP_SOURCES` (no page indicators) are left out. Several captures of one
+        incident (a cloaked URL fetched twice) are one sighting: counts are per pre-group. Real outlet
+        pages (`must_not_link`) never enter the counts or the denominator; their values only form a
+        brand stop-list (a scam value also seen on a real page is brand skin, a hub)."""
         from ftf.linking.ledger import ScoringContext  # local: ledger imports this module
 
-        ctx = ScoringContext.from_dataset(corpus, chain_rule=False)
+        kept = [i for i in corpus.incidents if not any(s in i.source or i.id.startswith(f"{s}:") for s in SKIP_SOURCES)]
+        ctx = ScoringContext.from_dataset(corpus.model_copy(update={"incidents": kept}), chain_rule=False)
+        brand: set[str] = set()
+        if must_not_link is not None:
+            real = ScoringContext.from_dataset(must_not_link, chain_rule=False)
+            brand = {digest(*k) for k in real.index if k[0] is not Layer.collector}
         counts: dict[str, int] = {}
         kind_groups: dict[tuple[str, str], set[str]] = defaultdict(set)
         kind_values: dict[tuple[str, str], int] = Counter()
@@ -93,11 +109,14 @@ class BackgroundCounts:
         }
         return cls(
             counts=counts, kinds=kinds, n_operators=ctx.n_groups, n_incidents=ctx.n_incidents,
-            sources=dict(Counter(inc.source for inc in corpus.incidents)), alpha=alpha,
+            sources=dict(Counter(inc.source for inc in kept)), alpha=alpha, brand=brand,
         )
 
     def count(self, layer: Layer, kind: str, norm: str) -> int:
         return self.counts.get(digest(layer, kind, norm), 0)
+
+    def is_brand(self, layer: Layer, kind: str, norm: str) -> bool:
+        return digest(layer, kind, norm) in self.brand
 
     def knows(self, layer: Layer, kind: str) -> bool:
         return (layer.value, kind) in self.kinds
@@ -128,6 +147,7 @@ class BackgroundCounts:
                 for (layer, kind), st in sorted(self.kinds.items())
             ],
             "counts": dict(sorted(self.counts.items())),
+            "brand": sorted(self.brand),
         }
 
     @classmethod
@@ -142,4 +162,5 @@ class BackgroundCounts:
             },
             n_operators=int(doc["n_operators"]), n_incidents=int(doc["n_incidents"]),
             sources={str(k): int(v) for k, v in doc.get("sources", {}).items()}, alpha=float(doc["alpha"]),
+            brand={str(x) for x in doc.get("brand", [])},
         )

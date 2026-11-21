@@ -187,6 +187,8 @@ class ScoringContext:
     def rarity(self, key: tuple[Layer, str, str], k: int) -> float:
         """Bits taken off a shared value for being common: log2(k) over the sample's pre-groups, or with
         background counts log2[(c + α)/(1 + α)], c = corpus operators + sample pre-groups (0 for one operator)."""
+        if self.background is not None and self.background.is_brand(*key):
+            return math.inf  # brand skin: also on a real outlet page, a hub
         if self.background is None or not self.background.knows(key[0], key[1]):
             return math.log2(max(k, 1))
         a = self.background.alpha
@@ -276,7 +278,8 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
             ids = ids_of(xa, [best_norm]) + ids_of(xb, [best_norm])
             seen = _seen(ctx, key, best_norm)
             value = _short(xa.display[best_norm])
-            rarity_txt = f"log2({best_k})" if ctx.background is None else f"{best_rar:.2f} (corpus + sample)"
+            rarity_txt = (f"log2({best_k})" if ctx.background is None else "brand skin (on a real outlet page)"
+                          if math.isinf(best_rar) else f"{best_rar:.2f} (corpus + sample)")
             if scale == 0:
                 other_rows.append(EvidenceRow(
                     layer=layer, kind=kind, status=EvidenceStatus.shared, value=value, seen_in=seen,

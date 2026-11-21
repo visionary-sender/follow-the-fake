@@ -314,3 +314,19 @@ def test_a_different_aio_campaign_is_a_campaign_conflict_but_no_cannot_link():
     assert any(r.kind == "aio_campaign" and r.status is EvidenceStatus.conflict for r in hand.rows)
     op = score_pair(ctx, "m1/lander", "m3/lander", Relation.operator)
     assert not any(r.status is EvidenceStatus.conflict for r in op.rows)
+
+
+def test_corpus_filters_certpl_and_uses_real_pages_only_as_brand_stop_list():
+    corpus = big_campaign_ds()
+    certpl = Incident(id="certpl:listing.example:listing", source="scanner_certpl",
+                      captures=[Capture(id="certpl:listing.example:listing:c1", stage="unknown")])
+    corpus = corpus.model_copy(update={"incidents": corpus.incidents + [certpl]})
+    real = Dataset(name="real", incidents=[incident("outlet", [ind(L.creative, "ad_caption", "Small caption")])])
+    bg = BackgroundCounts.from_dataset(corpus, must_not_link=real)
+    assert bg.n_incidents == 15 and "scanner_certpl" not in bg.sources  # certpl listings left out
+    assert bg.n_operators == 8  # real pages are not in the denominator
+    assert bg.is_brand(L.creative, "ad_caption", "small caption")
+    ctx = ScoringContext.from_dataset(big_campaign_ds(), background=bg, chain_rule=False)
+    (cap,) = [r for r in score_pair(ctx, "s0/lander", "s1/lander").rows if r.kind == "ad_caption"]
+    assert cap.status is EvidenceStatus.hub_subsumed and "brand skin" in cap.note
+    assert BackgroundCounts.from_json(json.loads(json.dumps(bg.to_json()))).brand == bg.brand

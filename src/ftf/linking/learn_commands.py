@@ -29,6 +29,8 @@ def register_learn_weights(subparsers: argparse._SubParsersAction) -> None:
     )
     parser.add_argument("dataset", type=Path, metavar="DATASET.json", help="contract dataset with indicators")
     parser.add_argument("--background", type=Path, metavar="CORPUS.json", help="contract dataset of a background corpus")
+    parser.add_argument("--must-not-link", type=Path, metavar="REAL.json",
+                        help="contract dataset of real outlet pages: a brand stop-list only, never rarity evidence")
     parser.add_argument("-o", "--out", type=Path, required=True, metavar="weights.json")
     parser.set_defaults(func=run_learn_weights)
 
@@ -36,7 +38,8 @@ def register_learn_weights(subparsers: argparse._SubParsersAction) -> None:
 def run_learn_weights(args: argparse.Namespace) -> int:
     try:
         ds = Dataset.from_json(args.dataset.read_bytes())
-        bg = BackgroundCounts.from_dataset(Dataset.from_json(args.background.read_bytes())) if args.background else None
+        mnl = Dataset.from_json(args.must_not_link.read_bytes()) if args.must_not_link else None
+        bg = BackgroundCounts.from_dataset(Dataset.from_json(args.background.read_bytes()), must_not_link=mnl) if args.background else None
     except (OSError, ValidationError, ValueError) as exc:
         print(f"ftf learn-weights: {exc}", file=sys.stderr)
         return 2
