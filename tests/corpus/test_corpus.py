@@ -330,3 +330,60 @@ def test_wayback_picked(tmp_path):
     assert tags["corpus_kind"] == "must_not_link" and tags["corpus_wayback_snapshot"] == "20261118061622"
     row = json.loads((root / "manifest.jsonl").read_text())
     assert row["source"] == "wayback" and row["source_ref"] == orig
+
+
+def test_review_fixes(tmp_path):
+    from ftf.corpus.articles import article_links, site_of
+    from ftf.corpus.build import read_fetch_dirs, wayback_original
+
+    assert site_of("www.pekao.com.pl") == "pekao.com.pl"
+    assert article_links('<a href="https://evil.com.pl/a-b-c-1">x</a>', "https://www.pekao.com.pl/", 5) == []
+    assert article_links('<a href="/a-ra1">x</a>', "https://tvn24.pl/", 0) == []
+    assert wayback_original("https://web.archive.org/web/2026if_/tvn24.pl/x-st1") == ("2026", "https://tvn24.pl/x-st1")
+    q = read_queue_from([_row("k", "meta", "i", url="  https://x.example/path ", domain="x.example")])
+    assert target_url(q[0]) == "https://x.example/path"
+
+    # A loaded capture beats a later failed one, across subdirs and in any argument order.
+    root = tmp_path / "r"
+    _capture(root / "a", "ok", "https://u.example/", "live", "live", "2026-11-21T20:00:00Z")
+    _capture(root / "b", "late-fail", "https://u.example/", "cloaked", "bot_wall", "2026-11-21T22:00:00Z")
+    _capture(root / "b", "old", "https://v.example/", "live", "live", "2026-11-21T20:00:00Z")
+    _capture(root / "a", "new", "https://v.example/", "live", "live", "2026-11-21T21:00:00Z")
+    for order in (["a", "b"], ["b", "a"]):
+        got = read_fetch_dirs(root, order)
+        assert got["https://u.example/"].manifest["capture_id"] == "ok"
+        assert got["https://v.example/"].manifest["capture_id"] == "new"
+
+
+def test_victim_and_blocked(corpus):
+    root, picked = corpus
+    # Victim-profile re-fetch: the cloaked Google target loads, the shared Meta lander stays cloaked.
+    _capture(root / "fetch-victim", "v-g", "https://invest.example/", "live", "live", "2026-11-21T23:00:00Z")
+    _capture(root / "fetch-victim", "v-lp", "https://shared.example/lp", "cloaked", "decoy", "2026-11-21T23:00:01Z")
+    _capture(root / "fetch-victim", "v-dead", "https://dead.example/", "live", "live", "2026-11-21T23:00:02Z")
+    _capture(root / "picked-fetch", "cap-403", "https://www.tvn24.pl/", "dead", "http_error", "2026-11-21T22:00:01Z")
+    summary = build_corpus(root, "scanner", [RUN], ["fetch-1", "fetch-2"], [picked], ["picked-fetch"], "t",
+                           victim_dirs=["fetch-victim"])
+    ds = m.Dataset.from_json((root / "dataset.json").read_bytes())
+    inc = {i.id: i for i in ds.incidents}
+    rows = {r["incident_id"]: r for r in map(json.loads, (root / "manifest.jsonl").read_text().splitlines())}
+
+    g = inc["adlib:g-3"]
+    assert [c.id for c in g.captures] == ["adlib:g-3:ad", "adlib:g-3:lander", "adlib:g-3:lander-victim"]
+    vtags = {x.kind: x.value for x in g.indicators if x.capture_id == "adlib:g-3:lander-victim" and x.kind.startswith("corpus_")}
+    assert vtags == {"corpus_kind": "fetched_landing", "corpus_source": "google_atc:trading", "corpus_profile": "victim-pl-mobile"}
+    assert rows["adlib:g-3"]["victim_flipped_to_live"] and rows["adlib:g-3"]["victim_outcome"] == "live"
+
+    # Shared victim lander: deduplicated separately from the default lander.
+    assert inc["adlib:meta-2"].captures[2].duplicate_of == "adlib:meta-1:lander-victim"
+    assert inc["adlib:meta-2"].captures[1].duplicate_of == "adlib:meta-1:lander"
+    assert not rows["adlib:meta-1"]["victim_flipped_to_live"]
+
+    # A dead CERT domain that loads under the victim profile becomes a fetched landing page.
+    assert rows["certpl:c-5"]["corpus_kind"] == "fetched_landing"
+    assert [c.id for c in inc["certpl:c-5"].captures] == ["certpl:c-5:c1", "certpl:c-5:victim"]
+
+    assert summary["victim_profile"]["refetched"] == 4 and summary["victim_profile"]["flipped_to_live"] == 2
+    # The 403 tvn24 home page is kept, but not as a must-not-link distractor.
+    assert rows["fetch:cap-403"]["corpus_kind"] == "must_not_link_blocked"
+    assert summary["by_corpus_kind"]["must_not_link"] == 1

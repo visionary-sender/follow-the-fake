@@ -85,8 +85,9 @@ def normalise_host(host: str) -> str | None:
 
 def target_url(row: QueueRow) -> str | None:
     """The URL to fetch for a queue row: the ad's landing URL, else https://<domain>/."""
-    if row.landing_url and row.landing_url.lower().startswith(("http://", "https://")):
-        return row.landing_url.strip()
+    landing = (row.landing_url or "").strip()
+    if landing.lower().startswith(("http://", "https://")):
+        return landing
     if row.landing_domain:
         host = normalise_host(row.landing_domain)
         if host:

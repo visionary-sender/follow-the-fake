@@ -41,19 +41,27 @@ AD_RECORD = "ad_record"
 FETCHED_LANDING = "fetched_landing"
 BARE_DOMAIN = "bare_domain"
 MUST_NOT_LINK = "must_not_link"
-KINDS = (AD_RECORD, FETCHED_LANDING, BARE_DOMAIN, MUST_NOT_LINK)
+KINDS = (AD_RECORD, FETCHED_LANDING, BARE_DOMAIN, MUST_NOT_LINK, "must_not_link_blocked")  # see MUST_NOT_LINK_BLOCKED
 
 # Sources with an ad behind the queue row; everything else (CERT Polska) is a bare domain list.
 AD_SOURCES = {"meta", "google_atc"}
 PICKED_SOURCE = "hand_picked_must_not_link"
+# A hand-picked real page the fetcher could not load (e.g. HTTP 403): kept as honest data, but
+# not a must-not-link distractor, since its capture shows an error page, not the outlet.
+MUST_NOT_LINK_BLOCKED = "must_not_link_blocked"
+VICTIM_PROFILE = "victim-pl-mobile"
+VICTIM_TAG = {"profile": VICTIM_PROFILE}
 WAYBACK_SOURCE = "wayback"
-_WAYBACK = re.compile(r"^https?://web\.archive\.org/web/(\d{4,14})[a-z_]*/(https?://.+)$")
+_WAYBACK = re.compile(r"^https?://web\.archive\.org/web/(\d{4,14})[a-z_]*/((?:https?://)?.+)$")
 
 
 def wayback_original(url: str) -> tuple[str, str] | None:
     """(snapshot timestamp, original URL) for an Internet Archive snapshot URL, else None."""
     mt = _WAYBACK.match(url)
-    return (mt.group(1), mt.group(2)) if mt else None
+    if not mt:
+        return None
+    orig = mt.group(2)
+    return mt.group(1), orig if orig.startswith(("http://", "https://")) else f"https://{orig}"
 
 
 def sanitise(part: str) -> str:
@@ -101,13 +109,16 @@ class FetchedCapture:
 
 
 def read_fetch_dirs(root: Path, subdirs: list[str]) -> dict[str, FetchedCapture]:
-    """Map requested URL -> capture. A URL fetched twice keeps the later capture."""
-    out: dict[str, FetchedCapture] = {}
+    """Map requested URL -> capture, across all `subdirs`.
+
+    A URL fetched more than once keeps a capture that loaded a page over one that did not, and
+    among equals the later one (by `started_at`), whatever the order of `subdirs`.
+    """
+    found: list[FetchedCapture] = []
     for sub in subdirs:
         base = root / sub
         if not base.is_dir():
             continue
-        found = []
         for cj in base.glob("*/capture.json"):
             try:
                 man = json.loads(cj.read_text(encoding="utf-8"))
@@ -116,8 +127,9 @@ def read_fetch_dirs(root: Path, subdirs: list[str]) -> dict[str, FetchedCapture]
             if not isinstance(man, dict) or "requested_url" not in man or "incident" not in man:
                 continue
             found.append(FetchedCapture(f"{sub}/{cj.parent.name}", man))
-        for fc in sorted(found, key=lambda f: f.manifest.get("started_at") or ""):
-            out[fc.requested_url] = fc
+    out: dict[str, FetchedCapture] = {}
+    for fc in sorted(found, key=lambda f: (f.is_page, f.manifest.get("started_at") or "")):
+        out[fc.requested_url] = fc
     return out
 
 
@@ -198,7 +210,9 @@ def _bytes(root: Path, inc: m.Incident) -> int:
     return total
 
 
-def _ad_incident(base: m.Incident, row: QueueRow, fc: FetchedCapture | None, label: str) -> m.Incident:
+def _ad_incident(
+    base: m.Incident, row: QueueRow, fc: FetchedCapture | None, victim: FetchedCapture | None, label: str
+) -> m.Incident:
     ref = sanitise(base.source_ref or row.incident_id)
     iid = f"adlib:{ref}"
     ad_caps = [c for c in base.captures if c.stage is m.Stage.ad] or base.captures[:1]
@@ -206,38 +220,66 @@ def _ad_incident(base: m.Incident, row: QueueRow, fc: FetchedCapture | None, lab
     caps, inds = _rekey(base, iid, names)
     for c in caps:
         inds += _tags(c.id, AD_RECORD, label)
-    if fc is not None:
-        finc = fc.incident()
-        lander = finc.captures[0]
-        lcaps, linds = _rekey(finc, iid, {lander.id: f"{iid}:lander"})
-        lcap = lcaps[0].model_copy(update={"stage": m.Stage.lander})
-        caps.append(lcap)
-        inds += linds + _tags(lcap.id, FETCHED_LANDING if fc.is_page else BARE_DOMAIN, label)
+    for suffix, f, extra in ((":lander", fc, {}), (":lander-victim", victim, VICTIM_TAG)):
+        if f is not None:
+            lcaps, linds = _fetched_captures(f, f"{iid}{suffix}", label, extra)
+            caps += [c.model_copy(update={"stage": m.Stage.lander}) for c in lcaps]
+            inds += linds
     return m.Incident(id=iid, source=base.source, source_ref=base.source_ref, captures=caps, indicators=inds)
 
 
-def _fetch_incident(fc: FetchedCapture, source: str, source_ref: str, kind: str, label: str, **extra: str) -> m.Incident:
+def _fetched_captures(
+    fc: FetchedCapture, cid: str, label: str, extra: dict[str, str]
+) -> tuple[list[m.Capture], list[m.Indicator]]:
+    """All captures of a fetch, re-keyed as `cid`, `cid`2, ... and tagged by their own verdict."""
+    finc = fc.incident()
+    names = {c.id: cid if i == 0 else f"{cid}{i + 1}" for i, c in enumerate(finc.captures)}
+    caps, inds = _rekey(finc, cid, names)
+    kind = FETCHED_LANDING if fc.is_page else BARE_DOMAIN
+    for c in caps:
+        inds += _tags(c.id, kind, label, **extra)
+    return caps, inds
+
+
+def _fetch_incident(
+    fc: FetchedCapture,
+    source: str,
+    source_ref: str,
+    kind: str,
+    label: str,
+    victim: FetchedCapture | None = None,
+    **extra: str,
+) -> m.Incident:
     inc = fc.incident()
     inds = list(inc.indicators)
     for c in inc.captures:
         inds += _tags(c.id, kind, label, **extra)
-    return inc.model_copy(update={"source": source, "source_ref": source_ref, "indicators": inds})
+    caps = list(inc.captures)
+    if victim is not None:
+        vcaps, vinds = _fetched_captures(victim, f"{inc.id}:victim", label, VICTIM_TAG)
+        caps += vcaps
+        inds += vinds
+    return inc.model_copy(update={"source": source, "source_ref": source_ref, "captures": caps, "indicators": inds})
 
 
-def _bare_incident(base: m.Incident, label: str) -> m.Incident:
+def _bare_incident(base: m.Incident, label: str, victim: FetchedCapture | None = None) -> m.Incident:
     ref = sanitise(base.source_ref or base.id)
     iid = f"certpl:{ref}"
     names = {c.id: f"{iid}:c{i + 1}" for i, c in enumerate(base.captures)}
     caps, inds = _rekey(base, iid, names)
     for c in caps:
         inds += _tags(c.id, BARE_DOMAIN, label)
+    if victim is not None:
+        vcaps, vinds = _fetched_captures(victim, f"{iid}:victim", label, VICTIM_TAG)
+        caps += vcaps
+        inds += vinds
     return m.Incident(id=iid, source=base.source, source_ref=base.source_ref, captures=caps, indicators=inds)
 
 
-def _mark_duplicates(incidents: list[m.Incident], url_of: dict[str, str]) -> list[m.Incident]:
+def _mark_duplicates(incidents: list[m.Incident], url_of: dict[str, tuple[str, str]]) -> list[m.Incident]:
     """Captures of the same requested URL in several incidents (ads sharing one landing page):
     the lexicographically smallest capture id is canonical, the others point at it."""
-    groups: dict[str, list[str]] = defaultdict(list)
+    groups: dict[tuple[str, str], list[str]] = defaultdict(list)
     for cid, url in url_of.items():
         groups[url].append(cid)
     dup = {cid: min(ids) for ids in groups.values() if len(ids) > 1 for cid in ids if cid != min(ids)}
@@ -258,11 +300,13 @@ def build_corpus(
     picked: list[Path] | Path | None,
     picked_fetch_dirs: list[str],
     name: str = "corpus",
+    victim_dirs: list[str] | None = None,
 ) -> dict:
     root = Path(root)
     incidents: list[m.Incident] = []
     rows_out: list[dict] = []
-    lander_url: dict[str, str] = {}  # capture id -> requested URL, for duplicate marking
+    # capture id -> (requested URL, profile), for duplicate marking: same URL and profile = same files
+    lander_url: dict[str, tuple[str, str]] = {}
     seen_ids: set[str] = set()
 
     def add(inc: m.Incident, row: dict) -> bool:
@@ -275,6 +319,7 @@ def build_corpus(
 
     if scanner:
         fetched = read_fetch_dirs(root, fetch_dirs)
+        victims = read_fetch_dirs(root, victim_dirs or [])
         files: dict[str, dict[str, m.Incident]] = {}
         for row in read_queue(root / scanner / "queue.jsonl", runs):
             if row.incidents_file not in files:
@@ -287,18 +332,17 @@ def build_corpus(
             label = _source_label(row)
             url = target_url(row)
             fc = fetched.get(url) if url else None
+            vc = victims.get(url) if url else None
             if row.source in AD_SOURCES:
-                inc = _ad_incident(base, row, fc, label)
+                inc = _ad_incident(base, row, fc, vc, label)
                 kind = AD_RECORD
-                if fc is not None:
-                    lander_url[f"{inc.id}:lander"] = url
             elif fc is not None and fc.is_page:
-                inc = _fetch_incident(fc, base.source, base.source_ref or row.incident_id, FETCHED_LANDING, label)
+                inc = _fetch_incident(fc, base.source, base.source_ref or row.incident_id, FETCHED_LANDING, label, vc)
                 kind = FETCHED_LANDING
             else:
-                inc = _bare_incident(base, label)
-                kind = BARE_DOMAIN
-            add(
+                inc = _bare_incident(base, label, vc)
+                kind = FETCHED_LANDING if vc is not None and vc.is_page else BARE_DOMAIN
+            if not add(
                 inc,
                 {
                     "corpus_kind": kind,
@@ -314,11 +358,28 @@ def build_corpus(
                     "fetch_category": fc.category if fc else None,
                     "final_url": fc.manifest.get("final_url") if fc else None,
                     "has_landing_page": bool(fc and fc.is_page),
+                    "victim_capture_id": vc.manifest.get("capture_id") if vc else None,
+                    "victim_outcome": vc.outcome if vc else None,
+                    "victim_category": vc.category if vc else None,
+                    "victim_final_url": vc.manifest.get("final_url") if vc else None,
+                    "victim_flipped_to_live": bool(vc and vc.is_page and not (fc and fc.is_page)),
                     "creatives": sum(
                         1 for c in inc.captures for a in c.artefacts if a.type is m.ArtefactType.ad_screenshot
                     ),
                 },
-            )
+            ):
+                continue
+            # Fetched captures, keyed by the files they share (same URL, same profile).
+            if kind == AD_RECORD:
+                default_cid, victim_cid = f"{inc.id}:lander", f"{inc.id}:lander-victim"
+            elif inc.id.startswith("fetch:"):
+                default_cid, victim_cid = inc.captures[0].id, f"{inc.id}:victim"
+            else:
+                default_cid, victim_cid = None, f"{inc.id}:victim"
+            if fc is not None and default_cid:
+                lander_url[default_cid] = (url, "default")
+            if vc is not None:
+                lander_url[victim_cid] = (url, VICTIM_PROFILE)
 
     lists = [picked] if isinstance(picked, (str, Path)) else list(picked or [])
     if lists:
@@ -328,19 +389,18 @@ def build_corpus(
                 fc = pfetched.get(p.url)
                 if fc is None:
                     continue
+                kind = MUST_NOT_LINK if fc.is_page else MUST_NOT_LINK_BLOCKED
                 label = f"picked:{p.brand}:{p.page_kind}"
                 wb = wayback_original(p.url)
                 source, ref, extra = PICKED_SOURCE, p.url, {}
                 if wb:  # a real page served by the Internet Archive because the outlet blocked us
                     source, ref, extra = WAYBACK_SOURCE, wb[1], {"wayback_snapshot": wb[0]}
                     label = f"wayback:{p.brand}:{p.page_kind}"
-                inc = _fetch_incident(
-                    fc, source, ref, MUST_NOT_LINK, label, brand=p.brand, page_kind=p.page_kind, **extra
-                )
+                inc = _fetch_incident(fc, source, ref, kind, label, brand=p.brand, page_kind=p.page_kind, **extra)
                 add(
                     inc,
                     {
-                        "corpus_kind": MUST_NOT_LINK,
+                        "corpus_kind": kind,
                         "source": source,
                         "source_ref": ref,
                         "wayback_snapshot": wb[0] if wb else None,
@@ -388,6 +448,19 @@ def summarise(rows: list[dict]) -> dict:
         "by_corpus_kind": dict(sorted(by_kind.items())),
         "by_corpus_kind_and_source": dict(sorted(by_kind_source.items())),
         "ads_with_landing_page": sum(1 for r in rows if r["corpus_kind"] == AD_RECORD and r["has_landing_page"]),
+        "victim_profile": {
+            "refetched": sum(1 for r in rows if r.get("victim_outcome")),
+            "flipped_to_live": sum(1 for r in rows if r.get("victim_flipped_to_live")),
+            "default_vs_victim": dict(
+                sorted(
+                    Counter(
+                        f"{r['source']} | {r['fetch_outcome']} -> {r['victim_outcome']}"
+                        for r in rows
+                        if r.get("victim_outcome")
+                    ).items()
+                )
+            ),
+        },
         "fetch_outcomes": dict(sorted(outcomes.items())),
         "not_fetched": sum(1 for r in rows if not r["fetch_outcome"]),
         "bytes_referenced": sum(r["bytes"] for r in rows),

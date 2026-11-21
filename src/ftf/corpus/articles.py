@@ -37,10 +37,15 @@ class _Links(HTMLParser):
                     self.hrefs.append(v.strip())
 
 
+# Second-level public suffixes seen among the outlets and brands here (Polish functional domains).
+_SUFFIX2 = {"com.pl", "net.pl", "org.pl", "gov.pl", "edu.pl", "info.pl", "biz.pl", "waw.pl", "co.uk"}
+
+
 def site_of(host: str) -> str:
-    """Last two labels: good enough for the Polish outlets here (no multi-label suffixes)."""
+    """Registrable domain: last two labels, or three under a known two-label suffix (com.pl)."""
     parts = host.lower().strip(".").split(".")
-    return ".".join(parts[-2:])
+    n = 3 if ".".join(parts[-2:]) in _SUFFIX2 else 2
+    return ".".join(parts[-n:])
 
 
 def article_links(html: str, base_url: str, limit: int = 10) -> list[str]:
@@ -49,6 +54,8 @@ def article_links(html: str, base_url: str, limit: int = 10) -> list[str]:
     p = _Links()
     p.feed(html)
     out: list[str] = []
+    if limit <= 0:
+        return out
     for href in p.hrefs:
         url = urldefrag(urljoin(base_url, href))[0]
         parts = urlsplit(url)
