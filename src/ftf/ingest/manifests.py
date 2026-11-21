@@ -10,8 +10,14 @@ layout is detected from the manifest, never from file names:
   (``adlib:<id>`` / ``adlib:<id>:ad``, ``certpl:<domain>`` / ``certpl:<domain>:listing``).
   ``ad.json`` becomes the ``ad_library`` artefact (the manifest lists it without a path);
   creatives become ``ad_screenshot`` (images) or ``video``.
+- CERT Polska bare-domain listings (``certpl:<registrable domain>``) are not ads and were never
+  fetched: exactly one capture ``certpl:<domain>:listing``, stage ``unknown``, one pathless ``url``
+  artefact whose sha256 is over the listed URL or domain from ``ad.json`` (no files), ``html``,
+  ``har`` and ``screenshot`` missing with reason ``domain listing only, not fetched``, and incident
+  source ``certpl``. Linking can skip page-level rarity for this source; the domain is in
+  ``source_ref``.
 
-Every capture also gets its folder's ``capture.json`` as an ``other`` artefact
+Every other capture also gets its folder's ``capture.json`` as an ``other`` artefact
 (``<capture id>:manifest``), so extractors can read collector facts such as the fetch profile.
 
 Run folders: every child folder holding a ``capture.json`` is read; ``queue.jsonl``, ``state/``,
@@ -28,12 +34,13 @@ resolves outside its capture folder (symlinks included) is ignored. Nothing is e
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from ftf.contract import ArtefactType, Incident, Stage
+from ftf.contract import ArtefactType, Incident, MissingModality, Stage
 from ftf.ingest import files as F
 from ftf.ingest.model import RawArtefact, RawCapture, RawIncident
 
@@ -46,6 +53,9 @@ SCAN_TOOL = "ftf-scanner@"
 MANIFEST_VERSIONS = frozenset({1})
 MAX_MANIFEST_BYTES = 32 * 1024 * 1024
 DEFAULT_PROFILE = "default"
+CERTPL_PREFIX = "certpl:"
+CERTPL_SOURCE = "certpl"
+CERTPL_MISSING_REASON = "domain listing only, not fetched"
 
 
 @dataclass
@@ -167,8 +177,37 @@ def _scan_type(path: Path, declared: ArtefactType) -> ArtefactType:
     return t if t in (ArtefactType.ad_screenshot, ArtefactType.video, ArtefactType.ad_library) else declared
 
 
+def is_certpl(m: Manifest) -> bool:
+    return m.tool == "scan" and (m.data.get("source") == "certpl" or m.incident.id.startswith(CERTPL_PREFIX))
+
+
+def certpl_raw(m: Manifest) -> RawIncident:
+    """A CERT Polska bare-domain listing: one ``…:listing`` capture holding one pathless ``url`` artefact."""
+    inc = m.incident
+    cap = inc.captures[0]
+    record = {}
+    p = artefact_file(m.folder, AD_RECORD)
+    if p is not None and p.stat().st_size <= MAX_MANIFEST_BYTES:
+        try:
+            record = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, ValueError):
+            record = {}
+    record = record if isinstance(record, dict) else {}
+    domain = inc.id[len(CERTPL_PREFIX):]
+    value = next((v for v in (record.get("landing_url"), record.get("landing_domain")) if isinstance(v, str) and v), domain)
+    data = value.encode("utf-8")
+    lib = next((a.id for a in cap.artefacts if a.path is None), f"{cap.id}:library")
+    art = RawArtefact(rel="url", type=ArtefactType.url, sha256=hashlib.sha256(data).hexdigest(), size=len(data), fixed_id=lib)
+    missing = [MissingModality(modality=t, reason=CERTPL_MISSING_REASON) for t in (ArtefactType.html, ArtefactType.har, ArtefactType.screenshot)]
+    raw_cap = RawCapture(key="listing", artefacts=[art], stage=Stage.unknown, observed=cap.observed, captured_on=cap.captured_on,
+                         missing=missing, fixed_id=cap.id)
+    return RawIncident(source=CERTPL_SOURCE, source_ref=domain, captures=[raw_cap], fixed_id=inc.id)
+
+
 def to_raw(m: Manifest) -> RawIncident:
     """The manifest's incident with files re-read from disk (sha256 and size recomputed)."""
+    if is_certpl(m):
+        return certpl_raw(m)
     folder, inc = m.folder, m.incident
     captures: list[RawCapture] = []
     used: set[Path] = set()

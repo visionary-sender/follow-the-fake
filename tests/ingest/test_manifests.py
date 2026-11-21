@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -59,6 +60,9 @@ def scanner_run(out: Path) -> Path:
     scan_capture(out, "1000000000000001")
     scan_capture(out, "1000000000000002", creatives=("creative-1.jpg", "creative-2.mp4"))
     scan_capture(out, "scam.example.test", source="certpl", creatives=())
+    scan_capture(out, "CR01234567890123456789", source="google_atc", ad={"page_id": None, "page_name": None,
+                                                                        "advertiser_id": "AR01234567890123456789",
+                                                                        "advertiser_name": "Example Advertiser"})
     write(out / "dataset.json", json.dumps({"name": "scan", "incidents": []}))
     write(out / "queue.jsonl", json.dumps({"key": "meta:1000000000000001", "status": "pending"}) + "\n")
     write(out / "state" / "seen.json", json.dumps({"meta:1000000000000001": STAMP}))
@@ -76,7 +80,8 @@ def caps(ds: Dataset) -> dict:
 def test_scanner_run_keeps_ids_and_types(tmp_path):
     run = scanner_run(tmp_path / "scanner")
     ds = load_inputs([run])
-    assert sorted(i.id for i in ds.incidents) == ["adlib:1000000000000001", "adlib:1000000000000002", "certpl:scam.example.test"]
+    assert sorted(i.id for i in ds.incidents) == ["adlib:1000000000000001", "adlib:1000000000000002", "adlib:CR01234567890123456789",
+                                                  "certpl:scam.example.test"]
     c = caps(ds)
     ad = c["adlib:1000000000000001:ad"]
     assert ad.stage is Stage.ad and ad.observed is Observed.static and ad.captured_on == "2026-11-21"
@@ -90,9 +95,35 @@ def test_scanner_run_keeps_ids_and_types(tmp_path):
                                                                          ArtefactType.video, ArtefactType.other}
     listing = c["certpl:scam.example.test:listing"]
     assert listing.stage is Stage.unknown
-    assert {a.type for a in listing.artefacts} == {ArtefactType.ad_library, ArtefactType.other}
     # queue.jsonl, state/ and runs/ are not read
-    assert not any("queue" in a.path or "state/" in a.path or "runs/" in a.path for cap in c.values() for a in cap.artefacts)
+    assert not any(a.path and ("queue" in a.path or "state/" in a.path or "runs/" in a.path) for cap in c.values() for a in cap.artefacts)
+
+
+def test_certpl_listing_is_one_url_capture(tmp_path):
+    run = scanner_run(tmp_path / "scanner")
+    ds = load_inputs([run])
+    (inc,) = [i for i in ds.incidents if i.id.startswith("certpl:")]
+    assert inc.source == "certpl" and inc.source_ref == "scam.example.test"
+    (cap,) = inc.captures
+    assert cap.id == "certpl:scam.example.test:listing" and cap.stage is Stage.unknown
+    (art,) = cap.artefacts
+    assert art.type is ArtefactType.url and art.path is None
+    assert art.sha256 == hashlib.sha256(b"scam.example.test").hexdigest()
+    assert {(m.modality, m.reason) for m in cap.missing} == {
+        (t, "domain listing only, not fetched") for t in (ArtefactType.html, ArtefactType.har, ArtefactType.screenshot)}
+
+
+def test_google_atc_creative(tmp_path):
+    run = scanner_run(tmp_path / "scanner")
+    ds = load_inputs([run], root=tmp_path)
+    (inc,) = [i for i in ds.incidents if i.id == "adlib:CR01234567890123456789"]
+    assert inc.source == "scanner_google_atc"
+    (cap,) = inc.captures
+    assert cap.id == "adlib:CR01234567890123456789:ad" and cap.stage is Stage.ad
+    assert {a.type for a in cap.artefacts} == {ArtefactType.ad_library, ArtefactType.ad_screenshot, ArtefactType.other}
+    assert cap.artefacts[0].path.startswith(f"scanner/{STAMP}-google_atc-")
+    ad = load_ad(cap, tmp_path)
+    assert (ad["advertiser_id"], ad["page_id"]) == ("AR01234567890123456789", None)
 
 
 def test_load_ad_exposes_fields(tmp_path):
@@ -103,7 +134,7 @@ def test_load_ad_exposes_fields(tmp_path):
     assert ad["ad_text"] == ad["body"] == "Cudowny lek, kup teraz"
     assert (ad["page_name"], ad["page_id"], ad["landing_url"]) == ("Zdrowie Example", "555000111", "https://shop.example.test/lp?x=1")
     assert (ad["first_date"], ad["last_date"]) == ("2026-11-01", "2026-11-20")
-    assert load_ad(c["certpl:scam.example.test:listing"], tmp_path)["kind"] == "domain"
+    assert load_ad(c["certpl:scam.example.test:listing"], tmp_path) == {}
     write(tmp_path / "other" / "x.png", b"\x89PNG")
     (only,) = load_inputs([tmp_path / "other" / "x.png"]).incidents
     assert load_ad(only.captures[0], tmp_path / "other") == {}
@@ -148,8 +179,9 @@ def test_refetch_with_victim_profile_is_one_incident(tmp_path):
     first = "20261121T220000Z-pi.example.test-00000001"
     second = "20261121T220100Z-pi.example.test-00000002"
     # the victim-profile fetch sorts first by name; default must still come first
-    fetcher_capture(out, "20261121T215900Z-pi.example.test-00000000", "https://pi.example.test/", profile="victim-pl-mobile",
-                    started="2026-11-21T22:01:00Z")
+    victim = fetcher_capture(out, "20261121T215900Z-pi.example.test-00000000", "https://pi.example.test/", profile="victim-pl-mobile",
+                             started="2026-11-21T22:01:00Z")
+    write(victim / "page.html", "<p>the cloaked offer</p>")  # identical content would make it an exact duplicate
     fetcher_capture(out, first, "https://pi.example.test/", started="2026-11-21T22:00:00Z")
     fetcher_capture(out, second, "https://rho.example.test/")
     ds = ingest([out])
@@ -255,5 +287,5 @@ def test_cli_ingests_scanner_run(tmp_path, capsys):
     out = tmp_path / "out" / "dataset.json"
     assert cli_main(["ingest", str(run), "--out", str(out)]) == 0
     ds = Dataset.from_json(out.read_text())
-    assert len(ds.incidents) == 3
+    assert len(ds.incidents) == 4
     assert not any(i.kind == "fetch_profile" for i in ds.indicators())  # scanner manifests carry no fetch profile
