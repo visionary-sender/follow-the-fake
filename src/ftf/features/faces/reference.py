@@ -122,9 +122,11 @@ def _get(url: str, params: Optional[dict] = None, timeout: int = 60) -> bytes:
         except urllib.error.HTTPError as e:
             if e.code not in (429, 500, 502, 503, 504) or attempt == tries - 1:
                 raise
+            if "upload.wikimedia.org" in url and attempt >= 1:
+                raise  # originals are throttled for long periods: skip the file, not minutes of waiting
             retry_after = e.headers.get("Retry-After", "")
             wait = int(retry_after) if retry_after.isdigit() else 5 * 2**attempt
-            print(f"HTTP {e.code} from {urllib.parse.urlparse(url).netloc}, retry in {min(wait, 120)} s", file=sys.stderr)
+            print(f"HTTP {e.code} from {urllib.parse.urlparse(url).netloc}{urllib.parse.urlparse(url).path[:60]}, retry in {min(wait, 120)} s", file=sys.stderr)
             time.sleep(min(wait, 120))
     raise AssertionError("unreachable")
 
@@ -138,6 +140,7 @@ def build(dest: Path, manifest: Path = MANIFEST_PATH, keep_images: bool = False)
     img_dir = dest / "images"
     img_dir.mkdir(parents=True, exist_ok=True)
     names, titles, rows = [], [], []
+    failed = 0
     for person in doc["people"]:
         for im in person["images"]:
             if not licence_ok(im["licence"]):
@@ -145,7 +148,12 @@ def build(dest: Path, manifest: Path = MANIFEST_PATH, keep_images: bool = False)
             suffix = Path(urllib.parse.urlparse(im["thumb_url"]).path).suffix.lower() or ".jpg"
             p = img_dir / (hashlib.sha1(im["title"].encode()).hexdigest()[:16] + suffix)
             if not p.exists():
-                p.write_bytes(_get(im["thumb_url"]))
+                try:
+                    p.write_bytes(_get(im["thumb_url"]))
+                except (OSError, urllib.error.URLError) as e:
+                    print(f"warning: {im['title']}: download failed ({e}), skipped", file=sys.stderr)
+                    failed += 1
+                    continue
             got = hashlib.sha256(p.read_bytes()).hexdigest()
             if im.get("sha256") and got != im["sha256"]:
                 print(f"warning: {im['title']}: thumbnail bytes changed upstream", file=sys.stderr)
@@ -159,7 +167,11 @@ def build(dest: Path, manifest: Path = MANIFEST_PATH, keep_images: bool = False)
             titles.append(im["title"])
             rows.append(v)
     ref = Reference(names, titles, np.stack(rows).astype(np.float32), manifest_sha(manifest))
-    _save(ref, dest)
+    if failed:
+        # do not cache a partial set: the next run retries the missing images
+        print(f"warning: {failed} reference images missing; not caching {dest}", file=sys.stderr)
+    else:
+        _save(ref, dest)
     if not keep_images:
         for p in img_dir.iterdir():
             p.unlink()
