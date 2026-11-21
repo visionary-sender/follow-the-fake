@@ -13,11 +13,15 @@ from ftf import __version__
 from ftf.enrich.commands import register as register_enrich_domain
 from ftf.features.commands import register as register_features
 from ftf.linking.commands import register_score
+from ftf.pipeline.commands import register_analyze
+from ftf.pipeline.commands import register_serve
 
 COMMANDS: list[Callable[[argparse._SubParsersAction], None]] = [
+    register_analyze,
     register_enrich_domain,
     register_features,
     register_score,
+    register_serve,
 ]
 
 
