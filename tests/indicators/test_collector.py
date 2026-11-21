@@ -46,8 +46,8 @@ AIO_VISIT = {
         "country_code": "PL",
         "useragent": UA,
         "created_at": "2026-10-09T06:23:55Z",
-        "browser_window_width": "834",
-        "browser_window_height": "730",
+        "browser_window_width": "1000",
+        "browser_window_height": "700",
         "fields": {"fb_pixel": "1234567890123456", "fbclid": make_fbclid(SESSION)},
     },
 }
@@ -68,15 +68,15 @@ def capture_root(tmp_path: Path):
     d.mkdir()
     post_form = {
         "mimeType": "application/x-www-form-urlencoded",
-        "text": f"browser_time_zone=Europe%2FWarsaw&browser_window_width=834&browser_window_height=730&fingerprint={FP}",
+        "text": f"browser_time_zone=Europe%2FWarsaw&browser_window_width=1000&browser_window_height=700&fingerprint={FP}",
         "params": [
             {"name": "browser_time_zone", "value": "Europe%2FWarsaw"},
-            {"name": "browser_window_width", "value": "834"},
-            {"name": "browser_window_height", "value": "730"},
+            {"name": "browser_window_width", "value": "1000"},
+            {"name": "browser_window_height", "value": "700"},
             {"name": "fingerprint", "value": FP},
         ],
     }
-    post_json = {"mimeType": "application/json", "text": json.dumps({"useragent": UA, "viewport": {"width": 834, "height": 730}})}
+    post_json = {"mimeType": "application/json", "text": json.dumps({"useragent": UA, "viewport": {"width": 1000, "height": 700}})}
     geo = {"status": 200, "content": {"mimeType": "application/json", "text": json.dumps({"ip": "198.51.100.7", "city": "Testville", "org": "AS64500 Example"})}}
     entries = [
         entry("https://landing.example.test/?utm_visit=x&fbclid=" + make_fbclid(SESSION), t="2026-10-09T06:24:01.000Z",
@@ -88,7 +88,7 @@ def capture_root(tmp_path: Path):
     ]
     (d / "page.har").write_bytes(har(entries, pages=[{"startedDateTime": "2026-10-09T06:23:59.000Z", "id": "page_1"}]))
     (d / "page.html").write_bytes(aio_html())
-    (d / "Zrzut ekranu 2026-10-09 082411.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\x00IEND\xaeB`\x82")
+    (d / "Zrzut ekranu 2025-01-02 031405.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\x00IEND\xaeB`\x82")
     mhtml = (
         "From: <Saved by Blink>\r\nSnapshot-Content-Location: https://landing.example.test/\r\n"
         "Subject: test\r\nDate: Thu, 08 Oct 2026 09:09:43 GMT\r\nMIME-Version: 1.0\r\n"
@@ -104,7 +104,7 @@ def capture_root(tmp_path: Path):
         artefacts=[
             Artefact(id="c1:s1:har", type="har", path="case/page.har"),
             Artefact(id="c1:s1:html", type="html", path="case/page.html"),
-            Artefact(id="c1:s1:shot", type="screenshot", path="case/Zrzut ekranu 2026-10-09 082411.png"),
+            Artefact(id="c1:s1:shot", type="screenshot", path="case/Zrzut ekranu 2025-01-02 031405.png"),
             Artefact(id="c1:s1:mhtml", type="mhtml", path="case/page.mhtml"),
             Artefact(id="c1:s1:info", type="other", path="case/archive_info.json"),
             Artefact(id="c1:s1:gone", type="har", path="case/missing.har"),
@@ -154,7 +154,7 @@ def test_aio_fingerprint_same_from_har_and_html(capture_root):
 def test_viewport_and_screen(capture_root):
     inc, cap, root = capture_root
     kinds = by_kind(collector.extract(inc, cap, root))
-    assert {i.value for i in kinds["viewport"]} == {"834x730"}
+    assert {i.value for i in kinds["viewport"]} == {"1000x700"}
     assert {i.value for i in kinds["screen_size"]} == {"1920x1080"}
 
 
@@ -180,11 +180,11 @@ def test_user_agent_and_times(capture_root):
     times = {i.value for i in kinds["capture_time"]}
     assert "2026-10-09T06:23:59.000Z" in times  # earliest HAR time (page)
     assert "2026-10-09T06:23:55Z" in times  # aio visit created_at
-    assert "2026-10-09T08:24:11 local" in times  # screenshot file name
+    assert "2025-01-02T03:14:05 local" in times  # screenshot file name
     assert "2026-10-08T09:09:43+00:00" in times  # MHTML Date
     assert "2026-10-08T09:09:43.4" in times  # archiver timestamp
     assert {"2026-10-09", "2026-10-08"} <= {i.value for i in kinds["capture_day"]}
-    assert {i.value for i in kinds["screenshot_date"]} == {"2026-10-09"}
+    assert {i.value for i in kinds["screenshot_date"]} == {"2025-01-02"}
 
 
 def test_fbclid_session_only_tail(capture_root):

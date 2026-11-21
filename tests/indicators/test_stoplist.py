@@ -50,7 +50,7 @@ def test_hits(kind, value):
 @pytest.mark.parametrize(
     "kind,value",
     [
-        ("script_host", "crimsonbase.example.test"),
+        ("script_host", "tracker.example.test"),
         ("gateway_host", "xd-0000.ecs.us-east-1.on.aws"),  # protected kind
         ("third_party_host", "xd-0000.ecs.us-east-1.on.aws"),  # tenant host under a cloud suffix
         ("registered_domain", "example-scam.test"),
