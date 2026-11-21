@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ftf"
+description = "Follow the Fake: group single scam ads and their landing pages into campaigns."
+readme = "README.md"
+requires-python = ">=3.11"
+dynamic = ["version"]
+dependencies = [
+    "pydantic>=2,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "packaging>=24",
+    "pytest==9.2.0",
+]
+
+[project.scripts]
+ftf = "ftf.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "ftf.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
