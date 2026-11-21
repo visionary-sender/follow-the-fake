@@ -141,6 +141,9 @@ def run_link(args: argparse.Namespace) -> int:
 
 
 def run_assign(args: argparse.Namespace) -> int:
+    if args.delta <= 0:
+        print("ftf assign: --delta must be positive", file=sys.stderr)
+        return 2
     base = _load(args.collection)
     new = _load(args.new)
     relation = Relation(args.relation)
@@ -173,7 +176,11 @@ def run_assign(args: argparse.Namespace) -> int:
             print(f"ftf assign: duplicate_of points at unknown captures: {', '.join(missing)}", file=sys.stderr)
             return 2
         for inc in ready:
-            res = link_incident(current, inc, relation, index=index)
+            try:
+                res = link_incident(current, inc, relation, index=index)
+            except ValueError as exc:
+                print(f"ftf assign: {inc.id}: {exc}", file=sys.stderr)
+                return 2
             if args.sensitivity:
                 rec = assignment_flips(current, inc, res.assignment, relation, index=index, delta=args.delta)
                 res.assignment = annotate_assignment(res.assignment, rec)
@@ -188,7 +195,11 @@ def run_assign(args: argparse.Namespace) -> int:
     data = combine(base, added).model_dump(mode="json") if index is not None else current.model_dump(mode="json")
     data["links"] += [l.model_dump(mode="json") for r in results for l in r.links]
     data["assignments"] += [r.assignment.model_dump(mode="json") for r in results]
-    out = Dataset.model_validate(data)
+    try:
+        out = Dataset.model_validate(data)
+    except ValidationError as exc:
+        print(f"ftf assign: the result does not validate: {exc}", file=sys.stderr)
+        return 2
     _write(out, args.out)
     counts = Counter(r.assignment.decision.value for r in results)
     print(f"{len(results)} incidents ({relation.value}): " + ", ".join(f"{k} {v}" for k, v in sorted(counts.items())) + f" -> {args.out}")
@@ -242,6 +253,9 @@ def register_sensitivity(subparsers: argparse._SubParsersAction) -> None:
 
 
 def run_sensitivity(args: argparse.Namespace) -> int:
+    if args.delta <= 0:
+        print("ftf sensitivity: --delta must be positive", file=sys.stderr)
+        return 2
     try:
         ds = _load(args.collection)
     except (OSError, ValidationError) as exc:

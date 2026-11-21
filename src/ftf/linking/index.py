@@ -259,6 +259,8 @@ class CandidateIndex:
     _extras: Optional[_Extras] = field(default=None, repr=False)
     _base: Optional[Dataset] = field(default=None, repr=False)
     _added: list[Incident] = field(default_factory=list, repr=False)  # incidents added since `attach`
+    _artefacts: set[str] = field(default_factory=set, repr=False)  # artefact ids of base + added
+    _shape: tuple = field(default=(), repr=False)  # cheap fingerprint of the cached base object
 
     # --- build / persist --------------------------------------------------------------------
 
@@ -314,6 +316,7 @@ class CandidateIndex:
         self._ctx, self._extras = ctx, _extras(base, ctx)
         self._base = base
         self._added = []
+        self._artefacts = {a.id for i in base.incidents for c in i.captures for a in c.artefacts}
 
     @property
     def ready(self) -> bool:
@@ -324,12 +327,13 @@ class CandidateIndex:
         path.parent.mkdir(parents=True, exist_ok=True)
         views = {}
         for view, vv in sorted(self.vectors.items()):
-            npy = path.with_name(f"{path.stem}.{_safe(view)}.npy")
+            npy = path.with_name(f"{path.stem}.{_safe(view)}-{hashlib.sha256(view.encode()).hexdigest()[:8]}.npy")
             np.save(npy, vv.matrix, allow_pickle=False)
             views[view] = {"file": npy.name, "capture_ids": vv.capture_ids}
         data = {
             "version": INDEX_VERSION,
             "digest": self.digest,
+            "weights": weights_fingerprint(self.weights),
             "n_captures": self.n_captures,
             "incidents": sorted(self.incidents),
             "postings": [[k[0].value, k[1], k[2], sorted(v), *self.counts.get(k, (0, 0))] for k, v in sorted(self.postings.items(), key=lambda kv: (kv[0][0].value, kv[0][1], kv[0][2]))],
@@ -348,6 +352,8 @@ class CandidateIndex:
         data = json.loads(path.read_text(encoding="utf-8"))
         if data.get("version") != INDEX_VERSION:
             raise ValueError(f"index version {data.get('version')} != {INDEX_VERSION}; rebuild it")
+        if data.get("weights") != weights_fingerprint(weights):
+            raise ValueError("the index was built with another weight table; rebuild it with `ftf index`")
         postings, counts = {}, {}
         for layer, kind, value, caps, n_inc, n_grp in data["postings"]:
             key = (Layer(layer), kind, value)
@@ -482,11 +488,20 @@ class CandidateIndex:
         # The linear path rejects these when it validates base + incident; the index must too.
         reused = sorted({c.id for c in incident.captures if c.id in self._ctx.canonical})
         reused += sorted({i.id for i in incident.indicators if i.id in self._ctx.indicator_incident})
+        reused += sorted({a.id for c in incident.captures for a in c.artefacts if a.id in self._artefacts})
         if reused:
             raise ValueError(f"incident {incident.id} reuses ids already in the collection: {', '.join(reused[:5])}")
+        own = {c.id for c in incident.captures}
+        for c in incident.captures:
+            t = c.duplicate_of
+            if t is not None and t not in own and self._ctx.canonical.get(t) != t:
+                raise ValueError(f"capture {c.id}: duplicate_of {t} is not a canonical capture of the collection")
 
     def extend(self, incident: Incident) -> ScoringContext:
-        """Scoring context of the base plus `incident` (the index itself is not changed)."""
+        """Scoring context of the base plus `incident` (the index itself is not changed).
+
+        The result shares the index's dicts underneath: use it before the next `add()`.
+        """
         self._check_new(incident)
         assert self._ctx is not None and self._extras is not None
         return extend_context(self._ctx, self._extras, incident)[0]
@@ -518,6 +533,7 @@ class CandidateIndex:
             old.update(new.maps[0])
         ex.incidents = ext_ex.incidents
         self._added.append(incident)
+        self._artefacts |= {a.id for c in incident.captures for a in c.artefacts}
         base_members = set()
         for rel_map in self.campaign_of.values():
             base_members |= rel_map.keys()
@@ -544,20 +560,52 @@ class CandidateIndex:
             del _CACHE[k]
 
 
+def weights_fingerprint(weights: WeightTable) -> str:
+    """Stable across processes (no set or hash order): kinds, defaults, scales and constants."""
+    def rel(m) -> list:
+        return sorted((r.value, float(v)) for r, v in (m or {}).items())
+
+    canon = {
+        "kinds": sorted(
+            (k, e.layer.value, float(e.bits), e.single_valued, e.private, rel(e.relations) if e.relations is not None else None)
+            for k, e in weights.kinds.items()
+        ),
+        "defaults": sorted((l.value, float(b)) for l, b in weights.layer_defaults.items()),
+        "scale": sorted((l.value, rel(m)) for l, m in weights.relation_scale.items()),
+        "conflict_relations": sorted(r.value for r in weights.conflict_relations),
+        "constants": [weights.conflict_bits, weights.hub_bits, weights.static_discount],
+    }
+    return hashlib.sha256(json.dumps(canon).encode()).hexdigest()[:16]
+
+
 def _safe(view: str) -> str:
     return "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in view) or "view"
 
 
+def _shape(ds: Dataset) -> tuple:
+    return (len(ds.incidents), len(ds.campaigns), len(ds.links), len(ds.assignments), sum(len(i.indicators) for i in ds.incidents))
+
+
 def _remember(base: Dataset, idx: CandidateIndex) -> None:
+    idx._shape = _shape(base)
     _CACHE[id(base)] = (base, idx)
     while len(_CACHE) > _CACHE_SIZE:
         del _CACHE[next(iter(_CACHE))]
 
 
 def cached_index(base: Dataset) -> Optional[CandidateIndex]:
-    """The index built (or loaded with a base) for this very `Dataset` object, if any."""
+    """The index built (or loaded with a base) for this very `Dataset` object, if any.
+
+    A cheap shape check drops it if the object was edited in place (incidents, campaigns, links,
+    assignments or indicators added or removed); edit values in place and you must rebuild.
+    """
     hit = _CACHE.get(id(base))
-    return hit[1] if hit is not None and hit[0] is base and hit[1].ready else None
+    if hit is None or hit[0] is not base or not hit[1].ready:
+        return None
+    if hit[1]._shape != _shape(base):  # edited in place since indexing
+        del _CACHE[id(base)]
+        return None
+    return hit[1]
 
 
 def clear_cache() -> None:

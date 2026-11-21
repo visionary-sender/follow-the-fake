@@ -37,9 +37,9 @@ def _t(fn):
 def _split(ds: Dataset, hold: int) -> tuple[Dataset, list]:
     """Base = all but the last `hold` incidents whose duplicates point into the base."""
     incs = list(ds.incidents)
-    base, new = incs[:-hold], []
+    base, new = incs[: len(incs) - hold], []
     known = {c.id for i in base for c in i.captures}
-    for i in incs[-hold:]:
+    for i in incs[len(incs) - hold :]:
         if all(c.duplicate_of is None or c.duplicate_of in known for c in i.captures):
             new.append(i)
         else:

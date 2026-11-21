@@ -111,6 +111,8 @@ def link_flips(ctx: ScoringContext, a: str, b: str, relation: Relation, delta: f
 
 def fragile_links(ds: Dataset, delta: float = DELTA, weights: WeightTable = HAND_TABLE) -> list[dict]:
     """One record per ledger link of `ds` (see `link_flips`), with its `link_id`."""
+    if delta <= 0:
+        raise ValueError("delta must be positive")
     ctx = ScoringContext.from_dataset(ds, weights)
     tables = _Tables(ctx, delta)
     out = []

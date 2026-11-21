@@ -107,7 +107,9 @@ def link_incident(
     scoring context is extended instead of rebuilt; the result is identical to the linear scan.
     `weights` replaces the weight table (sensitivity analysis; needs the hand-table ledger).
     """
-    if index is None:
+    if index is None and backend is None:
+        # The cached index was built with the hand-table ledger; a custom scorer may match on
+        # other kinds, so it always takes the linear scan unless an index is passed explicitly.
         index = cached_index(base)
     if index is not None:
         return _decide(_indexed_setup(index, incident, relation, backend, weights), incident, relation)

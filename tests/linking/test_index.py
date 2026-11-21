@@ -140,7 +140,7 @@ def test_json_round_trip(tmp_path):
     idx.add_vector_view("ad_image", caps, rng.normal(size=(12, 8)).astype(np.float32))
     path = tmp_path / "index.json"
     idx.save(path)
-    assert (tmp_path / "index.ad_image.npy").exists()
+    assert len(list(tmp_path.glob("index.ad_image-*.npy"))) == 1
     back = CandidateIndex.load(path)
     assert back.postings == idx.postings and back.counts == idx.counts
     assert back.campaigns == idx.campaigns and back.campaign_of == idx.campaign_of
@@ -315,3 +315,42 @@ def test_cli_assign_refuses_index_with_linear(tmp_path):
     (tmp_path / "l.json").write_text(base.to_json())
     (tmp_path / "n.json").write_text(sc.dataset(new[:1]).to_json())
     assert cli.main(["assign", str(tmp_path / "l.json"), str(tmp_path / "n.json"), "-o", str(tmp_path / "o.json"), "--linear", "--index", str(tmp_path / "x.json")]) == 2
+
+
+def test_index_rejects_bad_duplicate_targets_and_reused_artefacts():
+    base, new = _split()
+    idx = CandidateIndex.build(base, cache=False)
+    b = sc.Builder()
+    b.n = 5000
+    ghost = sc.Incident(id="ghost", source="synthetic", captures=[b.capture("ghost-l", "lander", duplicate_of="no-such-capture")], indicators=[])
+    with pytest.raises(ValueError, match="duplicate_of"):
+        link_incident(base, ghost, index=idx)
+    with pytest.raises(Exception):
+        link_incident(base, ghost)  # the linear path rejects it too (validation)
+    taken = base.incidents[0].captures[0].artefacts[0]
+    cap = b.capture("art-l", "lander").model_copy(update={"artefacts": [taken]})
+    reuse = sc.Incident(id="art", source="synthetic", captures=[cap], indicators=[])
+    with pytest.raises(ValueError, match="reuses ids"):
+        link_incident(base, reuse, index=idx)
+
+
+def test_cache_is_skipped_for_a_custom_backend_and_an_edited_base():
+    clear_cache()
+    base, new = _split()
+    idx = CandidateIndex.build(base)
+    assert cached_index(base) is idx
+    base.campaigns.append(base.campaigns[0].model_copy(update={"id": "campaign:campaign:extra"}))
+    assert cached_index(base) is None
+    clear_cache()
+
+
+def test_loading_with_another_weight_table_is_refused(tmp_path):
+    from dataclasses import replace as dc_replace
+
+    from ftf.linking.weights import HAND_TABLE
+
+    base, _ = _split()
+    CandidateIndex.build(base, cache=False).save(tmp_path / "i.json")
+    CandidateIndex.load(tmp_path / "i.json")  # same table: fine
+    with pytest.raises(ValueError, match="weight table"):
+        CandidateIndex.load(tmp_path / "i.json", weights=dc_replace(HAND_TABLE, hub_bits=0.7))
