@@ -35,7 +35,7 @@ and say so in their note.
 from __future__ import annotations
 
 import math
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
@@ -44,6 +44,7 @@ from ftf.contract.models import (
     EvidenceRow,
     EvidenceStatus,
     Layer,
+    Level,
     Link,
     LinkLevel,
     Observed,
@@ -111,6 +112,7 @@ class ScoringContext:
     n_incidents: int  # incidents with at least one canonical capture
     background: BackgroundCounts | None = None  # corpus operator counts for the rarity term
     hierarchy: Hierarchy | None = None  # discovered id levels for the chain rule (None: off)
+    kind_level: dict[Key, Level] = field(default_factory=dict)  # (layer, kind) → its usual Indicator.level
 
     @classmethod
     def from_dataset(
@@ -131,6 +133,7 @@ class ScoringContext:
         index: dict[tuple[Layer, str, str], set[str]] = defaultdict(set)
         live_private: dict[tuple[Layer, str, str], set[str]] = defaultdict(set)
         owners: dict[str, set[str]] = defaultdict(set)  # incident → owner-level ids (live or static)
+        levels: dict[Key, Counter] = defaultdict(Counter)
         for inc in ds.incidents:
             for ind in inc.indicators:
                 cap = canonical[ind.capture_id]
@@ -147,7 +150,9 @@ class ScoringContext:
                     vals.live.add(norm)
                 # rarity counts the incident of the canonical capture, never the duplicate's
                 index[(ind.layer, ind.kind, norm)].add(incident_of[cap])
-                if ind.layer is Layer.owner:
+                levels[(ind.layer, ind.kind)][ind.level] += 1
+                if ind.layer is Layer.owner and (ind.level is Level.operator or ANCHOR_KINDS.get(ind.kind) is Level.operator):
+                    # owner ids only: an aio campaign id in the owner layer names a campaign, not an owner
                     owners[incident_of[cap]].add(f"{ind.kind}={norm}")
                 if ind.observed is Observed.live and weights.weight(ind.kind, ind.layer).private:
                     live_private[(ind.layer, ind.kind, norm)].add(incident_of[cap])
@@ -166,6 +171,7 @@ class ScoringContext:
             n=len(canon_ids),
             n_incidents=len({incident_of[c] for c in canon_ids}),
             background=background,
+            kind_level={key: max(c, key=lambda lv: (c[lv], lv.value)) for key, c in levels.items()},
         )
         if chain_rule:
             ctx.hierarchy = ctx.build_hierarchy()
@@ -309,17 +315,24 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
     for c in shared_cands:
         shared_rows[c.key[0]].append(_Candidate(c.row, c.bits))
 
+    chain_layers = set() if ctx.hierarchy is None else {ly for ly, k in ctx.kind_level if k in ctx.hierarchy.anchors}
     rows: list[EvidenceRow] = []
     total = 0.0
     layers_positive = 0
     for layer in Layer:
         layer_bits = 0.0
-        cands = sorted(shared_rows.get(layer, []), key=lambda c: -c.bits)
-        if cands:
-            top = cands[0]
-            rows.append(top.row)
-            layer_bits += top.bits
-            for c in cands[1:]:
+        # within a layer the best kind counts; in a layer holding a chain id (tenant, owner, aio campaign,
+        # landing) the best kind *per Indicator.level* counts, so a shared owner and a shared aio campaign
+        # are two levels, while an alias of the campaign id is not a second term
+        tops: dict[Level | None, _Candidate] = {}
+        for c in sorted(shared_rows.get(layer, []), key=lambda c: -c.bits):
+            slot = ctx.kind_level.get((layer, c.row.kind)) if layer in chain_layers else None
+            top = tops.get(slot)
+            if top is None:
+                tops[slot] = c
+                rows.append(c.row)
+                layer_bits += c.bits
+            else:
                 rows.append(c.row.model_copy(update={
                     "bits": 0.0, "note": f"{c.row.note}; within-layer max: subsumed by {top.row.kind}",
                 }))

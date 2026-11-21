@@ -275,3 +275,40 @@ def test_json_round_trip_and_cli(tmp_path):
     assert main(["learn-weights", str(ds_path), "--background", str(bg_path), "-o", str(out)]) == 0
     assert main(["score", str(ds_path), "c1-0/lander", "c1-1/lander", "--weights", str(out)]) == 0
     assert main(["score", str(ds_path), "c1-0/lander", "c1-1/lander", "--weights", str(tmp_path / "nope.json")]) == 2
+
+
+# ---- one term per level inside a chain layer; a different aio campaign of one owner ----
+
+
+def owner_campaign_ds() -> Dataset:
+    def inc(iid, camp, landing):
+        i = incident(iid, PLATFORM + chain("tenant-1", "owner-1", camp, landing))
+        return i.model_copy(update={"indicators": [
+            x.model_copy(update={"level": Level.operator}) if x.kind == "aio_owner" else x for x in i.indicators]})
+    return Dataset(name="synthetic", incidents=[
+        inc("m1", "camp-1", "landing-1"), inc("m2", "camp-1", "landing-1"), inc("m3", "camp-2", "landing-2"),
+        incident("o1", PLATFORM + chain("tenant-9", "owner-9", "camp-9", "landing-9")),
+    ])
+
+
+def test_shared_owner_and_campaign_are_two_terms_and_alias_is_not():
+    ctx = ScoringContext.from_dataset(owner_campaign_ds())
+    s = score_pair(ctx, "m1/lander", "m2/lander")
+    owner_layer = {r.kind: r for r in s.rows if r.layer is L.owner}
+    assert owner_layer["aio_owner"].bits > 0
+    campaign_terms = sorted(owner_layer[k].bits for k in ("aio_campaign", "aio_campaign_name"))
+    assert campaign_terms[0] == 0 and campaign_terms[1] > 0  # the campaign level counts once
+
+
+def test_learned_table_makes_a_different_aio_campaign_a_cannot_link_under_campaign_only():
+    from ftf.linking.ledger import verdict
+
+    table, rep = learn_weights(owner_campaign_ds())
+    entry = table.kinds["aio_campaign"]
+    assert entry.single_valued and entry.relations[Relation.operator] == 0
+    ctx = ScoringContext.from_dataset(owner_campaign_ds(), weights=table)
+    camp = score_pair(ctx, "m1/lander", "m3/lander", Relation.campaign)
+    assert any(r.kind == "aio_campaign" and r.status is EvidenceStatus.conflict for r in camp.rows)
+    assert verdict(camp, ctx) != "link"
+    op = score_pair(ctx, "m1/lander", "m3/lander", Relation.operator)
+    assert not any(r.status is EvidenceStatus.conflict for r in op.rows)

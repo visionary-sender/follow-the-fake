@@ -43,6 +43,12 @@ NEGATIVE_LABEL = "aio_owner"
 FORMAT = "ftf-weights"
 VERSION = 1
 METHOD = "learned@0.1"
+# Chain ids that are single-valued per capture and campaign-stable: a different value is a conflict (cannot-link)
+# under the relations they name, and they say nothing about the relations listed (an owner runs several
+# aio campaigns, so a different campaign id is no evidence against the same owner).
+SINGLE_VALUED_CHAIN: dict[str, frozenset] = {
+    "aio_campaign": frozenset({Relation.operator, Relation.tracking_account, Relation.template}),
+}
 
 Feats = dict[tuple[Layer, str], set[str]]
 
@@ -216,6 +222,18 @@ def learn_weights(
             single_valued=base.single_valued, private=base.private or (kind not in prior.kinds and layer in PRIVATE_LAYERS),
             relations={r: (round(b / top, 4) if top > 0 else 0.0) for r, b in absolute.items()},
         )
+    for kind, silent in SINGLE_VALUED_CHAIN.items():
+        if kind not in kind_layer:
+            continue
+        base = kinds.get(kind) or prior.weight(kind, kind_layer[kind])
+        absolute = {r: base.bits * (base.relations.get(r, 0.0) if base.relations is not None
+                                    else prior.relation_scale.get(kind_layer[kind], {}).get(r, 0.0)) for r in Relation}
+        top = max(absolute.values()) or base.bits
+        kinds[kind] = KindWeight(
+            layer=kind_layer[kind], bits=round(top, 3), single_valued=True, private=True,
+            relations={r: (0.0 if r in silent else round(absolute[r] / top, 4) if top > 0 else 0.0) for r in Relation},
+        )
+        report["kinds"].setdefault(kind, {})["single_valued_chain_id"] = sorted(r.value for r in silent)
     table = WeightTable(
         kinds=kinds, layer_defaults=dict(prior.layer_defaults), relation_scale=prior.relation_scale,
         conflict_relations=prior.conflict_relations, conflict_bits=prior.conflict_bits,
