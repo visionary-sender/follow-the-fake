@@ -40,7 +40,7 @@ The manifest has the same value.
 | `must_not_link` | a real page of an impersonated outlet, bank, brand or public figure | the fetcher's own incident `fetch:<capture_id>` | as for `fetched_landing` |
 
 A fifth value, `must_not_link_blocked`, marks a hand-picked real page that the fetcher could not
-load (e.g. tvn24.pl's HTTP 403). It is kept as honest data, but it is not a distractor, because
+load (e.g. an outlet that answers HTTP 403). It is kept as honest data, but it is not a distractor, because
 its capture shows an error page.
 
 **Victim-profile re-fetch.** Every batch-0 URL whose first verdict was `bot_wall`, `decoy` or
@@ -87,7 +87,7 @@ or on the workbench, and needs no network.
 # on ftf-sandbox, as user ftf
 ftf corpus targets --queue scanner/queue.jsonl --run <scanner run> --out targets --parts 2
 ftf fetch --list targets/urls-1.txt --out fetch-1     # and urls-2 -> fetch-2; concurrency <= 2
-ftf corpus targets --picked src/ftf/corpus/lists/must-not-link-home.tsv --out targets-home
+ftf corpus targets --picked lists/must-not-link-home.tsv --out targets-home
 ftf fetch --list targets-home/urls-1.txt --out picked-home
 ftf corpus articles --picked must-not-link-home.tsv --fetch picked-home --per-page 3 --out articles.tsv
 ftf fetch --list <targets of articles.tsv> --out picked-articles
@@ -101,11 +101,12 @@ ftf corpus build --root <batch dir> --picked lists/home.tsv --picked lists/artic
   `https://<landing domain>/`. URLs are deduplicated and interleaved by source, so every source
   starts early.
 - `ftf corpus articles` takes real article links from a fetched home page. It parses the HTML as
-  inert text, keeps only links on the same site, and matches article URL shapes for each outlet.
+  inert text, keeps only links on the same registrable domain, and matches common article URL shapes.
 - `ftf corpus build` writes `dataset.json`, `manifest.jsonl` and `summary.json`. The result
   validates against the contract.
 
-The hand-picked seed lists are in `src/ftf/corpus/lists/`.
+The hand-picked seed lists live in the bucket, not in git: `gs://follow-the-fake-data/outputs/corpus/lists/`
+(each batch also has its own copy under `lists/`).
 
 ## Sampling and biases
 
@@ -123,8 +124,8 @@ ads started since 2026-11-14) plus the CERT Polska entries from its later runs.
 - **CERT Polska warning list**: the newest entries per run (150 per run). These are bare
   domains, mostly delivery, marketplace and bank phishing (`olx.pl-…sbs`, `allegrolokalnie…top`,
   `vinted…`), not celebrity investment scams.
-- The keyword queries also return **legitimate advertisers** (e.g. Saxo and real brokers for
-  "platforma inwestycyjna"; InPost's own ads for "Brzoska"). Scanner ads are not all scams. Treat
+- The keyword queries also return **legitimate advertisers**: real brokers for
+  "platforma inwestycyjna", and the named person's own company for a person's name. Scanner ads are not all scams. Treat
   them as an unlabelled background, which is what a rarity baseline needs. Don't use them as
   positives.
 
@@ -141,7 +142,7 @@ fetched once):
 
 **How this differs from NASK's cases.** NASK's cases are user-reported **celebrity-likeness
 investment scams**. They arrive on Instagram or Facebook through a cloaker, with fake news
-articles (Gazeta.pl, TVN24, Polsat clones) and AI-trading platform brands. The corpus is broader
+articles that clone national news outlets, and AI-trading platform brands. The corpus is broader
 and noisier:
 
 - the ads come from keyword search, so they include legitimate advertisers;
@@ -153,11 +154,15 @@ So rarity estimates from this corpus are **conservative for kit and tracker feat
 scam landers) and **realistic for infrastructure features** (hosting, registrars, TLDs of fresh
 scam domains).
 
-**Must-not-link side (batch 1).** Hand-picked, not sampled. It covers the outlets, banks and
-brands that the cases and the CERT list impersonate (gazeta.pl, tvn24.pl, polsatnews.pl,
-interia.pl, fakt.pl, money.pl, bankier.pl, PKO, Pekao, InPost, NBP, gov.pl/finanse, Allegro,
-Vinted, OLX), plus Wikipedia pages of the most impersonated people (Brzoska, Glapiński, Olejnik,
-Lis). It also holds real articles linked from those home pages on the day of collection.
-**tvn24.pl answered HTTP 403** to the sandbox for the home page, /biznes, fakty.tvn24.pl and three
-real article URLs. Those 403 captures are kept as honest data. Real articles from polsatnews.pl and
-interia.pl stand in for tvn24.pl articles.
+**Must-not-link side (batch 1).** Hand-picked, not sampled: real home, section and article
+pages of the national news outlets, banks, delivery and marketplace brands, and public bodies that
+scams impersonate, plus encyclopedia pages of public figures named in the scanner keywords. The
+articles are links taken from those home pages on the day of collection. The list is in the bucket.
+
+One outlet answered **HTTP 403** to the sandbox for every URL tried: home, sections and three
+articles, each tried once with no evasion. Those captures are kept as `must_not_link_blocked`.
+Real articles of that outlet were fetched from **Internet Archive** snapshots instead
+(`Incident.source = wayback`, `source_ref` = the original URL, indicator
+`corpus_wayback_snapshot`). Their HAR shows archive.org infrastructure, not the outlet's, but the
+rendered page and text are the outlet's. Linking must not use their network features as the
+outlet's.

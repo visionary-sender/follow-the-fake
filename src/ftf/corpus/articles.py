@@ -12,16 +12,16 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urldefrag, urljoin, urlsplit
 
-# Site-specific article URL shapes; anything else falls back to the generic rule.
-_ARTICLE = {
-    "gazeta.pl": re.compile(r"/7,\d+,\d+,[^/]+\.html$"),
-    "tvn24.pl": re.compile(r"-(?:ra|st)\d+$"),
-    "interia.pl": re.compile(r",nId,\d+$"),
-    "polsatnews.pl": re.compile(r"/wiadomosc/\d{4}-\d{2}-\d{2}/[^/]+/?$"),
-    "fakt.pl": re.compile(r"/[a-z0-9-]+/[a-z0-9-]+/\w+-\w+$"),
-    "money.pl": re.compile(r"-\d{16,}a\.html$"),
-    "bankier.pl": re.compile(r"-\d{7,}\.html$"),
-}
+# Article URL path shapes common on Polish news and brand sites (no site names: the outlets come
+# from a hand-picked list kept in the bucket). A link is an article if any shape matches its path.
+_SHAPES = [
+    re.compile(r"/7,\d+,\d+,[^/]+\.html$"),  # comma-separated section/article ids
+    re.compile(r"-(?:ra|st)\d{5,}$"),  # slug ending in a prefixed numeric id
+    re.compile(r",nId,\d+$"),
+    re.compile(r"/wiadomosc/\d{4}-\d{2}-\d{2}/[^/]+/?$"),
+    re.compile(r"-\d{16,}a\.html$"),
+    re.compile(r"-\d{7,}\.html$"),
+]
 _GENERIC = re.compile(r"/[^/]*[a-z][^/]*-[^/]*-[^/]*\d[^/]*/?$|/\d{4}/\d{2}/")
 
 
@@ -50,7 +50,6 @@ def site_of(host: str) -> str:
 
 def article_links(html: str, base_url: str, limit: int = 10) -> list[str]:
     site = site_of(urlsplit(base_url).hostname or "")
-    pattern = _ARTICLE.get(site, _GENERIC)
     p = _Links()
     p.feed(html)
     out: list[str] = []
@@ -62,7 +61,8 @@ def article_links(html: str, base_url: str, limit: int = 10) -> list[str]:
         if parts.scheme != "https" or not parts.hostname or site_of(parts.hostname) != site:
             continue
         url = parts._replace(query="").geturl()
-        if pattern.search(parts.path) and url not in out:
+        path = parts.path
+        if (any(p.search(path) for p in _SHAPES) or _GENERIC.search(path)) and url not in out:
             out.append(url)
         if len(out) >= limit:
             break

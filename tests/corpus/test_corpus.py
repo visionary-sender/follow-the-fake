@@ -138,11 +138,11 @@ def corpus(tmp_path):
     picked = tmp_path / "picked.tsv"
     picked.write_text(
         "# url\tbrand\tkind\n"
-        "https://www.gazeta.pl/a1\tgazeta.pl\tarticle\treal article\n"
-        "https://www.gazeta.pl/a1\tgazeta.pl\tarticle\n"
-        "https://www.tvn24.pl/\ttvn24.pl\thome\n"
+        "https://www.news-a.example/a1\tnews-a.example\tarticle\treal article\n"
+        "https://www.news-a.example/a1\tnews-a.example\tarticle\n"
+        "https://www.news-b.example/\tnews-b.example\thome\n"
     )
-    _capture(root / "picked-fetch", "cap-gz", "https://www.gazeta.pl/a1", "live", "live", "2026-11-21T22:00:00Z")
+    _capture(root / "picked-fetch", "cap-gz", "https://www.news-a.example/a1", "live", "live", "2026-11-21T22:00:00Z")
     return root, picked
 
 
@@ -229,12 +229,12 @@ def test_build(corpus):
     assert [c.id for c in inc["certpl:c-6"].captures] == ["certpl:c-6:c1"]
 
     mnl = [i for i in ds.incidents if i.source == "hand_picked_must_not_link"]
-    assert len(mnl) == 1 and mnl[0].source_ref == "https://www.gazeta.pl/a1" and mnl[0].id == "fetch:cap-gz"
+    assert len(mnl) == 1 and mnl[0].source_ref == "https://www.news-a.example/a1" and mnl[0].id == "fetch:cap-gz"
     assert rows["fetch:cap-gz"]["capture_ids"] == ["fetch:cap-gz:c1"]
     assert tags(mnl[0], mnl[0].captures[0]) == {
         "corpus_kind": "must_not_link",
-        "corpus_source": "picked:gazeta.pl:article",
-        "corpus_brand": "gazeta.pl",
+        "corpus_source": "picked:news-a.example:article",
+        "corpus_brand": "news-a.example",
         "corpus_page_kind": "article",
     }
 
@@ -256,7 +256,7 @@ def test_sanitise():
 
 def test_read_picked_rejects_bad_line(tmp_path):
     p = tmp_path / "p.tsv"
-    p.write_text("gazeta.pl\tarticle\n")
+    p.write_text("news-a.example\tarticle\n")
     with pytest.raises(ValueError):
         read_picked(p)
 
@@ -267,7 +267,7 @@ def test_cli_targets_and_build(corpus, tmp_path, capsys):
     assert main(["corpus", "targets", "--queue", str(root / "scanner/queue.jsonl"), "--run", RUN,
                  "--picked", str(picked), "--out", str(out), "--parts", "2"]) == 0
     lines = (out / "urls-1.txt").read_text().split() + (out / "urls-2.txt").read_text().split()
-    assert len(lines) == 7 and "https://www.tvn24.pl/" in lines
+    assert len(lines) == 7 and "https://www.news-b.example/" in lines
     assert len((out / "targets.jsonl").read_text().splitlines()) == 7
     assert main(["corpus", "build", "--root", str(root), "--scanner", "scanner", "--run", RUN,
                  "--fetch", "fetch-1", "--fetch", "fetch-2"]) == 0
@@ -279,49 +279,49 @@ def test_article_links_same_site_only():
 
     html = """
     <a href="/wiadomosci/7,114884,31234567,tytul-artykulu.html#x">a</a>
-    <a href="https://next.gazeta.pl/next/7,151003,31234568,inny.html?utm=1">b</a>
+    <a href="https://next.news-a.example/next/7,151003,31234568,inny.html?utm=1">b</a>
     <a href="https://evil.example/7,1,2,x.html">c</a>
-    <a href="http://wiadomosci.gazeta.pl/wiadomosci/7,1,3,plain-http.html">d</a>
+    <a href="http://wiadomosci.news-a.example/wiadomosci/7,1,3,plain-http.html">d</a>
     <a href="/wiadomosci/0,0.html">e</a>
     <a href="/wiadomosci/7,114884,31234567,tytul-artykulu.html">dup</a>
     """
-    assert article_links(html, "https://wiadomosci.gazeta.pl/", 10) == [
-        "https://wiadomosci.gazeta.pl/wiadomosci/7,114884,31234567,tytul-artykulu.html",
-        "https://next.gazeta.pl/next/7,151003,31234568,inny.html",
+    assert article_links(html, "https://wiadomosci.news-a.example/", 10) == [
+        "https://wiadomosci.news-a.example/wiadomosci/7,114884,31234567,tytul-artykulu.html",
+        "https://next.news-a.example/next/7,151003,31234568,inny.html",
     ]
     tvn = '<a href="/polska/jakis-tytul-ra1234567">x</a><a href="/polska">y</a>'
-    assert article_links(tvn, "https://tvn24.pl/", 5) == ["https://tvn24.pl/polska/jakis-tytul-ra1234567"]
+    assert article_links(tvn, "https://news-b.example/", 5) == ["https://news-b.example/polska/jakis-tytul-ra1234567"]
 
 
 def test_cli_articles(tmp_path, capsys):
     root = tmp_path / "b"
-    _capture(root / "pf", "cap-home", "https://tvn24.pl/", "live", "live", "2026-11-21T22:00:00Z")
+    _capture(root / "pf", "cap-home", "https://news-b.example/", "live", "live", "2026-11-21T22:00:00Z")
     (root / "pf" / "cap-home" / "page.html").write_text(
         '<a href="/polska/a-ra1">1</a><a href="/swiat/b-ra2">2</a><a href="/c-ra3">3</a>'
     )
-    _capture(root / "pf", "cap-dead", "https://www.gazeta.pl/", "dead", "timeout", "2026-11-21T22:00:01Z")
+    _capture(root / "pf", "cap-dead", "https://www.news-a.example/", "dead", "timeout", "2026-11-21T22:00:01Z")
     picked = tmp_path / "home.tsv"
-    picked.write_text("https://tvn24.pl/\ttvn24.pl\thome\nhttps://www.gazeta.pl/\tgazeta.pl\thome\n")
+    picked.write_text("https://news-b.example/\tnews-b.example\thome\nhttps://www.news-a.example/\tnews-a.example\thome\n")
     out = tmp_path / "articles.tsv"
     assert main(["corpus", "articles", "--picked", str(picked), "--fetch", str(root / "pf"),
                  "--per-page", "2", "--out", str(out)]) == 0
     rows = [r.split("\t") for r in out.read_text().splitlines()]
-    assert [r[0] for r in rows] == ["https://tvn24.pl/polska/a-ra1", "https://tvn24.pl/swiat/b-ra2"]
-    assert all(r[1:3] == ["tvn24.pl", "article"] for r in rows)
+    assert [r[0] for r in rows] == ["https://news-b.example/polska/a-ra1", "https://news-b.example/swiat/b-ra2"]
+    assert all(r[1:3] == ["news-b.example", "article"] for r in rows)
     assert len(read_picked(out)) == 2
 
 
 def test_wayback_picked(tmp_path):
     from ftf.corpus.build import wayback_original
 
-    orig = "https://tvn24.pl/polska/x-st1"
+    orig = "https://news-b.example/polska/x-st1"
     snap = f"https://web.archive.org/web/20261118061622if_/{orig}"
     assert wayback_original(snap) == ("20261118061622", orig)
     assert wayback_original(orig) is None
     root = tmp_path / "b"
     _capture(root / "wb", "cap-wb", snap, "live", "live", "2026-11-21T23:00:00Z")
     lst = tmp_path / "wb.tsv"
-    lst.write_text(f"{snap}\ttvn24.pl\tarticle\n")
+    lst.write_text(f"{snap}\tnews-b.example\tarticle\n")
     build_corpus(root, None, None, [], [lst], ["wb"])
     ds = m.Dataset.from_json((root / "dataset.json").read_bytes())
     (inc,) = ds.incidents
@@ -336,10 +336,10 @@ def test_review_fixes(tmp_path):
     from ftf.corpus.articles import article_links, site_of
     from ftf.corpus.build import read_fetch_dirs, wayback_original
 
-    assert site_of("www.pekao.com.pl") == "pekao.com.pl"
-    assert article_links('<a href="https://evil.com.pl/a-b-c-1">x</a>', "https://www.pekao.com.pl/", 5) == []
-    assert article_links('<a href="/a-ra1">x</a>', "https://tvn24.pl/", 0) == []
-    assert wayback_original("https://web.archive.org/web/2026if_/tvn24.pl/x-st1") == ("2026", "https://tvn24.pl/x-st1")
+    assert site_of("www.bank.com.pl") == "bank.com.pl"
+    assert article_links('<a href="https://evil.com.pl/a-b-c-1">x</a>', "https://www.bank.com.pl/", 5) == []
+    assert article_links('<a href="/a-ra1">x</a>', "https://news-b.example/", 0) == []
+    assert wayback_original("https://web.archive.org/web/2026if_/news-b.example/x-st1") == ("2026", "https://news-b.example/x-st1")
     q = read_queue_from([_row("k", "meta", "i", url="  https://x.example/path ", domain="x.example")])
     assert target_url(q[0]) == "https://x.example/path"
 
@@ -361,7 +361,7 @@ def test_victim_and_blocked(corpus):
     _capture(root / "fetch-victim", "v-g", "https://invest.example/", "live", "live", "2026-11-21T23:00:00Z")
     _capture(root / "fetch-victim", "v-lp", "https://shared.example/lp", "cloaked", "decoy", "2026-11-21T23:00:01Z")
     _capture(root / "fetch-victim", "v-dead", "https://dead.example/", "live", "live", "2026-11-21T23:00:02Z")
-    _capture(root / "picked-fetch", "cap-403", "https://www.tvn24.pl/", "dead", "http_error", "2026-11-21T22:00:01Z")
+    _capture(root / "picked-fetch", "cap-403", "https://www.news-b.example/", "dead", "http_error", "2026-11-21T22:00:01Z")
     summary = build_corpus(root, "scanner", [RUN], ["fetch-1", "fetch-2"], [picked], ["picked-fetch"], "t",
                            victim_dirs=["fetch-victim"])
     ds = m.Dataset.from_json((root / "dataset.json").read_bytes())
@@ -384,6 +384,6 @@ def test_victim_and_blocked(corpus):
     assert [c.id for c in inc["certpl:c-5"].captures] == ["certpl:c-5:c1", "certpl:c-5:victim"]
 
     assert summary["victim_profile"]["refetched"] == 4 and summary["victim_profile"]["flipped_to_live"] == 2
-    # The 403 tvn24 home page is kept, but not as a must-not-link distractor.
+    # The 403 home page is kept, but not as a must-not-link distractor.
     assert rows["fetch:cap-403"]["corpus_kind"] == "must_not_link_blocked"
     assert summary["by_corpus_kind"]["must_not_link"] == 1
