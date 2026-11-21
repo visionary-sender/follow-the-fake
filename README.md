@@ -64,8 +64,8 @@ docker run --rm ftf --help
 docker run --rm ftf --version
 ```
 
-For the team, on the workbench VM (Docker is installed there; the sync copies the worktree to
-`/work/<slug>/src`, where `<slug>` is the worktree directory name, e.g. `hack-3-container`):
+For the team, on the workbench VM. The sync copies the worktree to `/work/<slug>/src`, where
+`<slug>` is the worktree directory name (replace it, e.g. `hack-3-container`):
 
 ```bash
 scripts/vm.sh run -- true      # sync the worktree to the VM
@@ -74,7 +74,7 @@ gcloud compute ssh ftf-workbench --project follow-the-fake --zone europe-central
   --command 'cd /work/<slug>/src && sudo docker build -t ftf:dev . && sudo docker run --rm ftf:dev --help'
 ```
 
-Install Docker on the VM once: `sudo apt-get install -y docker.io`.
+Docker on the VM is a one-time setup: `sudo apt-get install -y docker.io`.
 Remove dangling images afterwards with `sudo docker image prune -f`.
 
 ## Methods
