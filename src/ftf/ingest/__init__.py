@@ -63,7 +63,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ftf.contract import Dataset
-from ftf.ingest import adapters
+from ftf.ingest import adapters, manifests
 from ftf.ingest.build import CaptureRecord, build
 from ftf.ingest.model import RawIncident
 
@@ -140,6 +140,7 @@ def run(
     raw: list[RawIncident] = []
     for item in items:
         raw.extend(adapters.load(item, fetch=fetch, fetch_dir=fetch_dir, fetcher=fetcher))
+    raw = manifests.merge_fetches(raw)
     if root is None:
         root = default_root(items, [fetch_dir] if fetch and fetch_dir is not None and any(isinstance(i, str) and adapters.is_url(i) for i in items) else [])
     dataset, records = build(raw, Path(root), name)

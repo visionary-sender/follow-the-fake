@@ -217,6 +217,28 @@ def test_fetches_sharing_an_incident_id_merge_and_keep_capture_ids(tmp_path):
     assert a.name in merged.captures[0].artefacts[0].path
 
 
+def test_refetch_in_another_run_folder_merges(tmp_path):
+    first = "20261121T220000Z-psi.example.test-00000001"
+    fetcher_capture(tmp_path / "fetch-1", first, "https://psi.example.test/")
+    fetcher_capture(tmp_path / "fetch-1", "20261121T220001Z-omega.example.test-00000002", "https://omega.example.test/")
+    victim = fetcher_capture(tmp_path / "fetch-victim", "20261121T230000Z-psi.example.test-00000003", "https://psi.example.test/",
+                             profile="victim-pl-mobile", started="2026-11-21T23:00:00Z")
+    write(victim / "page.html", "<p>the cloaked offer</p>")
+    ds = load_inputs([tmp_path / "fetch-victim", tmp_path / "fetch-1"])
+    assert [i.id for i in ds.incidents] == [f"fetch:{first}", "fetch:20261121T220001Z-omega.example.test-00000002"]
+    assert [c.id for c in ds.incidents[0].captures] == [f"fetch:{first}:c1", f"fetch:{first}:c2"]
+    assert victim.name in ds.incidents[0].captures[1].artefacts[0].path
+
+
+def test_legacy_scanner_output_is_refused(tmp_path):
+    out = tmp_path / "scanner"
+    write(out / "queue.jsonl", "{}\n")
+    write(out / "runs" / STAMP / "incidents-meta.json", "[]")
+    write(out / "creatives" / ("ab" * 32 + ".jpg"), b"\xff\xd8")
+    with pytest.raises(ValueError, match="pre-v1 scanner output"):
+        load_inputs([out])
+
+
 def test_copied_fetch_folder_does_not_break_ingest(tmp_path):
     out = tmp_path / "captures"
     a = fetcher_capture(out, "20261121T220000Z-chi.example.test-00000001", "https://chi.example.test/")

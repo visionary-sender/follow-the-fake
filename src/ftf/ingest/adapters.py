@@ -283,6 +283,9 @@ def load(item: str | Path, *, fetch: bool = False, fetch_dir: Path | None = None
             return [manifests.load_folder(path)]
         if manifests.is_run(path):
             return manifests.load_run(path)
+        if manifests.is_legacy_scanner_root(path):
+            raise ValueError(f"{path}: pre-v1 scanner output (runs/*/incidents-*.json, no capture folders) is not read; "
+                             "expected the v1 layout (HACK-20): <out>/<stamp>-<source>-<id>/{capture.json,ad.json,creative-<n>.<ext>}")
         subs = [p for p in _listdir(path) if p.is_dir()]
         if subs and all(organiser_source(p) for p in subs):  # the raw data root itself
             return [inc for p in subs for inc in organiser_root(p, organiser_source(p))]

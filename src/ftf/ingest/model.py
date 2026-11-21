@@ -68,3 +68,7 @@ class RawIncident:
     ref: str | None = None  # organiser case folder; None for ad-hoc inputs (id from content)
     fixed_id: str | None = None
     notes: list[str] = field(default_factory=list)
+    # fetcher captures only (see ftf.ingest.manifests.merge_fetches)
+    fetch_url: str | None = None  # requested URL
+    fetch_rank: tuple = ()  # default profile first, then start time, then folder name
+    origin: str | None = None  # resolved capture folder

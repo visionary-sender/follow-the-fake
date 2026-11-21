@@ -21,12 +21,14 @@ Every other capture also gets its folder's ``capture.json`` as an ``other`` arte
 (``<capture id>:manifest``), so extractors can read collector facts such as the fetch profile.
 
 Run folders: every child folder holding a ``capture.json`` is read; ``queue.jsonl``, ``state/``,
-``runs/`` and ``dataset.json`` are ignored. Within one run,
+``runs/`` and ``dataset.json`` are ignored. A pre-v1 scanner output (``runs/<id>/incidents-*.json``
+without capture folders) is refused. Then:
 
-- fetches of the same requested URL (the default visit and an opt-in victim-profile re-fetch of a
-  cloaked page) form one incident under the first fetch's id (default profile first, then start
-  time), with captures ``…:c1``, ``…:c2``;
-- a stable scanner id seen in several scan folders keeps the newest folder.
+- across all inputs of one ingest call, fetches of the same requested URL (the default visit and
+  an opt-in victim-profile re-fetch of a cloaked page, often in another run folder) form one
+  incident under the first fetch's id (default profile first, then start time), with captures
+  ``…:c1``, ``…:c2`` (:func:`merge_fetches`);
+- within one run, a stable scanner id seen in several scan folders keeps the newest folder.
 
 Manifests are untrusted: an artefact path that is absolute, contains ``..`` or a backslash, or
 resolves outside its capture folder (symlinks included) is ignored. Nothing is executed or rendered.
@@ -240,7 +242,12 @@ def to_raw(m: Manifest) -> RawIncident:
             stage = Stage.ad
         captures.append(RawCapture(key=c.id.rsplit(":", 1)[-1], artefacts=arts, stage=stage, observed=c.observed,
                                    captured_on=c.captured_on, missing=missing, notes=notes, fixed_id=c.id))
-    return RawIncident(source=inc.source, source_ref=inc.source_ref, captures=captures, fixed_id=inc.id)
+    raw = RawIncident(source=inc.source, source_ref=inc.source_ref, captures=captures, fixed_id=inc.id)
+    if m.tool == "fetch":
+        raw.fetch_url = m.requested_url
+        raw.fetch_rank = (m.profile != DEFAULT_PROFILE, m.started, folder.name)
+        raw.origin = str(folder.resolve())
+    return raw
 
 
 def _unlisted_scan_files(folder: Path, capture_id: str, used: set[Path]) -> list[RawArtefact]:
@@ -278,33 +285,54 @@ def is_run(path: Path) -> bool:
     return path.is_dir() and not path.is_symlink() and bool(capture_folders(path))
 
 
-def _group_fetches(manifests: list[Manifest]) -> list[list[Manifest]]:
-    """Fetches sharing a requested URL or an incident id, in first-seen order."""
-    groups: list[list[Manifest]] = []
+def merge_fetches(raws: list[RawIncident]) -> list[RawIncident]:
+    """Fetches of one requested URL (or sharing an incident id) across one ingest call become one incident.
+
+    The fetcher writes a victim-profile re-fetch as its own incident, often into another run folder;
+    here it joins the first fetch's incident (default profile first, then start time) as ``…:c2``.
+    Other incidents keep their place; a folder given twice is read once.
+    """
+    groups: list[list[RawIncident]] = []
+    slots: list[int | RawIncident] = []
     by_key: dict[tuple[str, str], int] = {}
-    for m in manifests:
-        keys = [("id", m.incident.id)] + ([("url", m.requested_url)] if m.requested_url else [])
+    seen: set[str] = set()
+    for r in raws:
+        if not r.fetch_rank:
+            slots.append(r)
+            continue
+        if r.origin is not None:
+            if r.origin in seen:
+                continue
+            seen.add(r.origin)
+        keys = [("id", r.fixed_id or "")] + ([("url", r.fetch_url)] if r.fetch_url else [])
         hits = sorted({by_key[k] for k in keys if k in by_key})
         if not hits:
-            groups.append([m])
+            groups.append([r])
             idx = len(groups) - 1
+            slots.append(idx)
         else:
             idx = hits[0]
-            groups[idx].append(m)
-            for other in hits[1:]:  # m bridges two groups
+            groups[idx].append(r)
+            for other in hits[1:]:  # r bridges two groups
                 groups[idx].extend(groups[other])
+                groups[other] = []
                 for k, v in by_key.items():
                     if v == other:
                         by_key[k] = idx
-                groups[other] = []
         for k in keys:
             by_key[k] = idx
-    return [g for g in groups if g]
+    out: list[RawIncident] = []
+    for s in slots:
+        if isinstance(s, int):
+            if groups[s]:
+                out.append(_merge(groups[s]))
+        else:
+            out.append(s)
+    return out
 
 
-def _merge_fetches(group: list[Manifest]) -> RawIncident:
-    group = sorted(group, key=lambda m: (m.profile != DEFAULT_PROFILE, m.started, m.folder.name))
-    raws = [to_raw(m) for m in group]
+def _merge(group: list[RawIncident]) -> RawIncident:
+    raws = sorted(group, key=lambda r: r.fetch_rank)
     if len(raws) == 1:
         return raws[0]
     first = raws[0]
@@ -319,7 +347,8 @@ def _merge_fetches(group: list[Manifest]) -> RawIncident:
             c.key, c.fixed_id = f"c{n}", new_id
             for a in c.artefacts:  # artefact ids follow their capture, so copied folders cannot collide
                 a.fixed_id = f"{new_id}:{a.fixed_id.rsplit(':', 1)[-1]}" if a.fixed_id else None
-    return RawIncident(source=first.source, source_ref=first.source_ref, captures=caps, fixed_id=first.fixed_id)
+    return RawIncident(source=first.source, source_ref=first.source_ref, captures=caps, fixed_id=first.fixed_id,
+                       fetch_url=first.fetch_url, fetch_rank=first.fetch_rank, origin=first.origin)
 
 
 def _newest_scans(manifests: list[Manifest]) -> list[Manifest]:
@@ -333,6 +362,12 @@ def _newest_scans(manifests: list[Manifest]) -> list[Manifest]:
     return [m for m in manifests if id(m) in keep]
 
 
+def is_legacy_scanner_root(path: Path) -> bool:
+    """A pre-v1 scanner output (``runs/<id>/incidents-<source>.json``, hash-named creatives, no capture folders)."""
+    runs = path / "runs"
+    return (path / "queue.jsonl").is_file() and runs.is_dir() and any(runs.glob("*/incidents-*.json"))
+
+
 def load_run(run: Path) -> list[RawIncident]:
     """Every capture folder in a fetcher or scanner run folder (bad manifests are skipped with a warning)."""
     fetches: list[Manifest] = []
@@ -344,6 +379,4 @@ def load_run(run: Path) -> list[RawIncident]:
             log.warning("ftf ingest: skipping %s", e)
             continue
         (fetches if m.tool == "fetch" else scans).append(m)
-    out = [_merge_fetches(g) for g in _group_fetches(fetches)]
-    out.extend(to_raw(m) for m in _newest_scans(scans))
-    return out
+    return [to_raw(m) for m in fetches] + [to_raw(m) for m in _newest_scans(scans)]
