@@ -204,6 +204,16 @@ def test_no_geo_without_ip_context(tmp_path: Path):
     assert "analyst_geo" not in kinds
 
 
+def test_percent_encoded_local_path_in_har(tmp_path: Path):
+    url = "https://tags.example.test/collect?v=1&url=file%3A%2F%2F%2FC%3A%2FUsers%2Fanalyst2%2FDownloads%2Fp.html&tid=G-TEST"
+    (tmp_path / "a.har").write_bytes(har([entry(url)]))
+    cap = Capture(id="c4:s1", stage="lander", artefacts=[Artefact(id="c4:a", type="har", path="a.har")])
+    inc = Incident(id="c4", source="t", captures=[cap])
+    kinds = by_kind(collector.extract(inc, cap, tmp_path))
+    assert {i.value for i in kinds["os_username"]} == {collector.pseudonymise("os_username", "analyst2")}
+    assert {i.value for i in kinds["local_path"]} == {collector.pseudonymise("local_path", "file:///C:/Users/analyst2/Downloads/p.html")}
+
+
 def test_garbage_files_do_not_crash(tmp_path: Path):
     (tmp_path / "bad.har").write_bytes(b"{not json")
     (tmp_path / "bad.html").write_bytes(b"\xff\xfe window.aio = JSON.parse('{broken'); ")

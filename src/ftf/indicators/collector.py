@@ -69,8 +69,8 @@ _AIO = re.compile(r"window\.aio\s*=\s*JSON\.parse\('(.*?)'\);", re.S)
 _HEX_ID = re.compile(r"^[0-9a-fA-F]{16,64}$")
 _FBP = re.compile(r"^fb\.\d\.\d{10,}\.\d+$")
 _FBC = re.compile(r"^fb\.\d\.\d{10,}\.(.+)$")
-_FILE_URI = re.compile(r"file:///?(?:[A-Za-z](?::|%3A|\|)[^\s\"'<>)]*|/[^\s\"'<>)]+)", re.I)
-_WIN_PATH = re.compile(r"\b[A-Za-z]:(?:\\\\|\\|/)+(?:Users|Documents and Settings)(?:\\\\|\\|/)+[^\\/\s\"'<>]+[^\s\"'<>]*", re.I)
+_FILE_URI = re.compile(r"file:///?(?:[A-Za-z](?::|%3A|\|)[^\s\"'<>)&#]*|/[^\s\"'<>)&#]+)", re.I)
+_WIN_PATH = re.compile(r"\b[A-Za-z]:(?:\\\\|\\|/)+(?:Users|Documents and Settings)(?:\\\\|\\|/)+[^\\/\s\"'<>]+[^\s\"'<>&#]*", re.I)
 _USER_IN_PATH = re.compile(r"(?:^|[\\/:])(?:Users|Documents and Settings|home)(?:\\\\|\\|/|%5C|%2F)+([^\\/\s\"'<>%]+)", re.I)
 _GENERIC_USERS = {"public", "default", "default user", "all users", "shared"}
 _SHOT_NAME = re.compile(
@@ -294,13 +294,24 @@ class _Emitter:
             self.fields({k.lower(): v for k, v in parse_qsl(q, keep_blank_values=False)}, observed, art, locator)
 
     def paths(self, text: str, observed: Observed, art: Artefact, locator: str) -> None:
-        for rx in (_FILE_URI, _WIN_PATH):
-            for m in rx.finditer(text):
-                path = m.group(0)
-                self.add("local_path", path, observed, art, locator)
-                u = _USER_IN_PATH.search(unquote(path).replace("\\\\", "\\"))
-                if u and u.group(1).lower() not in _GENERIC_USERS:
-                    self.add("os_username", u.group(1), observed, art, locator)
+        """Local paths, also inside percent-encoded values (e.g. a tracker's `url=` parameter)."""
+        texts = [text]
+        while "%" in texts[-1] and len(texts) < 3:
+            decoded = unquote(texts[-1])
+            if decoded == texts[-1]:
+                break
+            texts.append(decoded)
+        for t in texts:
+            uris = [m.span() for m in _FILE_URI.finditer(t)]
+            for rx in (_FILE_URI, _WIN_PATH):
+                for m in rx.finditer(t):
+                    if rx is _WIN_PATH and any(a <= m.start() < b for a, b in uris):
+                        continue  # the same path inside a file:// URI, already emitted
+                    path = unquote(m.group(0))
+                    self.add("local_path", path, observed, art, locator)
+                    u = _USER_IN_PATH.search(path.replace("\\\\", "\\"))
+                    if u and u.group(1).lower() not in _GENERIC_USERS:
+                        self.add("os_username", u.group(1), observed, art, locator)
 
 
 # ---- per artefact type ------------------------------------------------------------------------
@@ -397,10 +408,15 @@ def _from_har(em: _Emitter, art: Artefact, data: bytes) -> None:
         return
     live = Observed.live
     first: str | None = None
-    for page in log.get("pages") or []:
-        t = page.get("startedDateTime") if isinstance(page, dict) else None
+    for n, page in enumerate(log.get("pages") or []):
+        if not isinstance(page, dict):
+            continue
+        t = page.get("startedDateTime")
         if isinstance(t, str) and (first is None or t < first):
             first = t
+        title = page.get("title")
+        if isinstance(title, str):
+            em.paths(title, live, art, f"pages[{n}].title")
     for i, entry in enumerate(log.get("entries") or []):
         if not isinstance(entry, dict):
             continue
@@ -432,6 +448,7 @@ def _from_har(em: _Emitter, art: Artefact, data: bytes) -> None:
         body = _har_body(entry, "request")
         if body:
             _payload(em, body, live, art, f"{loc}.request.postData")
+            em.paths(body, live, art, f"{loc}.request.postData")
         rbody = _har_body(entry, "response")
         if rbody:
             mime = str(((entry.get("response") or {}).get("content") or {}).get("mimeType", "")).lower()
