@@ -24,11 +24,12 @@ class QueueRow:
     key: str
     source: str
     incident_id: str
-    incidents_file: str
+    incidents_file: str | None  # pre-v1 scanner: runs/<run>/incidents-<source>.json
     run_id: str
     keyword: str | None
     landing_url: str | None
     landing_domain: str | None
+    capture_dir: str | None = None  # v1 scanner: <capture_dir>/capture.json holds the incident
 
     @classmethod
     def from_json(cls, row: dict) -> "QueueRow":
@@ -36,11 +37,12 @@ class QueueRow:
             key=row["key"],
             source=row["source"],
             incident_id=row["incident_id"],
-            incidents_file=row["incidents_file"],
+            incidents_file=row.get("incidents_file"),
             run_id=row["run_id"],
             keyword=row.get("keyword") or None,
             landing_url=row.get("landing_url") or None,
             landing_domain=row.get("landing_domain") or None,
+            capture_dir=row.get("capture_dir") or None,
         )
 
 

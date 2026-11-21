@@ -18,7 +18,7 @@ import re
 from collections import defaultdict
 from pathlib import Path
 
-from ftf.corpus.build import BARE_DOMAIN, FETCHED_LANDING, MUST_NOT_LINK, MUST_NOT_LINK_BLOCKED
+from ftf.corpus.build import BARE_DOMAIN, FETCHED_LANDING, MUST_NOT_LINK, MUST_NOT_LINK_BLOCKED, VICTIM_PROFILE
 
 _FETCH_ID = re.compile(r"^fetch:([^:]+)")
 
@@ -38,7 +38,7 @@ def tag_ingested(dataset_path: Path, manifest_path: Path, out_path: Path) -> dic
         if row.get("fetch_capture_id"):
             by_fetch[row["fetch_capture_id"]].append((row, "default"))
         if row.get("victim_capture_id"):
-            by_fetch[row["victim_capture_id"]].append((row, "victim-pl-mobile"))
+            by_fetch[row["victim_capture_id"]].append((row, VICTIM_PROFILE))
 
     ds = json.loads(Path(dataset_path).read_text(encoding="utf-8"))
     counts: dict[str, int] = defaultdict(int)
@@ -47,8 +47,9 @@ def tag_ingested(dataset_path: Path, manifest_path: Path, out_path: Path) -> dic
         for inc in ds.get("incidents", []):
             folders = {f for f in (fetch_id(inc["id"]), *(fetch_id(c["id"]) for c in inc["captures"])) if f}
             hits = [(r, prof, f) for f in sorted(folders) for r, prof in by_fetch.get(f, [])]
-            if not hits:
+            if not hits:  # still written, so nothing downstream mistakes it for a tagged item
                 untagged += 1
+                fh.write(json.dumps({"incident_id": inc["id"], "corpus_kind": None, "fetch_folders": sorted(folders)}) + "\n")
                 continue
             kinds = {r["corpus_kind"] for r, _, _ in hits}
             live = any(

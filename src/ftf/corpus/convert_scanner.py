@@ -145,7 +145,12 @@ def convert(scanner_dir: Path, out_dir: Path, runs: list[str] | None = None) -> 
                 continue
             folder = rec.folder(run_id)
             arts: list[Artefact] = []
-            olds = [a for c in old.captures for a in c.artefacts if a.type is ArtefactType.ad_screenshot and a.path]
+            olds = [
+                a
+                for c in old.captures
+                for a in c.artefacts
+                if a.type in (ArtefactType.ad_screenshot, ArtefactType.asset) and a.path
+            ]
             for n, a in enumerate(olds):
                 src = scanner_dir / a.path
                 if not src.is_file():

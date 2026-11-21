@@ -24,6 +24,8 @@ from ftf.corpus.targets import Target, build_targets, read_picked, read_queue, s
 
 
 def _targets(args: argparse.Namespace) -> int:
+    if args.parts < 1 or args.limit < 0:
+        raise SystemExit("corpus targets: --parts must be >= 1 and --limit >= 0")
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     targets: list[Target] = []

@@ -44,7 +44,7 @@ MUST_NOT_LINK = "must_not_link"
 KINDS = (AD_RECORD, FETCHED_LANDING, BARE_DOMAIN, MUST_NOT_LINK, "must_not_link_blocked")  # see MUST_NOT_LINK_BLOCKED
 
 # Sources with an ad behind the queue row; everything else (CERT Polska) is a bare domain list.
-AD_SOURCES = {"meta", "google_atc"}
+AD_SOURCES = {"meta", "google_atc", "google_bq"}
 PICKED_SOURCE = "hand_picked_must_not_link"
 # A hand-picked real page the fetcher could not load (e.g. HTTP 403): kept as honest data, but
 # not a must-not-link distractor, since its capture shows an error page, not the outlet.
@@ -65,12 +65,10 @@ def wayback_original(url: str) -> tuple[str, str] | None:
 
 
 def sanitise(part: str) -> str:
-    """Id part as in `ftf.ingest.ids.sanitise` (HACK-9): NFC, ASCII fold, [A-Za-z0-9_.-] only."""
-    s = unicodedata.normalize("NFKD", unicodedata.normalize("NFC", str(part)).replace("ł", "l").replace("Ł", "L"))
-    s = s.encode("ascii", "ignore").decode("ascii")
-    s = re.sub(r"[^A-Za-z0-9_.-]+", "-", s)
-    s = re.sub(r"-{2,}", "-", s).strip("-")
-    return s or "x"
+    """Id part, exactly as `ftf ingest` builds it (HACK-9 `ftf.ingest.ids.sanitise`)."""
+    from ftf.ingest.ids import sanitise as ingest_sanitise
+
+    return ingest_sanitise(part) or "x"
 
 
 @dataclass
@@ -193,6 +191,11 @@ def _rehome_scanner(inc: m.Incident, scanner: str) -> m.Incident:
     return inc.model_copy(update={"captures": caps})
 
 
+def _is_creative(a: m.Artefact) -> bool:
+    name = (a.path or "").rsplit("/", 1)[-1]
+    return a.type is m.ArtefactType.ad_screenshot or (a.type is m.ArtefactType.asset and name.startswith("creative-"))
+
+
 def _source_label(row: QueueRow) -> str:
     return f"{row.source}:{row.keyword}" if row.keyword else row.source
 
@@ -213,8 +216,8 @@ def _bytes(root: Path, inc: m.Incident) -> int:
 def _ad_incident(
     base: m.Incident, row: QueueRow, fc: FetchedCapture | None, victim: FetchedCapture | None, label: str
 ) -> m.Incident:
-    ref = sanitise(base.source_ref or row.incident_id)
-    iid = f"adlib:{ref}"
+    # v1 scanner incidents already carry the cross-project id; pre-v1 ones get it from the ad id.
+    iid = base.id if base.id.startswith("adlib:") else f"adlib:{sanitise(base.source_ref or row.incident_id)}"
     ad_caps = [c for c in base.captures if c.stage is m.Stage.ad] or base.captures[:1]
     names = {c.id: f"{iid}:ad" if i == 0 else f"{iid}:ad{i}" for i, c in enumerate(ad_caps)}
     caps, inds = _rekey(base, iid, names)
@@ -310,7 +313,10 @@ def build_corpus(
     seen_ids: set[str] = set()
 
     def add(inc: m.Incident, row: dict) -> bool:
-        if inc.id in seen_ids:  # e.g. one CERT domain listed twice, one fetch shared by two rows
+        if inc.id in seen_ids:
+            # One incident for several corpus items (a CERT domain listed twice, two entries whose
+            # landing URL is the same fetch): keep the item in the manifest, not a second incident.
+            rows_out.append({"incident_id": inc.id, **row, "shares_incident": True})
             return False
         seen_ids.add(inc.id)
         incidents.append(inc)
@@ -322,10 +328,18 @@ def build_corpus(
         victims = read_fetch_dirs(root, victim_dirs or [])
         files: dict[str, dict[str, m.Incident]] = {}
         for row in read_queue(root / scanner / "queue.jsonl", runs):
-            if row.incidents_file not in files:
-                ds = m.Dataset.from_json((root / scanner / row.incidents_file).read_bytes())
-                files[row.incidents_file] = {i.id: i for i in ds.incidents}
-            base = files[row.incidents_file].get(row.incident_id)
+            if row.capture_dir:  # v1 scanner layout: one folder per item
+                cj = root / scanner / row.capture_dir / "capture.json"
+                if not cj.is_file():
+                    continue
+                base = m.Incident.model_validate(json.loads(cj.read_text(encoding="utf-8"))["incident"])
+            elif row.incidents_file:
+                if row.incidents_file not in files:
+                    ds = m.Dataset.from_json((root / scanner / row.incidents_file).read_bytes())
+                    files[row.incidents_file] = {i.id: i for i in ds.incidents}
+                base = files[row.incidents_file].get(row.incident_id)
+            else:
+                base = None
             if base is None:
                 continue
             base = _rehome_scanner(base, scanner)
@@ -363,9 +377,7 @@ def build_corpus(
                     "victim_category": vc.category if vc else None,
                     "victim_final_url": vc.manifest.get("final_url") if vc else None,
                     "victim_flipped_to_live": bool(vc and vc.is_page and not (fc and fc.is_page)),
-                    "creatives": sum(
-                        1 for c in inc.captures for a in c.artefacts if a.type is m.ArtefactType.ad_screenshot
-                    ),
+                    "creatives": sum(1 for c in inc.captures for a in c.artefacts if _is_creative(a)),
                 },
             ):
                 continue
@@ -431,7 +443,7 @@ def build_corpus(
     by_id = {i.id: i for i in ds.incidents}
     for r in rows_out:
         inc = by_id[r["incident_id"]]
-        r["bytes"] = _bytes(root, inc)
+        r["bytes"] = 0 if r.get("shares_incident") else _bytes(root, inc)
         r["lander_duplicate_of"] = next((c.duplicate_of for c in inc.captures if c.duplicate_of), None)
     (root / "dataset.json").write_text(ds.to_json(), encoding="utf-8")
     with open(root / "manifest.jsonl", "w", encoding="utf-8") as fh:

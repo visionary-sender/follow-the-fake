@@ -60,7 +60,10 @@ def article_links(html: str, base_url: str, limit: int = 10) -> list[str]:
         parts = urlsplit(url)
         if parts.scheme != "https" or not parts.hostname or site_of(parts.hostname) != site:
             continue
-        url = parts._replace(query="").geturl()
+        query = "&".join(
+            q for q in parts.query.split("&") if q and not q.lower().startswith(("utm", "fbclid=", "gclid="))
+        )
+        url = parts._replace(query=query).geturl()
         path = parts.path
         if (any(p.search(path) for p in _SHAPES) or _GENERIC.search(path)) and url not in out:
             out.append(url)

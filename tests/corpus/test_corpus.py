@@ -433,7 +433,7 @@ def test_convert_scanner_v1(tmp_path):
             "captures": [{"id": "meta-111/ad", "stage": "ad", "captured_on": "2026-11-21", "artefacts": [
                 {"id": "meta-111/ad/library", "type": "ad_library"},
                 {"id": "meta-111/ad/creative/0", "type": "ad_screenshot", "path": "creatives/abc.jpg", "size": 20},
-                {"id": "meta-111/ad/creative/1", "type": "ad_screenshot", "path": "creatives/missing.jpg"}]}],
+                {"id": "meta-111/ad/creative/1", "type": "asset", "path": "creatives/missing.jpg"}]}],
             "indicators": [ind("meta-111", "meta_ad_id", "creative", "capture", "111", "ad_id"),
                            ind("meta-111", "advertiser_page_id", "distribution_account", "operator", "999", "page_id"),
                            ind("meta-111", "ad_text", "creative", "campaign", "Invented text", "body"),
@@ -467,3 +467,37 @@ def test_convert_scanner_v1(tmp_path):
     cad = json.loads((cfolder / "ad.json").read_text())
     assert cinc.id.startswith("certpl:") and cinc.captures[0].id == f"{cinc.id}:listing"
     assert cad["register_id"] == "7" and cad["landing_domain"] == "shop.bad-domain.example"
+
+
+def test_v1_queue_and_shared_rows(tmp_path):
+    root = tmp_path / "b"
+    sc = root / "scanner"
+    inc = _scanner_incident("adlib:222", "google_bq", None)
+    inc["captures"][0]["id"] = "adlib:222:ad"
+    inc["captures"][0]["artefacts"] = [{"id": "adlib:222:ad:library", "type": "ad_library"},
+                                       {"id": "adlib:222:ad:creative-0", "type": "asset", "path": "f1/creative-0.jpg", "size": 5}]
+    inc["indicators"][0].update(capture_id="adlib:222:ad", provenance={"artefact_id": "adlib:222:ad:library"})
+    (sc / "f1").mkdir(parents=True)
+    (sc / "f1" / "capture.json").write_text(json.dumps({"incident": inc}))
+    rows = [
+        {**_row("google_bq:222", "google_bq", "adlib:222", domain="ad.example"), "incidents_file": None, "capture_dir": "f1"},
+        _row("certpl:1", "certpl", "c-1", domain="same.example"),
+        _row("certpl:2", "certpl", "c-2", domain="same.example"),
+    ]
+    (sc / "queue.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    _write_dataset(sc / f"runs/{RUN}/incidents-certpl.json", [_scanner_incident(f"c-{i}", "certpl") for i in (1, 2)])
+    _capture(root / "fetch-1", "cap-same", "https://same.example/", "live", "live", "2026-11-21T21:00:00Z")
+    summary = build_corpus(root, "scanner", None, ["fetch-1"], None, [], "t")
+    man = [json.loads(line) for line in (root / "manifest.jsonl").read_text().splitlines()]
+    ad = [r for r in man if r["source"] == "google_bq"][0]
+    assert ad["incident_id"] == "adlib:222" and ad["corpus_kind"] == "ad_record" and ad["creatives"] == 1
+    same = [r for r in man if r["source"] == "certpl"]
+    assert [r["source_ref"] for r in same] == ["c-1", "c-2"] and same[1]["shares_incident"] and same[1]["bytes"] == 0
+    assert summary["incidents"] == 3
+
+
+def test_article_links_keep_non_tracking_query():
+    from ftf.corpus.articles import article_links
+
+    html = '<a href="/news/a-b-c-1234?id=7&utm_source=x">a</a>'
+    assert article_links(html, "https://site.example/", 5) == ["https://site.example/news/a-b-c-1234?id=7"]
