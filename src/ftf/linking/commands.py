@@ -20,6 +20,7 @@ from ftf.linking.grouping import ALL_RELATIONS, link_dataset
 from ftf.linking.learn_commands import add_weights_argument, context_from_args, load_weights_arg
 from ftf.linking.ledger import ScoringContext, level_of, score_pair, threshold, verdict
 from ftf.linking.types import PairScore
+from ftf.linking.weights import HAND_TABLE, warn_unknown_kinds
 
 
 def register_score(subparsers: argparse._SubParsersAction) -> None:
@@ -44,6 +45,7 @@ def run_score(args: argparse.Namespace) -> int:
     try:
         ds = Dataset.from_json(args.dataset.read_bytes())
         ctx = context_from_args(ds, args)
+        warn_unknown_kinds(ds, ctx.weights, "score")
         score = score_pair(ctx, args.a, args.b, Relation(args.relation))
     except (OSError, ValidationError, KeyError, ValueError) as exc:
         msg = exc.args[0] if isinstance(exc, KeyError) and exc.args else exc
@@ -137,7 +139,9 @@ def run_link(args: argparse.Namespace) -> int:
         return factory
     ds = _load(args.input)
     relations = list(dict.fromkeys(Relation(r) for r in args.relation)) if args.relation else list(ALL_RELATIONS)
-    out = link_dataset(ds, relations, backend=factory(ds) if factory else None)
+    backend = factory(ds) if factory else None
+    warn_unknown_kinds(ds, backend.context.weights if backend else HAND_TABLE, "link")
+    out = link_dataset(ds, relations, backend=backend)
     _write(out, args.out)
     n_caps = sum(len(i.captures) for i in out.incidents)
     print(f"{len(out.incidents)} incidents, {n_caps} captures -> {args.out}")

@@ -419,3 +419,15 @@ def test_multi_valued_kind_is_capped_at_log2_operators_and_keeps_the_copy_prior(
     info = rep["kinds"]["asset_sha256"]
     assert info["V"] > 100 and info["u_ref"] >= 1 / info["N"]
     assert info["bits"]["campaign"] <= math.log2(info["N"]) * HAND_TABLE.scale("asset_sha256", L.kit, Relation.campaign) + 1e-6
+
+
+def test_score_warns_about_kinds_without_a_weight_entry(tmp_path, capsys):
+    ds = Dataset(name="synthetic", incidents=[
+        incident("u1", [ind(L.kit, "made_up_kind", "v-1"), ind(L.tenant, "aio_cdn_tenant", "tenant-1")]),
+        incident("u2", [ind(L.kit, "made_up_kind", "v-1"), ind(L.tenant, "aio_cdn_tenant", "tenant-1")]),
+    ])
+    path = tmp_path / "ds.json"
+    path.write_text(ds.to_json())
+    assert main(["score", str(path), "u1/lander", "u2/lander"]) == 0
+    err = capsys.readouterr().err
+    assert "made_up_kind (2)" in err and "aio_cdn_tenant" not in err

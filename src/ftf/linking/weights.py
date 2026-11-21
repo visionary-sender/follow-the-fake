@@ -226,3 +226,23 @@ IGNORED_VALUES = frozenset({"unknown"})
 
 # Layers whose unknown kinds are treated as operator-private ids (fallback in `WeightTable.weight`).
 PRIVATE_LAYERS = frozenset({Layer.tenant, Layer.owner, Layer.tracker_instance, Layer.tracking_account})
+
+
+def unknown_kinds(ds, table: WeightTable = HAND_TABLE) -> dict[str, int]:
+    """Linkable kinds in `ds` without an explicit entry in `table` (they use the layer fallback), with counts."""
+    from collections import Counter
+
+    from ftf.contract.models import linkable
+
+    counts = Counter(i.kind for inc in ds.incidents for i in inc.indicators if linkable(i) and i.kind not in table.kinds)
+    return dict(sorted(counts.items()))
+
+
+def warn_unknown_kinds(ds, table: WeightTable, prog: str) -> None:
+    """One stderr line naming the kinds scored with the per-layer fallback (bounded by the within-layer max)."""
+    import sys
+
+    found = unknown_kinds(ds, table)
+    if found:
+        listed = ", ".join(f"{k} ({n})" for k, n in found.items())
+        print(f"ftf {prog}: warning: kinds without a weight entry use the layer fallback: {listed}", file=sys.stderr)
