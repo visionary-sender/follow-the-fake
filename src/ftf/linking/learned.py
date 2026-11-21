@@ -22,7 +22,8 @@ relation scale where that is below 1 (a copy prior for kits and forms that same-
 measure). u is the frequency of a value carried by one operator, over the larger of the background
 corpus and the sample, never below 1/N; unique-by-construction ids use the type prior 1/N. Relations
 without labels keep the prior's absolute bits. Kinds without positive data, without a usable u,
-or with prior weight 0 (dates, flags) keep the prior entry.
+or with prior weight 0 (dates, flags) keep the prior entry. Learned bits never exceed the prior by
+more than `MAX_RAISE` bits.
 """
 
 from __future__ import annotations
@@ -39,6 +40,9 @@ from ftf.linking.weights import HAND_TABLE, PRIVATE_LAYERS, KindWeight, WeightTa
 
 KAPPA = 4.0  # Beta prior strength (pseudo-observations) toward the prior / layer estimate
 MAX_NEG_PAIRS = 20000  # negatives only feed report counts
+# Learned bits may lower a prior freely but raise it by at most this much: ~20 positive pairs and a corpus of
+# tens of operators cannot measure how often a value is copied with a kit (07 §2.2 items 4 and 10, ±2 bits).
+MAX_RAISE = 2.0
 S_CLIP = (0.02, 0.98)
 LABELS: dict[Relation, str] = {Relation.campaign: "aio_campaign", Relation.operator: "aio_owner"}
 NEGATIVE_LABEL = "aio_owner"
@@ -214,7 +218,10 @@ def learn_weights(
                     continue
                 # a hand relation scale below 1 is a copy prior (kits and forms are sold and copied across
                 # operators) that same-operator pairs cannot measure: it stays a multiplier
-                absolute[relation] = bits_from_s(ks[kind], u["u"]) * min(prior.scale(kind, layer, relation), 1.0)
+                learned = bits_from_s(ks[kind], u["u"]) * min(prior.scale(kind, layer, relation), 1.0)
+                if learned > absolute[relation] + MAX_RAISE:
+                    info.setdefault("raise_capped", []).append(relation.value)
+                absolute[relation] = min(learned, absolute[relation] + MAX_RAISE)
                 learned_rel.append(relation.value)
             if not learned_rel:
                 info["fallback"] = "no positive pairs"

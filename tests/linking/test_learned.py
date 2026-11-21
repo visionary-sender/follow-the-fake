@@ -519,3 +519,16 @@ def test_shared_domain_or_common_redirector_alone_does_not_link():
     s = score_pair(ctx, "r1/lander", "r2/lander")
     assert verdict(s, ctx) == "no link" and not s.live_private
     assert not any(r.status is EvidenceStatus.conflict for r in s.rows)  # differing hosts carry nothing
+
+
+def test_learned_bits_raise_a_prior_by_at_most_max_raise():
+    from ftf.linking.learned import MAX_RAISE
+
+    table, rep = learn_weights(learning_ds(extra_pairs=20))
+    for kind, info in rep["kinds"].items():
+        entry = HAND_TABLE.kinds.get(kind)
+        if entry is None or not info["learned_relations"]:
+            continue
+        for rel in info["learned_relations"]:
+            hand = entry.bits * HAND_TABLE.scale(kind, entry.layer, Relation(rel))
+            assert info["bits"][rel] <= hand + MAX_RAISE + 1e-6, kind
