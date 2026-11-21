@@ -24,6 +24,9 @@ class Backend:
     context: Any = None
 
     def link(self, ps: PairScore, link_id: str) -> Optional[Link]:
+        """A contract link carrying the ledger, or None when the ledger has no rows to explain."""
+        if not ps.rows:
+            return None
         if self.to_link is not None:
             return self.to_link(ps, link_id)
         return default_link(ps, link_id)
@@ -33,11 +36,11 @@ class Backend:
         from ftf.linking import ledger
 
         return cls(
-            dataset=ctx.dataset,
+            dataset=ctx.ds,
             score=lambda a, b, relation: ledger.score_pair(ctx, a, b, relation),
             threshold=lambda relation: ledger.threshold(ctx, relation),
-            layer_caps=lambda relation: ledger_layer_caps(ctx, relation),
-            to_link=lambda ps, link_id: ledger.to_link(ps, link_id),
+            layer_caps=lambda relation: layer_caps(ctx.weights, relation),
+            to_link=lambda ps, link_id: ledger.to_link(ps, link_id, ctx),
             context=ctx,
         )
 
@@ -48,10 +51,23 @@ class Backend:
         return cls.from_context(ScoringContext.from_dataset(ds))
 
 
-def ledger_layer_caps(ctx: Any, relation: Relation) -> dict[Layer, float]:
-    from ftf.linking import ledger
+def layer_caps(weights: Any, relation: Relation) -> dict[Layer, float]:
+    """Most bits one shared value of each layer can add under `relation`, read from a `WeightTable`.
 
-    return ledger.layer_caps(ctx, relation)
+    Per layer: the largest `bits * scale` over the table's kinds in that layer and the layer
+    default (the fallback for unknown kinds). Rarity only lowers a weight, so this is an upper bound.
+    """
+    caps: dict[Layer, float] = {}
+    for layer in Layer:
+        if layer is Layer.collector:
+            continue
+        best = weights.layer_defaults.get(layer, 0.0) * weights.relation_scale.get(layer, {}).get(relation, 0.0)
+        for kind, entry in weights.kinds.items():
+            if entry.layer is layer:
+                best = max(best, entry.bits * weights.scale(kind, layer, relation))
+        if best > 0:
+            caps[layer] = best
+    return caps
 
 
 def link_level(ps: PairScore) -> LinkLevel:
