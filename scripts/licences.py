@@ -7,6 +7,13 @@ project venv (on the VM: `scripts/vm.sh licences`).
     python scripts/licences.py            # print the table to stdout
     python scripts/licences.py --check    # exit 1 if the committed table is stale or a
                                           # licence is not on the permissive allowlist
+
+Policy (owner, 2026-11-21): the permissive allowlist applies to production dependencies, i.e.
+what ships in the jury's container. Named exceptions: certifi (unmodified MPL-2.0 CA bundle) and
+the optional `fetch` extra, Playwright plus its browser binaries (Chromium, with its bundled
+unmodified LGPL-2.1 FFmpeg, and the Node.js driver). LGPL, GPL and MPL stay denied for everything
+else. The `fetch` extra is not installed in the dev venv (no browser on shared test runs), so it is
+listed from the static `FETCH_EXTRA` table below, which a test keeps in step with pyproject.toml.
 """
 
 from __future__ import annotations
@@ -42,6 +49,18 @@ EXCEPTIONS = {
         "shown_as": "MPL-2.0 (named exception, unmodified CA bundle; see README Licence section)",
     },
 }
+
+
+# The optional `fetch` extra: installed in the container for `ftf fetch`, not in the dev venv.
+FETCH_PIN = "playwright==1.64.1"  # must equal the `fetch` extra in pyproject.toml
+FETCH_EXTRA = [
+    ("playwright (Python package)", "Apache-2.0"),
+    ("greenlet (needed by playwright)", "MIT AND PSF-2.0"),
+    ("pyee (needed by playwright)", "MIT"),
+    ("Playwright driver (Node.js, inside the playwright wheel)", "Apache-2.0; bundled Node.js runtime MIT"),
+    ("Chromium headless shell (`playwright install --only-shell chromium`)",
+     "BSD-3-Clause; bundles unmodified FFmpeg (LGPL-2.1) and other components under their own licences"),
+]
 
 
 def licence_of(dist: metadata.Distribution) -> str:
@@ -133,6 +152,18 @@ def render() -> str:
     ]
     for name, dist in sorted(dependencies().items()):
         lines.append(f"| {name} | {shown_licence(name, licence_of(dist))} |")
+    lines += [
+        "",
+        f"## Optional `fetch` extra (`{FETCH_PIN}`)",
+        "",
+        "Installed in the container image for `ftf fetch` (live page capture), not with the core package.",
+        "Named exception, owner decision 2026-11-21: Playwright and its browser binaries are allowed,",
+        "including Chromium's bundled unmodified LGPL-2.1 FFmpeg.",
+        "",
+        "| Component | Licence |",
+        "|---|---|",
+    ]
+    lines += [f"| {name} | {lic} |" for name, lic in FETCH_EXTRA]
     return "\n".join(lines) + "\n"
 
 

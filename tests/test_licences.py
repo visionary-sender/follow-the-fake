@@ -36,6 +36,22 @@ def test_certifi_exception_is_exact_and_narrow():
     assert licences.shown_licence("some-other-mpl-package", "MPL-2.0") == "MPL-2.0"
 
 
+def test_fetch_extra_table_matches_pyproject():
+    import tomllib
+
+    data = tomllib.loads((SCRIPT.parent.parent / "pyproject.toml").read_text())
+    extras = data["project"]["optional-dependencies"]
+    assert extras["fetch"] == [licences.FETCH_PIN]
+    assert not any("playwright" in r or "fetch" in r for r in extras.get("dev", []))  # no browser in dev
+    assert not any("playwright" in r for r in data["project"].get("dependencies", []))
+
+
+def test_lgpl_gpl_mpl_denied_outside_named_exceptions():
+    for lic in ("LGPL-2.1-or-later", "GPL-2.0-only", "MPL-2.0", "GNU Lesser General Public License v2 or later (LGPLv2+)"):
+        assert not licences.is_allowed("playwright", lic)
+        assert not licences.is_allowed("some-package", lic)
+
+
 @pytest.mark.parametrize(
     "licence",
     ["UNLICENSED", "UNKNOWN", "GPL-3.0-only", "MIT AND CC-BY-NC-4.0", "LGPLv3+",
