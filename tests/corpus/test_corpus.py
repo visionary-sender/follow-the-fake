@@ -297,7 +297,7 @@ def test_cli_articles(tmp_path, capsys):
     root = tmp_path / "b"
     _capture(root / "pf", "cap-home", "https://news-b.example/", "live", "live", "2026-11-21T22:00:00Z")
     (root / "pf" / "cap-home" / "page.html").write_text(
-        '<a href="/polska/a-ra1">1</a><a href="/swiat/b-ra2">2</a><a href="/c-ra3">3</a>'
+        '<a href="/polska/a-ra100001">1</a><a href="/swiat/b-ra100002">2</a><a href="/c-ra100003">3</a>'
     )
     _capture(root / "pf", "cap-dead", "https://www.news-a.example/", "dead", "timeout", "2026-11-21T22:00:01Z")
     picked = tmp_path / "home.tsv"
@@ -306,7 +306,7 @@ def test_cli_articles(tmp_path, capsys):
     assert main(["corpus", "articles", "--picked", str(picked), "--fetch", str(root / "pf"),
                  "--per-page", "2", "--out", str(out)]) == 0
     rows = [r.split("\t") for r in out.read_text().splitlines()]
-    assert [r[0] for r in rows] == ["https://news-b.example/polska/a-ra1", "https://news-b.example/swiat/b-ra2"]
+    assert [r[0] for r in rows] == ["https://news-b.example/polska/a-ra100001", "https://news-b.example/swiat/b-ra100002"]
     assert all(r[1:3] == ["news-b.example", "article"] for r in rows)
     assert len(read_picked(out)) == 2
 
