@@ -9,6 +9,14 @@ if [ "$#" -gt 0 ]; then
     exec ftf "$@"
 fi
 
+# The documented --tmpfs /home/ftf needs uid=10001,gid=10001; without it the home is not writable,
+# so fall back to a private directory under /tmp (Streamlit and tldextract write to $HOME).
+if [ ! -w "${HOME:-/nonexistent}" ]; then
+    HOME=$(mktemp -d /tmp/ftf-home.XXXXXX)
+    export HOME
+fi
+cd "$HOME"
+
 base_dir=${FTF_BASE_DIR:-/base}
 raw_dir=${FTF_RAW_ROOT:-/data/raw}
 port=${FTF_PORT:-8501}
@@ -21,7 +29,10 @@ fi
 if [ -f "$base_dir/dataset.json" ]; then
     export FTF_BASE="$base_dir/dataset.json"
     if [ -z "${FTF_ENRICH_CACHE:-}" ] && [ -f "$base_dir/enrichment/cache.json" ]; then
-        export FTF_ENRICH_CACHE="$base_dir/enrichment/cache.json"
+        # Work on a copy: /base may be mounted read-only, and online lookups update the cache.
+        mkdir -p /tmp/ftf-enrichment
+        cp "$base_dir/enrichment/cache.json" /tmp/ftf-enrichment/cache.json
+        export FTF_ENRICH_CACHE=/tmp/ftf-enrichment/cache.json
     fi
 else
     echo "ftf: no campaign base ($base_dir/dataset.json) and no dataset folder at $raw_dir; the app shows the built-in fixture if one is installed" >&2

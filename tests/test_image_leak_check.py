@@ -14,7 +14,8 @@ leak = importlib.util.module_from_spec(_spec)
 sys.modules["image_leak_check"] = leak
 _spec.loader.exec_module(leak)
 
-FAKE_KEY = b"-----BEGIN " + b"PRIVATE KEY-----\nabc\n"
+FAKE_KEY = b"-----BEGIN " + b"PRIVATE KEY-----\n" + b"QUJD" * 16 + b"\n"
+KEY_HEADER_ONLY = b"\x00-----BEGIN " + b"PRIVATE KEY-----\x00%s\x00"
 
 
 def _tar(files: dict[str, bytes], dirs: tuple[str, ...] = ()) -> io.BytesIO:
@@ -70,6 +71,7 @@ def test_git_directory_entry():
 
 def test_secret_contents():
     assert _rules({"usr/lib/k.pem": FAKE_KEY}) == ["private key"]
+    assert _rules({"usr/lib/libtls.so": KEY_HEADER_ONLY}) == []
     assert _rules({"usr/lib/sa.txt": b'{"type": "service_account"}'}) == ["service account"]
     assert _rules({"usr/lib/t.txt": b"token=ghp_" + b"a" * 36}) == ["github token"]
 

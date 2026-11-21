@@ -47,7 +47,8 @@ MAX_CONTENT = 32 * 1024 * 1024
 # `py.typed`, `/etc/hostname`) collide with trivial organiser files and say nothing.
 MIN_HASH_SIZE = 512
 SECRET_PATTERNS = [
-    ("private key", re.compile(rb"-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----")),
+    # A header alone is a string constant in TLS libraries (gnutls, gio); a key has a body.
+    ("private key", re.compile(rb"-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----\r?\n[A-Za-z0-9+/=]{40}")),
     ("service account", re.compile(rb'"type"\s*:\s*"service_account"')),
     ("github token", re.compile(rb"\b(?:ghp|gho|ghs|ghu)_[A-Za-z0-9]{36}\b|\bgithub_pat_[A-Za-z0-9_]{60,}")),
     ("aws key", re.compile(rb"\bAKIA[0-9A-Z]{16}\b")),

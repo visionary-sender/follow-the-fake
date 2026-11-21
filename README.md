@@ -132,7 +132,7 @@ challenge set), then serves the app. Later starts reuse the base in the volume.
 ```bash
 docker volume create ftf-base
 docker run --rm --name ftf \
-  --read-only --tmpfs /tmp:rw,nosuid,nodev,size=512m --tmpfs /home/ftf:rw,nosuid,nodev,size=256m \
+  --read-only --tmpfs /tmp:rw,nosuid,nodev,size=512m --tmpfs /home/ftf:rw,nosuid,nodev,size=256m,uid=10001,gid=10001 \
   --cap-drop=ALL --cap-add=SYS_CHROOT --security-opt no-new-privileges \
   --security-opt seccomp=docker/seccomp-chromium.json \
   --shm-size=1g --pids-limit=512 --memory=4g --cpus=2 \
@@ -144,8 +144,9 @@ docker run --rm --name ftf \
 
 Open <http://127.0.0.1:8501>. Inside the container the app listens on `0.0.0.0` (Docker's port
 publishing needs it); `-p 127.0.0.1:...` keeps it reachable from this machine only. The hardening
-flags are the fetcher's (see "Safe URL fetcher → Running it in the container"); the app runs
-under them unchanged.
+flags are the fetcher's (see "Safe URL fetcher → Running it in the container") plus
+`uid=10001,gid=10001` on the `/home/ftf` tmpfs: Docker mounts it root-owned with mode 0700, and
+the app (Streamlit, the Public Suffix List cache) needs a writable home.
 
 **3. Run with a prebuilt base.** If you were handed a base bundle, mount it at `/base` (read-only
 is fine) and leave out `/data/raw`; nothing is rebuilt:
