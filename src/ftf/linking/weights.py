@@ -189,6 +189,19 @@ HAND_TABLE = WeightTable(
         # infrastructure (HACK-19 enrichment and prototype signals); shared hosting is weak
         "third_party_host": _K(L.infrastructure, 1.5),  # HACK-11: foreign host a page loads; CDNs are hubs
         "third_party_domain": _K(L.infrastructure, 1.5),  # HACK-11: its registered domain, coarser
+        # site identity (HACK-48 names, posted by the coordinator): one infrastructure layer, so the within-layer
+        # max keeps "same site" from stacking; not single-valued (domains rotate daily: a differing domain
+        # carries nothing, no conflict penalty). A CERT listing domain is the same kind of evidence.
+        "landing_host": _K(L.infrastructure, 3.0),
+        "landing_domain": _K(L.infrastructure, 2.5),
+        "ad_landing_domain": _K(L.infrastructure, 2.5),
+        "ad_display_domain": _K(L.infrastructure, 2.5),
+        "certpl_listing_domain": _K(L.infrastructure, 2.5),
+        # redirectors and trackers on the way: can be a hub shared by unrelated operators, so not private;
+        # pre-group rarity does the rest
+        "chain_host": _K(L.tracker_instance, 2.0),
+        "chain_domain": _K(L.tracker_instance, 2.0),
+        "redirect_chain_shape": _K(L.tracker_instance, 1.0),
         "server_ip": _K(L.infrastructure, 1.5),
         "a_record_ip": _K(L.infrastructure, 1.5),
         "nameserver": _K(L.infrastructure, 1.5),

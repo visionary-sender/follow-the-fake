@@ -497,3 +497,25 @@ def test_corpus_kinds_keep_only_rarity_kinds_and_must_not_link_needs_background(
     path = tmp_path / "ds.json"
     path.write_text(ds.to_json())
     assert main(["learn-weights", str(path), "--must-not-link", str(path), "-o", str(tmp_path / "w.json")]) == 2
+
+
+def test_shared_domain_or_common_redirector_alone_does_not_link():
+    from ftf.linking.ledger import verdict
+
+    filler = [incident(f"f{i}", [ind(L.infrastructure, "landing_domain", f"other-{i}.example")]) for i in range(6)]
+    two_domains = Dataset(name="synthetic", incidents=[
+        incident("c1", [ind(L.infrastructure, "certpl_listing_domain", "same.example")]),
+        incident("c2", [ind(L.infrastructure, "certpl_listing_domain", "same.example")]),
+    ] + filler)
+    ctx = ScoringContext.from_dataset(two_domains)
+    assert verdict(score_pair(ctx, "c1/lander", "c2/lander"), ctx) != "link"
+    redirector = [ind(L.tracker_instance, "chain_host", "redir.example", live=True),
+                  ind(L.tracker_instance, "redirect_chain_shape", "a>b>c")]
+    pages = Dataset(name="synthetic", incidents=[
+        incident("r1", redirector + [ind(L.infrastructure, "landing_host", "one.example")]),
+        incident("r2", redirector + [ind(L.infrastructure, "landing_host", "two.example")]),
+    ] + filler)
+    ctx = ScoringContext.from_dataset(pages)
+    s = score_pair(ctx, "r1/lander", "r2/lander")
+    assert verdict(s, ctx) == "no link" and not s.live_private
+    assert not any(r.status is EvidenceStatus.conflict for r in s.rows)  # differing hosts carry nothing
