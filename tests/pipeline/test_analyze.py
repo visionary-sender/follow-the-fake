@@ -173,7 +173,7 @@ def test_to_dataset_drops_candidates_outside_the_base(tmp_path, monkeypatch):
 
     from ftf.contract import Assignment, Candidate
 
-    def link_incident(base, incident, relation=None):
+    def link_incident(base, incident, relation=None, backend=None, base_dir=None, incident_dir=None):
         a = Assignment(incident_id=incident.id, candidates=[Candidate(campaign_id="new:1", score_bits=11.0),
                                                             Candidate(campaign_id="C1", score_bits=3.0)],
                        decision=Decision.assign, campaign_id="new:1", evidence_capacity_bits=9.0, method="fake@0")

@@ -25,22 +25,22 @@ def test_organiser_domains_from_har_and_scam_list_only(tmp_path):
     raw = tmp_path / "raw"
     (raw / "BACKUP" / "p1").mkdir(parents=True)
     (raw / "do").mkdir()
-    (raw / "BACKUP" / "p1" / "site.live.har").write_text(
-        json.dumps(har("https://lander.live/?utm=1", first="https://cdn.example-cdn.net/app.js")), encoding="utf-8"
+    (raw / "BACKUP" / "p1" / "site.example.har").write_text(
+        json.dumps(har("https://lander.example.org/?utm=1", first="https://cdn.example-cdn.net/app.js")), encoding="utf-8"
     )
-    (raw / "do" / "dup.live.har").write_text(json.dumps(har("https://LANDER.live/other")), encoding="utf-8")
+    (raw / "do" / "dup.example.har").write_text(json.dumps(har("https://LANDER.EXAMPLE.org/other")), encoding="utf-8")
     (raw / "do" / "broken.har").write_text("{not json", encoding="utf-8")
     (raw / "scam_links_odszyfrowane.txt").write_text(
-        "ZIDENTYFIKOWANY SCAM\r\n\r\nhttps://caepertss.com/products/1?from=google\r\nhttps://zzvn.info/x.\r\n",
+        "ZIDENTYFIKOWANY SCAM\r\n\r\nhttps://scamlink.example.com/products/1?from=google\r\nhttps://other.example.net/x.\r\n",
         encoding="utf-8",
     )
     (raw / "notes.txt").write_text("https://ignored-by-name.example/", encoding="utf-8")
 
     scope = organiser_domains(raw)
-    assert scope.domains == ["caepertss.com", "lander.live", "zzvn.info"]
+    assert scope.domains == ["example.com", "example.net", "example.org"]
     assert "cdn.example-cdn.net" not in scope.domains  # third-party hosts inside a page are out of scope
-    assert scope.sources["lander.live"] == ["har_page"]
-    assert scope.sources["caepertss.com"] == ["scam_link_list"]
+    assert scope.sources["example.org"] == ["har_page"]
+    assert scope.sources["example.com"] == ["scam_link_list"]
     assert [s.endswith("broken.har") for s in scope.skipped] == [True]
 
 
