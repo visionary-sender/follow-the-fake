@@ -141,6 +141,8 @@ def build(raw: list[RawIncident], root: Path, name: str, description: str | None
         if not inc.captures:
             continue
         if inc.fixed_id:
+            if inc.fixed_id in used_incidents:  # the same fetch or ad record given twice: keep the first
+                continue
             inc_id = inc.fixed_id
         elif inc.ref is not None:
             inc_id = ids.incident_id(inc.source, inc.ref)

@@ -14,7 +14,7 @@ import json
 import re
 import time
 from dataclasses import dataclass
-from datetime import timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -34,6 +34,11 @@ _DATE = re.compile(r"(20\d\d)[-_.]?(\d\d)[-_.]?(\d\d)")
 # Markers of scam tracking or platform code. A saved page on a scam host without any of them is
 # the cloaker's white page (see the decoy rule in ftf.ingest).
 _TRACKER_MARKERS = (b"window.aio", b"fbq(", b"facebook.com/tr", b"BINOM", b"gtag(", b"clickid", b"connect.facebook.net")
+
+
+def is_junk(name: str) -> bool:
+    """OS metadata files: Finder, Explorer and AppleDouble (`._x`, `__MACOSX`)."""
+    return name in JUNK_NAMES or name.startswith("._") or name == "__MACOSX"
 
 
 def clean_name(name: str) -> str:
@@ -138,6 +143,29 @@ def _scheme(url: str | None) -> str | None:
     return url.split(":", 1)[0].lower()
 
 
+def _is_page_url(text: str) -> bool:
+    try:
+        parts = urlsplit(text.strip())
+    except ValueError:
+        return False
+    if parts.scheme in ("http", "https"):
+        return bool(parts.netloc)
+    return parts.scheme == "file"
+
+
+def utc_iso(value: str | None) -> str | None:
+    """Normalise an ISO timestamp to naive UTC ``YYYY-MM-DDTHH:MM:SS``; naive input is taken as UTC."""
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt.strftime("%Y-%m-%dT%H:%M:%S")
+
+
 def har_info(path: Path) -> PageInfo:
     """Page URL and start time of a HAR: the first page, else the first HTML document, else the first entry."""
     try:
@@ -152,7 +180,7 @@ def har_info(path: Path) -> PageInfo:
     if pages and isinstance(pages[0], dict):
         started = pages[0].get("startedDateTime")
         title = pages[0].get("title")
-        if isinstance(title, str) and re.match(r"^[a-z]+:", title):
+        if isinstance(title, str) and _is_page_url(title):
             url = title
     if url is None:
         docs = [e for e in entries if isinstance(e, dict) and "html" in str(((e.get("response") or {}).get("content") or {}).get("mimeType", ""))
@@ -165,7 +193,7 @@ def har_info(path: Path) -> PageInfo:
         url = None
     if not isinstance(started, str):
         started = None
-    return PageInfo(url=url, scheme=_scheme(url), started=started)
+    return PageInfo(url=url, scheme=_scheme(url), started=utc_iso(started))
 
 
 def html_info(path: Path) -> PageInfo:
@@ -196,7 +224,10 @@ def mhtml_info(path: Path) -> PageInfo:
     started = None
     if msg.get("Date"):
         try:
-            started = email.utils.parsedate_to_datetime(msg["Date"]).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+            dt = email.utils.parsedate_to_datetime(msg["Date"])
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            started = dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
         except (TypeError, ValueError, IndexError):
             started = None
     url = str(url).strip() if url else None

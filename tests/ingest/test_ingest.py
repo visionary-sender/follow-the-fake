@@ -317,3 +317,71 @@ def test_cli_fetch_without_fetcher(tmp_path, capsys, monkeypatch):
 
 def test_cli_missing_input(tmp_path, capsys):
     assert cli_main(["ingest", str(tmp_path / "nope"), "--out", str(tmp_path / "d.json")]) == 2
+
+
+# -- review regressions --------------------------------------------------------------------------
+
+
+def test_fetcher_folder_given_twice_and_nested(tmp_path):
+    out = tmp_path / "captures"
+    d = fetcher_capture(out, "20261121T220000Z-lambda.example.test-1a2b3c4d")
+    assert len(load_inputs([out, d]).incidents) == 1
+    assert len(load_inputs([d, d]).incidents) == 1
+
+
+def test_same_ad_record_twice_keeps_first(tmp_path):
+    a = fetcher_capture(tmp_path / "x", "20261121T220000Z-a.example.test-00000001", ad={"ad_archive_id": "42"})
+    b = fetcher_capture(tmp_path / "y", "20261121T220000Z-b.example.test-00000002", ad={"ad_archive_id": "42"})
+    ds = load_inputs([a, b])
+    assert [i.id for i in ds.incidents] == ["adlib:42"]
+
+
+def test_har_title_that_is_not_a_url(tmp_path):
+    data = json.loads(har("https://omicron.example.test/"))
+    data["log"]["pages"][0]["title"] = "zdrowie: cudowny lek"
+    p = write(tmp_path / "x.har", json.dumps(data))
+    (cap,) = load_inputs([p]).incidents[0].captures
+    assert cap.observed is Observed.live
+
+
+def test_subfolder_with_only_images_is_ad(tmp_path):
+    case = tmp_path / "70"
+    write(case / "reklama" / "ad1.png", b"\x89PNG a1")
+    write(case / "page.har", har("https://pi.example.test/"))
+    c = caps(load_inputs([case]))
+    ad = next(x for x in c.values() if x.id.endswith(":reklama"))
+    assert ad.stage is Stage.ad and ad.artefacts[0].type is ArtefactType.ad_screenshot
+    lander = next(x for x in c.values() if x.stage is Stage.lander)
+    assert ArtefactType.ad_screenshot not in {m.modality for m in lander.missing}
+
+
+def test_appledouble_files_skipped(tmp_path):
+    case = tmp_path / "71"
+    write(case / "page.har", har("https://rho.example.test/"))
+    write(case / "._page.har", b"\x00\x05\x16\x07junk")
+    write(case / "__MACOSX" / "x", b"junk")
+    (cap,) = load_inputs([case]).incidents[0].captures
+    assert [a.path for a in cap.artefacts] == ["71/page.har"]
+
+
+def test_unmatched_files_folder_not_attached_to_unrelated_page(tmp_path):
+    case = tmp_path / "72"
+    saved_page(case, "a", "https://sigma.example.test/")
+    write(case / "b.html", html("https://tau.example.test/"))
+    write(case / "zdrowie_files" / "x.js", "x")
+    c = caps(load_inputs([case]))
+    sigma = next(x for x in c.values() if x.id.endswith(":a"))
+    assert not any("zdrowie_files" in a.path for a in sigma.artefacts)
+
+
+def test_mhtml_naive_date_is_utc(tmp_path):
+    p = write(tmp_path / "late.mhtml", MHTML.replace("Mon, 12 Oct 2026 09:48:00 -0000", "Mon, 12 Oct 2026 23:48:00"))
+    (cap,) = load_inputs([p]).incidents[0].captures
+    assert cap.captured_on == "2026-10-12"
+
+
+def test_decoy_order_uses_utc(tmp_path):
+    from ftf.ingest import files as F
+
+    assert F.utc_iso("2026-10-20T13:06:00+02:00") == "2026-10-20T11:06:00"
+    assert F.utc_iso("2026-10-20T11:00:00.000Z") == "2026-10-20T11:00:00"

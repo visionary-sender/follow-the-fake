@@ -106,7 +106,9 @@ def _inputs(inputs: Sequence[str | Path]) -> list[str | Path]:
         if key not in seen:
             seen.add(key)
             out.append(item)
-    return out
+    paths = [Path(i).resolve() for i in out if not (isinstance(i, str) and adapters.is_url(i))]
+    # An input inside another input (a fetcher folder under a fetcher root) is already covered.
+    return [i for i in out if (isinstance(i, str) and adapters.is_url(i)) or not any(Path(i).resolve() != p and Path(i).resolve().is_relative_to(p) for p in paths)]
 
 
 def default_root(inputs: Sequence[str | Path], extra: Sequence[Path] = ()) -> Path:

@@ -33,6 +33,9 @@ ORGANISER_SOURCES = {"do_udostepnienia", "BACKUP"}
 FETCH_MANIFEST = "capture.json"
 AD_RECORD = "ad.json"
 URL_MISSING_REASON = "not fetched"
+# A `<stem>_files` folder whose stem matches no saved page joins the page sharing at least this
+# many leading characters (browsers truncate long stems), else it stays its own unit.
+MIN_STEM_PREFIX = 8
 
 
 def organiser_source(path: Path) -> str | None:
@@ -47,7 +50,7 @@ def is_url(text: str) -> bool:
 
 def _listdir(folder: Path) -> list[Path]:
     """Children sorted by NFC name; symlinks and OS junk files are skipped (never followed)."""
-    out = [p for p in folder.iterdir() if not p.is_symlink() and p.name not in F.JUNK_NAMES]
+    out = [p for p in folder.iterdir() if not p.is_symlink() and not F.is_junk(p.name)]
     return sorted(out, key=lambda p: unicodedata.normalize("NFC", p.name))
 
 
@@ -65,11 +68,15 @@ def _rel(path: Path, base: Path) -> str:
     return path.relative_to(base).as_posix()
 
 
+def _in_assets(rel: str) -> bool:
+    return any(part.endswith("_files") or part == "resources" for part in Path(rel).parts[:-1])
+
+
 def load_file(path: Path, base: Path, *, ad_side: bool, in_assets: bool | None = None) -> RawArtefact:
     t0 = time.perf_counter()
     rel = _rel(path, base)
     if in_assets is None:
-        in_assets = any(part.endswith("_files") or part == "resources" for part in Path(rel).parts[:-1])
+        in_assets = _in_assets(rel)
     atype = F.artefact_type(path, in_assets=in_assets, ad_side=ad_side)
     digest, size = F.sha256_file(path)
     info = F.page_info(path, atype)
@@ -101,7 +108,9 @@ def split_folder(folder: Path) -> list[RawCapture]:
     captures: list[RawCapture] = []
     for sub in subdirs:
         cap = RawCapture(key=sub.name)
-        cap.artefacts = [load_file(p, folder, ad_side=False) for p in _walk(sub)]
+        inner = _walk(sub)
+        has_page = any(F.ext(p) in F.PAGE_EXT and not _in_assets(_rel(p, folder)) for p in inner)
+        cap.artefacts = [load_file(p, folder, ad_side=not has_page) for p in inner]
         captures.append(cap)
     # Files named after a sub-folder (an archive's .zip and .zip.sha256) belong to it.
     rest: list[Path] = []
@@ -124,7 +133,9 @@ def split_folder(folder: Path) -> list[RawCapture]:
         if target is None and len(htmls) == 1:
             target = htmls[0]
         if target is None and htmls:
-            target = max(htmls, key=lambda h: len(os.path.commonprefix([_nfc(_stem(h)), base])))
+            best = max(htmls, key=lambda h: len(os.path.commonprefix([_nfc(_stem(h)), base])))
+            if len(os.path.commonprefix([_nfc(_stem(best)), base])) >= MIN_STEM_PREFIX:
+                target = best
         if target is None:
             units.append((d, []))  # resources without a page: keep them as their own unit
         else:
@@ -251,6 +262,19 @@ def is_fetcher_root(path: Path) -> bool:
     return path.is_dir() and any(is_fetcher_folder(p) for p in _listdir(path) if p.is_dir())
 
 
+def _manifest_file(folder: Path, path: str) -> Path | None:
+    """A manifest artefact path (relative to the fetch root, or to the folder) as a file inside ``folder``."""
+    base = folder.resolve()
+    for cand in (folder.parent / path, folder / path):
+        try:
+            full = cand.resolve()
+        except OSError:
+            continue
+        if full.is_relative_to(base) and full != base and cand.is_file() and not cand.is_symlink():
+            return folder / full.relative_to(base)
+    return None
+
+
 def fetcher_folder(folder: Path) -> RawIncident:
     """Read ``<out>/<capture_id>/`` written by ``ftf.fetch``; ids are kept, artefact paths re-rooted.
 
@@ -267,11 +291,10 @@ def fetcher_folder(folder: Path) -> RawIncident:
         for a in c.artefacts:
             if a.path is None:
                 continue
-            name = Path(a.path).name
-            p = folder / name
-            if not p.is_file() or p.is_symlink():
+            p = _manifest_file(folder, a.path)
+            if p is None:
                 continue
-            known.add(name)
+            known.add(_rel(p, folder))
             art = load_file(p, folder, ad_side=False, in_assets=False)
             art.type, art.fixed_id = a.type, a.id
             arts.append(art)
@@ -314,15 +337,14 @@ def _with_ad_record(folder: Path, incident: RawIncident, known: set[str]) -> Raw
     ad.fixed_id = ids.capture_id(inc_id, "ad")
     for a in ad.artefacts:
         a.fixed_id = ids.artefact_id(ad.fixed_id, a.rel)
-    for c in incident.captures:
-        c.fixed_id = ids.capture_id(inc_id, "lander")
-        c.key = "lander"
+    for n, c in enumerate(incident.captures, start=1):
+        c.key = "lander" if n == 1 else f"lander-{n}"
+        c.fixed_id = ids.capture_id(inc_id, c.key)
         for a in c.artefacts:
             a.fixed_id = ids.artefact_id(c.fixed_id, a.rel)
-        if c.stage is Stage.unknown:
+        if c.stage is Stage.unknown and n == 1:
             c.stage = Stage.lander
-        break
-    return RawIncident(source="ad_library", source_ref=archive_id, captures=[ad, *incident.captures[:1]], fixed_id=inc_id)
+    return RawIncident(source="ad_library", source_ref=archive_id, captures=[ad, *incident.captures], fixed_id=inc_id)
 
 
 # -- dispatch ----------------------------------------------------------------------------------
