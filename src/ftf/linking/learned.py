@@ -17,8 +17,10 @@ The label's own layer is held out: it is never estimated from the pairs it defin
 labelled self-supervision, 07 §4 E1). Its aliases (e.g. the campaign name next to the campaign id)
 sit in the same layer and are held out with it.
 
-Weight of a kind under a learned relation: bits = log2[(s + (1 − s)·u)/u], with u the frequency
-of a value carried by one operator (over the larger of the background corpus and the sample; unique-by-construction ids use the type prior 1/N). Relations
+Weight of a kind under a learned relation: bits = log2[(s + (1 − s)·u)/u], times the prior's
+relation scale where that is below 1 (a copy prior for kits and forms that same-operator pairs cannot
+measure). u is the frequency of a value carried by one operator, over the larger of the background
+corpus and the sample, never below 1/N; unique-by-construction ids use the type prior 1/N. Relations
 without labels keep the prior's absolute bits. Kinds without positive data, without a usable u,
 or with prior weight 0 (dates, flags) keep the prior entry.
 """
@@ -206,7 +208,9 @@ def learn_weights(
             for relation, ks in learned_s.items():
                 if kind not in ks or learned_n[relation].get(kind, 0) <= 0 or absolute[relation] <= 0:
                     continue
-                absolute[relation] = bits_from_s(ks[kind], u["u"])
+                # a hand relation scale below 1 is a copy prior (kits and forms are sold and copied across
+                # operators) that same-operator pairs cannot measure: it stays a multiplier
+                absolute[relation] = bits_from_s(ks[kind], u["u"]) * min(prior.scale(kind, layer, relation), 1.0)
                 learned_rel.append(relation.value)
             if not learned_rel:
                 info["fallback"] = "no positive pairs"
@@ -269,6 +273,9 @@ def _reference_u(ctx, background: BackgroundCounts | None) -> dict[str, dict]:
             continue
         type_prior = unique >= TYPE_PRIOR_SHARE
         u = 1.0 / n if type_prior else (1.0 + alpha) / (n + alpha * v)
+        # never rarer than one operator in N: a multi-valued kind (asset hashes) has V >> N, and the Dirichlet
+        # denominator alone would claim log2(V) bits the N operators cannot support (07 §1.2, cap log2 N)
+        u = max(u, 1.0 / n)
         out[kind] = {"u": min(u, 1.0), "N": n, "V": v, "source": source, "type_prior": type_prior,
                      "layer": layer_of[kind]}
     return out

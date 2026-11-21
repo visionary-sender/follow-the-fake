@@ -400,3 +400,22 @@ def test_link_with_a_bad_weights_file_exits_cleanly(tmp_path):
     ds_path = tmp_path / "ds.json"
     ds_path.write_text(learning_ds().to_json())
     assert main(["link", str(ds_path), "-o", str(tmp_path / "o.json"), "--weights", str(tmp_path / "nope.json")]) == 2
+
+
+def test_multi_valued_kind_is_capped_at_log2_operators_and_keeps_the_copy_prior():
+    import math
+
+    def many_assets(iid, tenant, owner, camp, landing, shared):
+        own = [ind(L.kit, "asset_sha256", f"{iid}-asset-{n}") for n in range(40)]
+        return incident(iid, PLATFORM + chain(tenant, owner, camp, landing) + own +
+                        [ind(L.kit, "asset_sha256", shared)])
+    ds = Dataset(name="synthetic", incidents=[
+        many_assets("k1", "tenant-1", "owner-1", "camp-1", "landing-1", "pack-1"),
+        many_assets("k2", "tenant-1", "owner-1", "camp-1", "landing-1", "pack-1"),
+        many_assets("k3", "tenant-2", "owner-2", "camp-2", "landing-2", "pack-2"),
+        many_assets("k4", "tenant-2", "owner-2", "camp-2", "landing-2", "pack-2"),
+    ])
+    table, rep = learn_weights(ds)
+    info = rep["kinds"]["asset_sha256"]
+    assert info["V"] > 100 and info["u_ref"] >= 1 / info["N"]
+    assert info["bits"]["campaign"] <= math.log2(info["N"]) * HAND_TABLE.scale("asset_sha256", L.kit, Relation.campaign) + 1e-6
