@@ -14,12 +14,14 @@ from ftf.enrich.commands import register as register_enrich_domain
 from ftf.features.commands import register as register_features
 from ftf.linking.commands import register_assign
 from ftf.linking.commands import register_link
+from ftf.linking.commands import register_score
 
 COMMANDS: list[Callable[[argparse._SubParsersAction], None]] = [
     register_assign,
     register_enrich_domain,
     register_features,
     register_link,
+    register_score,
 ]
 
 
