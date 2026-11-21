@@ -16,6 +16,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+app = [
+    "networkx>=3.2,<4",
+    "plotly>=5.24,<7",
+    "streamlit>=1.40,<2",
+]
 # Models and native libraries for ftf.features (OCR, embeddings, faces, video); heavy, so opt-in.
 features = [
 ]
