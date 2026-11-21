@@ -114,6 +114,15 @@ class Recorder:
         self.guard: GuardProxy | None = None
         self.failed_after_load = False
         self.egress: dict | None = eg.current()  # read at the start: rotation happens between visits
+        # Optional upstream proxy (phase 2). A malformed proxy file fails the visit, never goes direct.
+        self.upstream: eg.Upstream | None = None
+        self.upstream_error: str | None = None
+        try:
+            self.upstream = eg.upstream_proxy()
+        except ValueError as e:
+            self.upstream_error = str(e)
+        if self.upstream is not None:
+            self.egress = {**(self.egress or {}), "proxy": self.upstream.label}
 
     # -- during the visit --------------------------------------------------------------------
 
