@@ -12,10 +12,14 @@ from collections.abc import Callable, Sequence
 from ftf import __version__
 from ftf.enrich.commands import register as register_enrich_domain
 from ftf.features.commands import register as register_features
+from ftf.linking.commands import register_assign
+from ftf.linking.commands import register_link
 
 COMMANDS: list[Callable[[argparse._SubParsersAction], None]] = [
+    register_assign,
     register_enrich_domain,
     register_features,
+    register_link,
 ]
 
 

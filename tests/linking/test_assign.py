@@ -1,0 +1,119 @@
+from __future__ import annotations
+
+import json
+import math
+
+from ftf.contract.models import Dataset, Decision, Layer, Relation
+from ftf.linking import assign, link_dataset, link_incident
+from ftf.linking.assign import combine
+
+from linking_support import TAU, WEIGHTS, dataset, simple, stub_backend
+
+L = Layer
+
+
+def _collection() -> Dataset:
+    a = [simple(f"a{i}", (L.platform, "P1"), (L.tenant, "T1"), (L.landing, "LA"), (L.kit, "K1"), (L.tracking_account, "PXA", True)) for i in range(3)]
+    b = [simple(f"b{i}", (L.platform, "P1"), (L.tenant, "T2"), (L.landing, "LB"), (L.kit, "K2")) for i in range(2)]
+    c = [simple(f"c{i}", (L.platform, "P2"), (L.offer, "OC"), (L.creative, "CRC")) for i in range(2)]
+    ds = dataset(*a, *b, *c)
+    return link_dataset(ds, backend=stub_backend(ds))
+
+
+def _k(collection: Dataset, relation=Relation.campaign) -> int:
+    return sum(1 for c in collection.campaigns if c.relation is relation)
+
+
+def test_assign_known_variant():
+    col = _collection()
+    new = simple("n", (L.platform, "P1"), (L.tenant, "T1"), (L.landing, "LA"), (L.kit, "K-new"), (L.tracking_account, "PXA", True))
+    a = assign(col, new, backend=stub_backend)
+    assert a.decision is Decision.assign
+    camp = next(c for c in col.campaigns if c.id == a.campaign_id)
+    assert set(camp.capture_ids) == {f"a{i}-c1" for i in range(3)}
+    assert a.candidates[0].campaign_id == a.campaign_id
+    assert a.candidates[0].score_bits >= TAU + math.log2(_k(col))
+    assert "tenant" in a.candidates[0].note
+
+
+def test_new_when_nothing_matches():
+    col = _collection()
+    new = simple("n", (L.platform, "P9"), (L.tenant, "T9"), (L.landing, "L9"), (L.kit, "K9"))
+    a = assign(col, new, backend=stub_backend)
+    assert a.decision is Decision.new
+    assert a.campaign_id is None
+
+
+def test_review_between_the_bars():
+    col = _collection()
+    # Shares the landing and kit with A but has another tenant: 4 + 3 + 1.5 - 4 = 4.5 bits, between tau-3 and the bar.
+    new = simple("n", (L.platform, "P1"), (L.tenant, "T7"), (L.landing, "LA"), (L.kit, "K1"))
+    a = assign(col, new, backend=stub_backend)
+    assert a.decision is Decision.review
+    assert TAU - 3 < a.candidates[0].score_bits < TAU + math.log2(_k(col))
+
+
+def test_bar_grows_with_number_of_campaigns():
+    col = _collection()
+    # 6.5 bits: above tau, but below tau + log2 K for K = 3 single-relation campaigns -> review.
+    new = simple("n", (L.offer, "OC"), (L.creative, "CRC"), (L.platform, "P2"), (L.kit, "Kx"))
+    a = assign(col, new, backend=stub_backend)
+    assert _k(col) >= 3
+    assert TAU <= a.candidates[0].score_bits < TAU + math.log2(_k(col))
+    assert a.decision is Decision.review
+
+
+def test_missing_modalities_never_lower_the_score_and_are_reported():
+    col = _collection()
+    full = simple("n", (L.platform, "P1"), (L.tenant, "T1"), (L.landing, "LA"), (L.kit, "K1"))
+    no_har = simple("n", (L.platform, "P1"), (L.tenant, "T1"), (L.landing, "LA"), (L.kit, "K1"), arts=("html", "ad_screenshot"), missing=[("har", "not captured")])
+    a_full = assign(col, full, backend=stub_backend)
+    a_nohar = assign(col, no_har, backend=stub_backend)
+    assert a_nohar.candidates[0].score_bits >= a_full.candidates[0].score_bits
+    assert a_nohar.decision is a_full.decision
+    assert "har missing (not captured): up to +" in a_nohar.note
+    assert a_nohar.evidence_capacity_bits < a_full.evidence_capacity_bits
+
+
+def test_capacity_comes_from_the_weight_table():
+    col = _collection()
+    shot_only = simple("n", (L.creative, "CR-unknown"), arts=("ad_screenshot",), missing=[("html", "page dead"), ("har", "page dead")])
+    a = assign(col, shot_only, backend=stub_backend)
+    assert a.evidence_capacity_bits == WEIGHTS[L.creative]
+    # Capacity is below tau, so the item cannot prove a new campaign: review, not new.
+    assert a.decision is Decision.review
+    assert "html missing (page dead): up to +" in a.note
+
+
+def test_link_incident_links_are_contract_valid():
+    col = _collection()
+    new = simple("n", (L.platform, "P1"), (L.tenant, "T1"), (L.landing, "LA"), (L.kit, "K1"))
+    res = link_incident(col, new, backend=stub_backend)
+    assert res.links and all("n-c1" in (l.a, l.b) for l in res.links)
+    out = combine(col, [new])
+    data = out.model_dump(mode="json")
+    data["links"] += [l.model_dump(mode="json") for l in res.links]
+    data["assignments"] = [res.assignment.model_dump(mode="json")]
+    Dataset.model_validate(json.loads(json.dumps(data)))
+
+
+def test_assign_does_not_recluster():
+    col = _collection()
+    before = [c.model_dump() for c in col.campaigns]
+    assign(col, simple("n", (L.tenant, "T1"), (L.landing, "LA")), backend=stub_backend)
+    assert [c.model_dump() for c in col.campaigns] == before
+
+
+def test_cli_link_and_assign(tmp_path, monkeypatch):
+    from ftf import cli
+    from ftf.linking import backend as backend_mod
+
+    monkeypatch.setattr(backend_mod.Backend, "from_dataset", classmethod(lambda cls, ds: stub_backend(ds)))
+    a = [simple(f"a{i}", (L.tenant, "T1"), (L.landing, "LA"), (L.kit, "K1")) for i in range(2)]
+    (tmp_path / "in.json").write_text(dataset(*a).to_json())
+    (tmp_path / "new.json").write_text(dataset(simple("n", (L.tenant, "T1"), (L.landing, "LA"), (L.kit, "K1")), simple("m", (L.kit, "K-other"), (L.tenant, "T8"), (L.landing, "L8"))).to_json())
+    assert cli.main(["link", str(tmp_path / "in.json"), "-o", str(tmp_path / "linked.json")]) == 0
+    assert cli.main(["assign", str(tmp_path / "linked.json"), str(tmp_path / "new.json"), "-o", str(tmp_path / "out.json")]) == 0
+    out = Dataset.from_json((tmp_path / "out.json").read_bytes())
+    decisions = {a.incident_id: a.decision for a in out.assignments}
+    assert decisions == {"n": Decision.assign, "m": Decision.new}
