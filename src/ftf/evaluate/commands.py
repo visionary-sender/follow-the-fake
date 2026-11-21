@@ -75,6 +75,7 @@ def _register_labels(sub: argparse._SubParsersAction) -> None:
         ds = load_dataset(args)
         labels = build_labels(ds)
         report = compare_expected(labels)
+        labels["summary"]["e1_discrepancies"] = report
         write_json(args.out_dir / "labels" / "labels.json", labels)
         for line in report:
             print("DISCREPANCY " + line)
@@ -89,7 +90,7 @@ def _register_leak(sub: argparse._SubParsersAction) -> None:
     add_common(p)
 
     def run(args: argparse.Namespace) -> int:
-        from ftf.evaluate.leak import hide_platform_ids, leak_check
+        from ftf.evaluate.leak import MASK, hide_platform_ids, leak_check
 
         ds = load_dataset(args)
         hidden, values = hide_platform_ids(ds)
@@ -98,6 +99,7 @@ def _register_leak(sub: argparse._SubParsersAction) -> None:
             "hidden_indicators": len(ds.indicators()) - len(hidden.indicators()),
             "remaining_indicators": len(hidden.indicators()),
             "hidden_values": len(values),
+            "masked_indicators": sum(1 for i in hidden.indicators() if i.value and MASK in i.value),
             "hits": len(hits),
             "hit_rows": [h.as_dict() for h in hits],
         }
