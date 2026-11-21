@@ -16,6 +16,7 @@ Challenge data lives in a private bucket and never in this repository.
 | `tests/` | pytest suite |
 | `scripts/vm.sh` | cloud dev loop (sync to the workbench VM, run tests or commands there) |
 | `scripts/licences.py` | generates and checks `LICENSES-THIRD-PARTY.md` |
+| `Dockerfile`, `.dockerignore` | container image that runs the `ftf` command |
 
 ## Running the tests
 
@@ -48,6 +49,33 @@ Only permissively licensed open-source dependencies are allowed (MIT, BSD, Apach
 `LICENSES-THIRD-PARTY.md` is generated from installed package metadata by
 `scripts/vm.sh licences`; a test fails if the table is stale or lists a licence outside the
 allowlist. After changing dependencies in `pyproject.toml`, regenerate it and commit it.
+
+## Container
+
+The image contains only the installed `ftf` package (no data, no secrets, no git metadata; the
+build context is default-deny in `.dockerignore`). It runs as a non-root user, and the
+entry point is `ftf`. Building needs internet access, because pip fetches the dependencies.
+
+For the jury, from a clean checkout of the repository root:
+
+```bash
+docker build -t ftf .
+docker run --rm ftf --help
+docker run --rm ftf --version
+```
+
+For the team, on the workbench VM (Docker is installed there; the sync copies the worktree to
+`/work/<slug>/src`, where `<slug>` is the worktree directory name, e.g. `hack-3-container`):
+
+```bash
+scripts/vm.sh run -- true      # sync the worktree to the VM
+gcloud compute ssh ftf-workbench --project follow-the-fake --zone europe-central2-a \
+  --tunnel-through-iap --quiet \
+  --command 'cd /work/<slug>/src && sudo docker build -t ftf:dev . && sudo docker run --rm ftf:dev --help'
+```
+
+Install Docker on the VM once: `sudo apt-get install -y docker.io`.
+Remove dangling images afterwards with `sudo docker image prune -f`.
 
 ## Methods
 
