@@ -55,9 +55,15 @@ DISPLAY_LEN = 40
 Key = tuple[Layer, str]  # (layer, kind)
 
 
-def normalise(value: str) -> str:
-    """Comparison form of an indicator value: trimmed, inner whitespace collapsed, case-folded."""
-    return " ".join(value.split()).casefold()
+# Free-text layers compare case-insensitively; ids, hashes and URL paths stay case-sensitive.
+CASE_FOLDED_LAYERS = frozenset({Layer.creative, Layer.distribution_account, Layer.offer})
+
+
+def normalise(value: str, layer: Layer | None = None) -> str:
+    """Comparison form of an indicator value: trimmed, inner whitespace collapsed; case-folded only
+    for free-text layers (`CASE_FOLDED_LAYERS`), never for ids, where case is significant."""
+    out = " ".join(value.split())
+    return out.casefold() if layer in CASE_FOLDED_LAYERS else out
 
 
 def _short(value: str, n: int = DISPLAY_LEN) -> str:
@@ -81,6 +87,7 @@ class ScoringContext:
     incident_of: dict[str, str]  # capture id → incident id
     indicator_incident: dict[str, str]  # indicator id → incident id
     values: dict[str, dict[Key, _Values]]  # canonical capture → (layer, kind) → values
+    layers: dict[str, set[Layer]]  # canonical capture → layers it has any indicator in (vectors too)
     index: dict[tuple[Layer, str, str], set[str]]  # (layer, kind, normalised value) → incidents
     n: int  # canonical captures
     n_incidents: int  # incidents with at least one canonical capture
@@ -95,13 +102,17 @@ class ScoringContext:
                 incident_of[cap.id] = inc.id
         canon_ids = {c for c in canonical.values()}
         values: dict[str, dict[Key, _Values]] = {c: {} for c in canon_ids}
+        layers: dict[str, set[Layer]] = {c: set() for c in canon_ids}
         index: dict[tuple[Layer, str, str], set[str]] = defaultdict(set)
         for inc in ds.incidents:
             for ind in inc.indicators:
-                if ind.value is None or normalise(ind.value) in IGNORED_VALUES:
-                    continue
                 cap = canonical[ind.capture_id]
-                norm = normalise(ind.value)
+                layers[cap].add(ind.layer)
+                if ind.value is None:
+                    continue
+                norm = normalise(ind.value, ind.layer)
+                if not norm or norm.casefold() in IGNORED_VALUES:
+                    continue
                 vals = values[cap].setdefault((ind.layer, ind.kind), _Values())
                 vals.ids[norm].append(ind.id)
                 vals.display.setdefault(norm, ind.value)
@@ -116,6 +127,7 @@ class ScoringContext:
             incident_of=incident_of,
             indicator_incident={ind.id: inc.id for inc in ds.incidents for ind in inc.indicators},
             values=values,
+            layers=layers,
             index=dict(index),
             n=len(canon_ids),
             n_incidents=len({incident_of[c] for c in canon_ids}),
@@ -143,8 +155,7 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
     w = ctx.weights
     va, vb = ctx.values[ca], ctx.values[cb]
     ends = {ctx.incident_of[ca], ctx.incident_of[cb]}
-    layers_a = {layer for layer, _ in va}
-    layers_b = {layer for layer, _ in vb}
+    layers_a, layers_b = ctx.layers[ca], ctx.layers[cb]
 
     def ids_of(vals: _Values, norms) -> list[str]:
         # evidence may only cite indicators of the two linked incidents (contract invariant 5);
@@ -264,7 +275,11 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
 
 
 def threshold(ctx: ScoringContext, relation: Relation = Relation.campaign) -> float:
-    """τ = log2(n/m) + 3 bits (07 §2.4); n = canonical captures, m = TYPICAL_SIZE[relation]."""
+    """τ = log2(n/m) + 3 bits (07 §2.4); n = canonical captures, m = TYPICAL_SIZE[relation].
+
+    Deliberate deviation: log2(n/m) is floored at 0, so τ never drops below the 3-bit margin on a
+    collection smaller than one typical group (a negative prior log-odds term would make a single
+    weak row link)."""
     m = TYPICAL_SIZE[Relation(relation)]
     return round(max(math.log2(max(ctx.n, 1) / m), 0.0) + THRESHOLD_MARGIN, 3)
 

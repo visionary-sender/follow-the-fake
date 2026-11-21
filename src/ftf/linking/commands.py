@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
+
+from pydantic import ValidationError
 
 from ftf.contract.models import Dataset, Relation
 from ftf.linking.ledger import ScoringContext, level_of, score_pair, threshold, verdict
@@ -28,9 +31,14 @@ def register_score(subparsers: argparse._SubParsersAction) -> None:
 
 
 def run_score(args: argparse.Namespace) -> int:
-    ds = Dataset.from_json(args.dataset.read_bytes())
-    ctx = ScoringContext.from_dataset(ds)
-    score = score_pair(ctx, args.a, args.b, Relation(args.relation))
+    try:
+        ds = Dataset.from_json(args.dataset.read_bytes())
+        ctx = ScoringContext.from_dataset(ds)
+        score = score_pair(ctx, args.a, args.b, Relation(args.relation))
+    except (OSError, ValidationError, KeyError, ValueError) as exc:
+        msg = exc.args[0] if isinstance(exc, KeyError) and exc.args else exc
+        print(f"ftf score: {msg}", file=sys.stderr)
+        return 2
     print(format_ledger(score, ctx))
     return 0
 

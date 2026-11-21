@@ -265,6 +265,40 @@ def test_unknown_values_ignored():
     assert s.bits == 0 and s.rows == []
 
 
+def test_empty_values_and_id_case():
+    ds = Dataset(name="norm", incidents=[
+        incident("x", [ind(L.creative, "page_title", "  "), ind(L.landing, "aio_landing", "Xq7aB"),
+                       ind(L.creative, "ad_caption", "Same Caption")]),
+        incident("y", [ind(L.creative, "page_title", ""), ind(L.landing, "aio_landing", "xq7ab"),
+                       ind(L.creative, "ad_caption", "same  caption")]),
+        incident("z", []),
+    ])
+    s = score_pair(ScoringContext.from_dataset(ds), "x/lander", "y/lander")
+    assert not [r for r in s.rows if r.kind == "page_title"]  # empty titles are no evidence
+    assert not [r for r in s.rows if r.status is EvidenceStatus.shared and r.kind == "aio_landing"]  # ids keep case
+    assert row(s, "ad_caption").status is EvidenceStatus.shared  # free text folds case
+
+
+def test_missing_row_sees_vector_only_layer():
+    from ftf.contract.models import VectorRef
+    x = incident("x", [ind(L.creative, "ad_caption", "Caption")])
+    y = incident("y", [])
+    y = y.model_copy(update={"indicators": [Indicator(
+        id="y/lander/emb", capture_id="y/lander", layer=L.creative, kind="text_embedding", level=Level.campaign,
+        vector_ref=VectorRef(store="s", key="k", model="m", dim=4), observed=Observed.static, extractor="synthetic@0",
+    )]})
+    s = score_pair(ScoringContext.from_dataset(Dataset(name="vec", incidents=[x, y])), "x/lander", "y/lander")
+    assert not [r for r in s.rows if r.status is EvidenceStatus.missing]
+
+
+def test_cli_score_bad_input(tmp_path, ds, capsys):
+    path = tmp_path / "ds.json"
+    path.write_text(ds.to_json())
+    assert main(["score", str(path), "n/lander", "nope"]) == 2
+    assert "unknown capture nope" in capsys.readouterr().err
+    assert main(["score", str(tmp_path / "absent.json"), "a", "b"]) == 2
+
+
 def test_cli_score(tmp_path, ds, capsys):
     path = tmp_path / "ds.json"
     path.write_text(ds.to_json())
