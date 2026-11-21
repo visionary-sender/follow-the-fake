@@ -48,8 +48,8 @@ EXTRA_CONSTANTS = [
     ind(L.kit, "aio_macros_file", "macros-const"),
     ind(L.kit, "kit_asset_set", "kitset-const"),
     ind(L.kit, "asset_sha256", "asset-const"),
-    ind(L.offer, "contact_email", "desk@mail.example"),
-    ind(L.offer, "form_field_set", "fields-const"),
+    ind(L.kit, "inline_script_sha256", "script-const"),
+    ind(L.kit, "aio_lander_template", "template-const"),
     ind(L.platform, "aio_action_files", "actions-const"),
 ]
 
@@ -88,10 +88,15 @@ def test_shared_platform_is_one_small_term_however_many_constants():
 
 
 def test_platform_constant_in_another_layer_is_capped_without_a_platform_row():
-    consts = [ind(L.kit, "kit_asset_set", "kitset-const"), ind(L.offer, "contact_email", "desk@mail.example")]
+    consts = [ind(L.kit, "kit_asset_set", "kitset-const"), ind(L.kit, "asset_sha256", "asset-const")]
     score = score_pair(ScoringContext.from_dataset(platform_ds(consts)), "x1/lander", "x2/lander")
-    kept = platform_bits(score, {"kit_asset_set", "contact_email"})
+    kept = platform_bits(score, {"kit_asset_set", "asset_sha256"})
     assert len(kept) == 1 and kept[0] <= HAND_TABLE.kinds["platform_name"].bits
+    # an operator-private id across two tenants is never demoted to a platform constant
+    private = [ind(L.offer, "contact_email", "desk@mail.example")]
+    s2 = score_pair(ScoringContext.from_dataset(platform_ds(PLATFORM + private)), "x1/lander", "x2/lander")
+    (email,) = [r for r in s2.rows if r.kind == "contact_email"]
+    assert email.status is EvidenceStatus.shared and email.bits > 0
 
 
 # ---- hierarchy discovery and level-level subsumption ----
@@ -431,3 +436,64 @@ def test_score_warns_about_kinds_without_a_weight_entry(tmp_path, capsys):
     assert main(["score", str(path), "u1/lander", "u2/lander"]) == 0
     err = capsys.readouterr().err
     assert "made_up_kind (2)" in err and "aio_cdn_tenant" not in err
+
+
+# ---- review round 2 ----
+
+
+def test_carriers_without_chain_ids_make_a_value_no_chain_constant():
+    pixel = ind(L.tracking_account, "meta_pixel", "pixel-1", live=True)
+    ds = Dataset(name="synthetic", incidents=[
+        incident("v1", chain("tenant-1", "owner-1", "camp-1", "landing-1") + [pixel]),
+        incident("v2", chain("tenant-1", "owner-1", "camp-1", "landing-2") + [pixel]),
+        incident("v3", [ind(L.platform, "platform_name", "stack-z"), pixel]),
+    ])
+    assert Hierarchy.from_dataset(ds).level((L.tracking_account, "meta_pixel", "pixel-1")) is None
+
+
+def test_one_term_per_level_keeps_the_stronger_of_id_and_constant():
+    def inc(iid, camp):
+        cid = f"{iid}/lander"
+        rows = [(L.tenant, "aio_cdn_tenant", "tenant-1", Level.tenant, True),
+                (L.owner, "aio_owner", "owner-1", Level.operator, False),  # static: 6 − 1 copy prior
+                (L.owner, "aio_campaign", camp, Level.campaign, False),
+                (L.tracker_instance, "xid_tracker_machine", "xid-1", Level.operator, True)]
+        return Incident(id=iid, source="synthetic", captures=[Capture(id=cid, stage="lander")], indicators=[
+            Indicator(id=f"{cid}/{n}", capture_id=cid, layer=ly, kind=k, level=lv, value=v,
+                      observed=Observed.live if live else Observed.static, extractor="synthetic@0")
+            for n, (ly, k, v, lv, live) in enumerate(rows)])
+    ds = Dataset(name="synthetic", incidents=[inc("h1", "camp-1"), inc("h2", "camp-2")])
+    s = score_pair(ScoringContext.from_dataset(ds), "h1/lander", "h2/lander", Relation.operator)
+    rows = {r.kind: r for r in s.rows}
+    level_terms = [rows["aio_owner"].bits, rows["xid_tracker_machine"].bits]
+    assert sorted(level_terms)[0] == 0 and max(level_terms) == pytest.approx(
+        max(HAND_TABLE.kinds["aio_owner"].bits - 1, HAND_TABLE.kinds["xid_tracker_machine"].bits))
+
+
+def test_platform_term_never_opens_the_live_gate():
+    ds = Dataset(name="synthetic", incidents=[
+        incident(f"t{i}", chain(f"tenant-{i}", f"owner-{i}") + [ind(L.kit, "asset_sha256", "asset-const", live=True)])
+        for i in range(3)
+    ])
+    s = score_pair(ScoringContext.from_dataset(ds), "t0/lander", "t1/lander", Relation.operator)
+    (asset,) = [r for r in s.rows if r.kind == "asset_sha256"]
+    assert asset.bits <= HAND_TABLE.kinds["platform_name"].bits
+    assert not s.live_private or any(r.layer in (L.tenant, L.owner) and r.bits > 0 for r in s.rows)
+
+
+def test_capacity_counts_owner_and_campaign_as_two_terms():
+    from ftf.linking.backend import layer_caps
+
+    caps = layer_caps(HAND_TABLE, Relation.campaign)
+    assert caps[L.owner] == pytest.approx(HAND_TABLE.kinds["aio_owner"].bits + HAND_TABLE.kinds["aio_campaign"].bits)
+    assert layer_caps(HAND_TABLE, Relation.template).get(L.owner, 0) <= HAND_TABLE.kinds["aio_owner"].bits
+
+
+def test_corpus_kinds_keep_only_rarity_kinds_and_must_not_link_needs_background(tmp_path):
+    ds = big_campaign_ds()
+    kinds = {i.id: ("fetched_landing" if i.id.startswith("big") else "bare_domain") for i in ds.incidents}
+    bg = BackgroundCounts.from_dataset(ds, corpus_kinds=kinds)
+    assert bg.n_incidents == 8 and bg.n_operators == 1
+    path = tmp_path / "ds.json"
+    path.write_text(ds.to_json())
+    assert main(["learn-weights", str(path), "--must-not-link", str(path), "-o", str(tmp_path / "w.json")]) == 2
