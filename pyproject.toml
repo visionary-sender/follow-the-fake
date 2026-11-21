@@ -31,6 +31,7 @@ features = [
     "imagehash>=4.3,<5",
     "lxml>=5,<7",
     "onnxruntime>=1.18,<2",
+    "opencv-python-headless>=4.9,<5",
     "pillow>=10,<14",
     "tokenizers>=0.19,<1",
     "torch>=2.4",
