@@ -1,0 +1,28 @@
+# Follow the Fake ad-library scan, one capped run (HACK-20). Installed on the sandbox VM by
+# scripts/scanner-sandbox.sh. Runs as the unprivileged user hack20; never fetches landing pages.
+[Unit]
+Description=Follow the Fake ad-library scan
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=hack20
+Group=hack20
+UMask=0027
+WorkingDirectory=/opt/hack-20/home
+Environment=HOME=/opt/hack-20/home XDG_CACHE_HOME=/opt/hack-20/home/.cache XDG_CONFIG_HOME=/opt/hack-20/home/.config
+Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/hack-20/ms-playwright LANG=C.UTF-8
+EnvironmentFile=-/opt/hack-20/scan.env
+ExecStart=/opt/hack-20/venv/bin/ftf scan --out /opt/hack-20/data --download-creatives $FTF_SCAN_ARGS
+StandardOutput=append:/opt/hack-20/log/scan.log
+StandardError=append:/opt/hack-20/log/scan.log
+# 75 = another scan still holds the lock: skipped, not failed.
+SuccessExitStatus=75
+TimeoutStartSec=90min
+Nice=10
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/hack-20/data /opt/hack-20/home /opt/hack-20/log
