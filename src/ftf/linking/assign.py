@@ -26,6 +26,7 @@ import math
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 from ftf.contract.models import (
@@ -65,9 +66,11 @@ def assign(
     incident: Incident,
     relation: Relation = Relation.campaign,
     backend: Optional[BackendFactory] = None,
+    base_dir: Optional[Path] = None,
+    incident_dir: Optional[Path] = None,
 ) -> Assignment:
     """Assign `incident` to a campaign of `relation` in `collection`, or declare it new, or send it to review."""
-    return link_incident(collection, incident, relation, backend=backend).assignment
+    return link_incident(collection, incident, relation, backend=backend, base_dir=base_dir, incident_dir=incident_dir).assignment
 
 
 def link_incident(
@@ -75,11 +78,15 @@ def link_incident(
     incident: Incident,
     relation: Relation = Relation.campaign,
     backend: Optional[BackendFactory] = None,
+    base_dir: Optional[Path] = None,
+    incident_dir: Optional[Path] = None,
 ) -> IncidentResult:
     """The assignment plus ledgers from the incident's captures to members of its top candidate campaigns.
 
     `base` is the output of `ftf link` / `link_dataset`. The links are valid inside `base` plus
-    the incident.
+    the incident. `base_dir` / `incident_dir` are where the base's and the incident's vector
+    stores live (content views, HACK-24); while they are None, content views are skipped. They
+    are accepted but not used yet.
     """
     if any(i.id == incident.id for i in base.incidents):
         raise ValueError(f"incident {incident.id} is already in the collection")
