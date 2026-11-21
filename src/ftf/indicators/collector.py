@@ -132,7 +132,7 @@ def _scalar(value: object) -> str | None:
 def _size(w: object, h: object) -> str | None:
     try:
         wi, hi = int(float(str(w))), int(float(str(h)))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     if not (0 < wi < 20000 and 0 < hi < 20000):
         return None
@@ -213,7 +213,7 @@ class _Emitter:
             elif isinstance(v, str) and len(v) < MAX_BODY and v[:1] in "{[":
                 try:
                     inner = json.loads(v)
-                except ValueError:
+                except (ValueError, RecursionError):
                     continue
                 self.walk(inner, observed, art, f"{locator}.{k}", depth + 1)
 
@@ -295,23 +295,23 @@ class _Emitter:
 
     def paths(self, text: str, observed: Observed, art: Artefact, locator: str) -> None:
         """Local paths, also inside percent-encoded values (e.g. a tracker's `url=` parameter)."""
-        texts = [text]
-        while "%" in texts[-1] and len(texts) < 3:
-            decoded = unquote(texts[-1])
-            if decoded == texts[-1]:
+        # Scan only the most-decoded copy: undecoded text is a subset of it, and one pass gives one
+        # value per path (a raw %20 would otherwise end the match early on the decoded pass).
+        t = text
+        for _ in range(2):
+            if "%" not in t:
                 break
-            texts.append(decoded)
-        for t in texts:
-            uris = [m.span() for m in _FILE_URI.finditer(t)]
-            for rx in (_FILE_URI, _WIN_PATH):
-                for m in rx.finditer(t):
-                    if rx is _WIN_PATH and any(a <= m.start() < b for a, b in uris):
-                        continue  # the same path inside a file:// URI, already emitted
-                    path = unquote(m.group(0))
-                    self.add("local_path", path, observed, art, locator)
-                    u = _USER_IN_PATH.search(path.replace("\\\\", "\\"))
-                    if u and u.group(1).lower() not in _GENERIC_USERS:
-                        self.add("os_username", u.group(1), observed, art, locator)
+            t = unquote(t)
+        uris = [m.span() for m in _FILE_URI.finditer(t)]
+        for rx in (_FILE_URI, _WIN_PATH):
+            for m in rx.finditer(t):
+                if rx is _WIN_PATH and any(a <= m.start() < b for a, b in uris):
+                    continue  # the same path inside a file:// URI, already emitted
+                path = m.group(0)
+                self.add("local_path", path, observed, art, locator)
+                u = _USER_IN_PATH.search(path.replace("\\\\", "\\"))
+                if u and u.group(1).lower() not in _GENERIC_USERS:
+                    self.add("os_username", u.group(1), observed, art, locator)
 
 
 # ---- per artefact type ------------------------------------------------------------------------
@@ -336,7 +336,7 @@ def _aio_blobs(text: str) -> Iterator[tuple[int, object]]:
             try:
                 yield m.start(), json.loads(decode(raw))
                 break
-            except (ValueError, UnicodeError):
+            except (ValueError, UnicodeError, RecursionError):
                 continue
 
 
@@ -359,6 +359,8 @@ def _from_mhtml(em: _Emitter, art: Artefact, data: bytes) -> None:
     if date:
         try:
             when = email.utils.parsedate_to_datetime(str(date))
+            if when.tzinfo is None:  # "-0000" or no zone: RFC 5322 says UTC, never the host zone
+                when = when.replace(tzinfo=timezone.utc)
             em.add("capture_time", when.astimezone(timezone.utc).isoformat(), Observed.static, art, "mhtml:Date")
         except (TypeError, ValueError):
             pass
@@ -381,12 +383,42 @@ def _from_mhtml(em: _Emitter, art: Artefact, data: bytes) -> None:
             em.paths(str(loc), Observed.static, art, f"part[{n}].Content-Location")
 
 
+def _d(value: object) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def _earlier(t: str, first: str | None) -> bool:
+    """True if HAR time `t` is before `first` (compared as instants, not strings)."""
+    if first is None:
+        return True
+    a, b = _instant(t), _instant(first)
+    if a is None or b is None:
+        return a is not None and b is None
+    return a < b
+
+
+def _instant(t: str) -> datetime | None:
+    try:
+        dt = datetime.fromisoformat(t.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _valid(y, mo, d, hh=None, mi=None, ss=None) -> bool:
+    try:
+        datetime(int(y), int(mo), int(d), int(hh or 0), int(mi or 0), int(ss or 0))
+    except ValueError:
+        return False
+    return 2000 <= int(y) <= 2100
+
+
 def _har_body(entry: dict, which: str) -> str | None:
     if which == "request":
-        pd = (entry.get("request") or {}).get("postData") or {}
+        pd = _d(_d(entry.get("request")).get("postData"))
         text = pd.get("text")
     else:
-        content = (entry.get("response") or {}).get("content") or {}
+        content = _d(_d(entry.get("response")).get("content"))
         text = content.get("text")
         if text and content.get("encoding") == "base64":
             try:
@@ -401,30 +433,30 @@ def _har_body(entry: dict, which: str) -> str | None:
 def _from_har(em: _Emitter, art: Artefact, data: bytes) -> None:
     try:
         har = json.loads(data.decode("utf-8", "replace"))
-    except ValueError:
+    except (ValueError, RecursionError):
         return
     log = har.get("log") if isinstance(har, dict) else None
     if not isinstance(log, dict):
         return
     live = Observed.live
     first: str | None = None
-    for n, page in enumerate(log.get("pages") or []):
+    for n, page in enumerate(log.get("pages") if isinstance(log.get("pages"), list) else []):
         if not isinstance(page, dict):
             continue
         t = page.get("startedDateTime")
-        if isinstance(t, str) and (first is None or t < first):
+        if isinstance(t, str) and _earlier(t, first):
             first = t
         title = page.get("title")
         if isinstance(title, str):
             em.paths(title, live, art, f"pages[{n}].title")
-    for i, entry in enumerate(log.get("entries") or []):
+    for i, entry in enumerate(log.get("entries") if isinstance(log.get("entries"), list) else []):
         if not isinstance(entry, dict):
             continue
         loc = f"entries[{i}]"
         t = entry.get("startedDateTime")
-        if isinstance(t, str) and (first is None or t < first):
+        if isinstance(t, str) and _earlier(t, first):
             first = t
-        req = entry.get("request") or {}
+        req = _d(entry.get("request"))
         url = req.get("url") or ""
         if isinstance(url, str):
             em.query(url, live, art, f"{loc}.request.url")
@@ -440,7 +472,7 @@ def _from_har(em: _Emitter, art: Artefact, data: bytes) -> None:
                 em.add("browser_fingerprint", value, live, art, f"{loc}.request.headers.x-client-data", field="x-client-data")
             elif name in ("referer", "origin"):
                 em.paths(value, live, art, f"{loc}.request.headers.{name}")
-        pd = req.get("postData") or {}
+        pd = _d(req.get("postData"))
         params = pd.get("params") if isinstance(pd, dict) else None
         if params:
             flat = {str(p.get("name", "")).lower(): unquote(str(p.get("value", ""))) for p in params if isinstance(p, dict)}
@@ -451,7 +483,7 @@ def _from_har(em: _Emitter, art: Artefact, data: bytes) -> None:
             em.paths(body, live, art, f"{loc}.request.postData")
         rbody = _har_body(entry, "response")
         if rbody:
-            mime = str(((entry.get("response") or {}).get("content") or {}).get("mimeType", "")).lower()
+            mime = str(_d(_d(entry.get("response")).get("content")).get("mimeType", "")).lower()
             if "json" in mime or rbody[:1] in "{[":
                 _payload(em, rbody, live, art, f"{loc}.response.content")
             elif "html" in mime and "window.aio" in rbody:
@@ -467,7 +499,7 @@ def _payload(em: _Emitter, text: str, observed: Observed, art: Artefact, locator
         try:
             em.walk(json.loads(s), observed, art, locator)
             return
-        except ValueError:
+        except (ValueError, RecursionError):
             pass
     if "=" in s and "\n" not in s[:2000]:
         try:
@@ -510,6 +542,9 @@ def _from_screenshot(em: _Emitter, art: Artefact, path: Path) -> None:
     m = _SHOT_NAME.search(path.name)
     if m:
         y, mo, d, hh, mi, ss = m.groups()
+        if not _valid(y, mo, d, hh, mi, ss):
+            m = None
+    if m:
         em.add("screenshot_date", f"{y}-{mo}-{d}", Observed.static, art, "filename")
         if hh:
             em.add("capture_time", f"{y}-{mo}-{d}T{hh}:{mi}:{ss} local", Observed.static, art, "filename")
@@ -528,7 +563,7 @@ def _from_json_text(em: _Emitter, art: Artefact, data: bytes) -> None:
     if len(text) <= MAX_BODY and text.lstrip()[:1] in "{[":
         try:
             em.walk(json.loads(text), Observed.static, art, "$")
-        except ValueError:
+        except (ValueError, RecursionError):
             pass
     em.paths(text[:MAX_BODY], Observed.static, art, "text")
 
@@ -549,12 +584,15 @@ def extract(incident: Incident, capture: Capture, root: Path) -> Iterable[Indica
         data = _read(path)
         if data is None:
             continue
-        if art.type is ArtefactType.har:
-            _from_har(em, art, data)
-        elif art.type is ArtefactType.html:
-            _from_html(em, art, data)
-        elif art.type is ArtefactType.mhtml:
-            _from_mhtml(em, art, data)
-        elif path.suffix.lower() in (".json", ".txt", ".har", ".html", ".htm"):
-            _from_json_text(em, art, data)
+        try:
+            if art.type is ArtefactType.har:
+                _from_har(em, art, data)
+            elif art.type is ArtefactType.html:
+                _from_html(em, art, data)
+            elif art.type is ArtefactType.mhtml:
+                _from_mhtml(em, art, data)
+            elif path.suffix.lower() in (".json", ".txt", ".har", ".html", ".htm"):
+                _from_json_text(em, art, data)
+        except (ValueError, TypeError, AttributeError, KeyError, IndexError, OverflowError, RecursionError, UnicodeError):
+            continue  # a malformed hostile file must not stop the run; what was found so far is kept
     return em.out

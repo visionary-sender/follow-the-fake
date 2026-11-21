@@ -225,3 +225,47 @@ def test_garbage_files_do_not_crash(tmp_path: Path):
     ])
     inc = Incident(id="c3", source="t", captures=[cap])
     assert list(collector.extract(inc, cap, tmp_path)) == []
+
+
+def one_har_capture(tmp_path: Path, data: bytes, cid: str = "c5"):
+    (tmp_path / "x.har").write_bytes(data)
+    cap = Capture(id=f"{cid}:s1", stage="lander", artefacts=[Artefact(id=f"{cid}:a", type="har", path="x.har")])
+    return Incident(id=cid, source="t", captures=[cap]), cap
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        har([entry("https://x.example.test/?sw=inf&sh=1080")]),
+        har([entry("https://x.example.test/", post={"mimeType": "application/json", "text": '{"screen_width": Infinity, "screen_height": 1}'})]),
+        har([entry("https://x.example.test/", post={"mimeType": "application/json", "text": "[" * 100_000})]),
+        har([{"request": [], "response": "x"}, {"request": {"url": "https://x.example.test/", "postData": "a=b"}, "response": {"content": "z"}}]),
+        json.dumps({"log": {"entries": 5, "pages": "x"}}).encode(),
+    ],
+)
+def test_hostile_har_shapes_do_not_crash(tmp_path: Path, payload: bytes):
+    inc, cap = one_har_capture(tmp_path, payload)
+    inds = list(collector.extract(inc, cap, tmp_path))
+    assert all(i.layer is Layer.collector for i in inds)
+    assert "screen_size" not in {i.kind for i in inds}
+
+
+def test_earliest_har_time_compares_instants(tmp_path: Path):
+    payload = har([entry("https://x.example.test/a", t="2026-10-09T07:30:00Z"), entry("https://x.example.test/b", t="2026-10-09T08:00:00+02:00")])
+    inc, cap = one_har_capture(tmp_path, payload)
+    times = {i.value for i in collector.extract(inc, cap, tmp_path) if i.kind == "capture_time"}
+    assert times == {"2026-10-09T08:00:00+02:00"}
+
+
+def test_invalid_screenshot_name_date_is_ignored(tmp_path: Path):
+    (tmp_path / "capture_12345678.png").write_bytes(b"")
+    cap = Capture(id="c6:s1", stage="ad", artefacts=[Artefact(id="c6:a", type="ad_screenshot", path="capture_12345678.png")])
+    inds = list(collector.extract(Incident(id="c6", source="t", captures=[cap]), cap, tmp_path))
+    assert not [i for i in inds if i.kind in ("screenshot_date", "capture_day", "capture_time")]
+
+
+def test_mhtml_date_without_zone_is_utc(tmp_path: Path):
+    (tmp_path / "p.mhtml").write_bytes(b"From: <Saved by Blink>\r\nDate: Thu, 08 Oct 2026 09:09:43 -0000\r\nMIME-Version: 1.0\r\nContent-Type: text/html\r\n\r\n<html></html>\r\n")
+    cap = Capture(id="c7:s1", stage="lander", artefacts=[Artefact(id="c7:a", type="mhtml", path="p.mhtml")])
+    inds = list(collector.extract(Incident(id="c7", source="t", captures=[cap]), cap, tmp_path))
+    assert {i.value for i in inds if i.kind == "capture_time"} == {"2026-10-08T09:09:43+00:00"}

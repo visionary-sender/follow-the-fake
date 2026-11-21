@@ -29,7 +29,10 @@ def ind(kind: str, value: str, layer: Layer = Layer.infrastructure) -> Indicator
         ("registered_domain", "on.aws"),
         ("host", "www.gazeta.pl"),
         ("host", "https://code.jquery.com/jquery-3.7.1.min.js"),
-        ("script_url", "https://cdnjs.cloudflare.com/ajax/libs/x/1/x.js"),
+        ("script_url", "https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"),
+        ("font_url", "https://fonts.googleapis.com/css2?family=Oswald"),
+        ("script_src_sha256", JQUERY_371),
+        ("logo_url", "https://static.im-g.pl/logo.svg"),
         ("asset_sha256", JQUERY_371),
         ("content_hash", "sha256:" + JQUERY_371),
         ("server_ip", "188.114.96.11"),
@@ -61,6 +64,8 @@ def test_hits(kind, value):
         ("pixel_host", "connect.facebook.net"),
         ("asset_phash", JQUERY_371),
         ("page_title", "jquery-3.7.1.min.js"),  # no family
+        ("script_url", "https://cdn.jsdelivr.net/gh/someone/kit@1/app.js"),  # own code on a public CDN
+        ("script_url", "https://unpkg.com/some-kit@1.0.0/dist/index.js"),
     ],
 )
 def test_non_hits(kind, value):

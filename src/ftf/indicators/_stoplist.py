@@ -8,15 +8,18 @@ keys on kind *families*, recognised from the kind string:
 | family    | kind looks like                                       | value matched against                |
 |-----------|-------------------------------------------------------|--------------------------------------|
 | host      | `host`/`domain`, or ends in `_host`, `_hostname`, `_domain` | `hosts.*` (entry or any subdomain), `bare_domains` (exact) |
-| url       | `url`, or ends in `_url`/`_uri`, or contains `src`/`href` | the URL's host against `hosts.cdn` and `hosts.brands` only |
-| ip        | `ip`, or ends in `_ip`/`_ip_address`                  | `ip_networks` (CIDR)                  |
 | hash      | contains `sha256`, `sha1`, `md5` or `hash`            | `hashes` (hex, optional `sha256:` prefix) |
+| ip        | `ip`, or ends in `_ip`/`_ip_address`                  | `ip_networks` (CIDR)                  |
+| url       | `url`, or ends in `_url`/`_uri`, or contains `src`/`href` | host in `hosts.brands` or `hosts.fonts`; host in `hosts.cdn` only if the file name is in `file_names` |
 | file name | contains `basename`, `filename`, `file_name`, `asset_name` | `file_names` regexes (`.pobrane` removed) |
 | header    | contains `header`                                     | `values.headers` (exact, case-insensitive) |
 | parameter | contains `param` or `query`                           | `values.params` (exact, case-insensitive) |
 
-Hosts matched on URL kinds are restricted to CDNs and brand sites: an SDK host such as
-www.facebook.com also serves scammers' own pages, so a URL there can be a real identifier.
+Families are tried in table order, so `script_src_sha256` is a hash, not a URL.
+
+URL kinds are stricter than host kinds: an SDK host such as www.facebook.com also serves
+scammers' own pages, and a public CDN path (`cdn.jsdelivr.net/gh/<user>/...`, `unpkg.com/<pkg>`) can
+name a scammer's own package. So a CDN URL is stopped only when its file is a known library.
 
 Never stopped, whatever the value:
 - the collector layer (it is excluded from linking by type already, and the demo shows it);
@@ -46,7 +49,9 @@ class _Lists:
     def __init__(self, data: dict) -> None:
         hosts = data["hosts"]
         self.all_hosts = frozenset(h.lower() for key, vals in hosts.items() if key != "about" for h in vals)
-        self.url_hosts = frozenset(h.lower() for h in hosts.get("cdn", []) + hosts.get("brands", []))
+        self.cdn_hosts = frozenset(h.lower() for h in hosts.get("cdn", []))
+        self.font_hosts = frozenset(h.lower() for h in hosts.get("fonts", []))
+        self.brand_hosts = frozenset(h.lower() for h in hosts.get("brands", []))
         self.bare = frozenset(d.lower() for d in data["bare_domains"]["values"])
         self.nets = tuple(ipaddress.ip_network(n) for n in data["ip_networks"]["values"])
         self.hashes = frozenset(h.lower() for h in data["hashes"]["values"])
@@ -68,12 +73,12 @@ def family(kind: str) -> str | None:
         return None
     if k in ("host", "domain", "hostname") or k.endswith(("_host", "_hostname", "_domain")):
         return "host"
-    if k == "url" or k.endswith(("_url", "_uri")) or "src" in k or "href" in k:
-        return "url"
-    if k == "ip" or k.endswith(("_ip", "_ip_address")):
-        return "ip"
     if any(p in k for p in ("sha256", "sha1", "md5", "hash")):
         return "hash"
+    if k == "ip" or k.endswith(("_ip", "_ip_address")):
+        return "ip"
+    if k == "url" or k.endswith(("_url", "_uri")) or "src" in k or "href" in k:
+        return "url"
     if any(p in k for p in ("basename", "filename", "file_name", "asset_name")):
         return "name"
     if "header" in k:
@@ -98,6 +103,12 @@ def host_stopped(host: str, entries: frozenset[str]) -> bool:
     return any(".".join(parts[i:]) in entries for i in range(len(parts) - 1))
 
 
+def _name_stopped(name: str, L: _Lists) -> bool:
+    if name.lower().endswith(".pobrane"):
+        name = name[: -len(".pobrane")]
+    return bool(name) and bool(L.names.fullmatch(name))
+
+
 def is_stopped(indicator: Indicator) -> bool:
     """True if the indicator's value is a public library, CDN, shared front end or brand asset."""
     if indicator.layer is Layer.collector or indicator.value is None:
@@ -112,10 +123,16 @@ def is_stopped(indicator: Indicator) -> bool:
         return bool(host) and (host in L.bare or host_stopped(host, L.all_hosts))
     if fam == "url":
         try:
-            host = (urlsplit(value if "://" in value else "//" + value).hostname or "").lower()
+            parts = urlsplit(value if "://" in value else "//" + value)
         except ValueError:
             return False
-        return bool(host) and host_stopped(host, L.url_hosts)
+        host = (parts.hostname or "").lower()
+        if not host:
+            return False
+        if host_stopped(host, L.brand_hosts) or host_stopped(host, L.font_hosts):
+            return True
+        name = parts.path.rstrip("/").rsplit("/", 1)[-1]
+        return host_stopped(host, L.cdn_hosts) and _name_stopped(name, L)
     if fam == "ip":
         try:
             ip = ipaddress.ip_address(value)
@@ -126,10 +143,7 @@ def is_stopped(indicator: Indicator) -> bool:
         m = _HEX.match(value.lower())
         return bool(m) and m.group(1) in L.hashes
     if fam == "name":
-        name = value.replace("\\", "/").rsplit("/", 1)[-1].split("?", 1)[0]
-        if name.lower().endswith(".pobrane"):
-            name = name[: -len(".pobrane")]
-        return bool(L.names.fullmatch(name))
+        return _name_stopped(value.replace("\\", "/").rsplit("/", 1)[-1].split("?", 1)[0], L)
     if fam == "header":
         return value.lower() in L.headers
     if fam == "param":

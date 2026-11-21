@@ -5,9 +5,10 @@
     "cdn": [
       "cdn.jsdelivr.net", "fastly.jsdelivr.net", "cdnjs.cloudflare.com", "unpkg.com", "code.jquery.com", "ajax.googleapis.com",
       "ajax.aspnetcdn.com", "stackpath.bootstrapcdn.com", "maxcdn.bootstrapcdn.com", "cdn.skypack.dev", "esm.sh", "cdn.tailwindcss.com",
-      "use.fontawesome.com", "kit.fontawesome.com", "ka-f.fontawesome.com", "fonts.googleapis.com", "fonts.gstatic.com", "www.gstatic.com",
+      "use.fontawesome.com", "kit.fontawesome.com", "ka-f.fontawesome.com", "www.gstatic.com",
       "ssl.gstatic.com", "cct.google", "polyfill.io", "cdn.polyfill.io"
     ],
+    "fonts": ["fonts.googleapis.com", "fonts.gstatic.com"],
     "sdk": [
       "connect.facebook.net", "www.facebook.com", "facebook.com", "graph.facebook.com", "static.xx.fbcdn.net", "www.googletagmanager.com",
       "www.google-analytics.com", "region1.google-analytics.com", "analytics.google.com", "stats.g.doubleclick.net", "googleads.g.doubleclick.net",
