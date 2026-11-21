@@ -92,7 +92,11 @@ def norm_uuid(v: str) -> str | None:
     return v if re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", v) else None
 
 
-_PLACEHOLDER_NATIONAL = {"123456789", "987654321", "111222333", "123123123", "500600700", "000000000"}
+# Obvious fillers plus the libphonenumber / intl-tel-input example numbers (PL, CZ, SK, DE, UK, ...).
+_PLACEHOLDER_NATIONAL = {
+    "123456789", "987654321", "111222333", "123123123", "500600700", "000000000",
+    "512345678", "601123456", "912123456", "15123456789", "7400123456", "201555012",
+}
 
 
 def norm_phone(raw: str) -> str | None:
@@ -142,8 +146,8 @@ def norm_path(path: str) -> str | None:
     p = re.sub(r"^[a-z][a-z0-9+.\-]*://[^/]*", "", p, flags=re.I)
     if p.startswith("//"):
         p = re.sub(r"^//[^/]*", "", p)
-    p = p.split("#", 1)[0].split("?", 1)[0]
-    p = re.sub(r"/{2,}", "/", unquote_plus(p)).lower()
+    p = unquote_plus(p).split("#", 1)[0].split("?", 1)[0]
+    p = re.sub(r"/{2,}", "/", p).lower()
     trailing = p.endswith("/")
     p = posixpath.normpath("/" + p.lstrip("/"))
     if p.startswith("//"):
@@ -220,7 +224,6 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("contact_telegram", re.compile(r"(?:\bt\.me|\btelegram\.me)/([A-Za-z0-9_]{5,32})\b")),
     ("contact_email", re.compile(r"(?:mailto:)?\b([A-Za-z0-9._%+\-]{1,64}@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,12})\b")),
     ("contact_phone", re.compile(r"""tel:([+\d][\d\s\-().]{6,22}\d)""")),
-    ("contact_phone", re.compile(r"(?:wa\.me/|api\.whatsapp\.com/send/?\?phone=)(\+?\d{8,15})")),
     ("contact_phone", re.compile(r"(?<![\w+])(\+48[\s\-]?\d{3}[\s\-]?\d{3}[\s\-]?\d{3})(?!\d)")),
 ]
 
@@ -275,14 +278,28 @@ def scan_params(text: str) -> Iterator[Hit]:
         yield Hit("tracker_postback", m.group(1).lower() + m.group(2).lower())
 
 
-def scan(text: str) -> Iterator[Hit]:
-    """All identifier hits in `text` (page code, a URL, a request body)."""
+CONTACT_KINDS = frozenset({"contact_phone", "contact_email", "contact_telegram"})
+_WHATSAPP = re.compile(r"(?:wa\.me/|api\.whatsapp\.com/send/?\?phone=)\+?(\d{8,15})")
+_PLACEHOLDER_ATTR = re.compile(r"""placeholder\s*=\s*(?:"[^"]*"|'[^']*')""", re.I)
+
+
+def scan(text: str, contacts: bool = True) -> Iterator[Hit]:
+    """All identifier hits in `text` (page code, a URL, a request body).
+
+    `contacts=False` skips phones, emails and messenger handles: use it on what the collector
+    sent (request URLs and bodies), which can hold the analyst's own form input.
+    """
     text = strip_tokens(text.replace("&amp;", "&").replace("\\/", "/").replace("\\u0026", "&"))
     for name, rx in _PLATFORM_MARKERS:
         if rx.search(text):
             yield Hit("platform_name", name)
+    # Input placeholders show example numbers and addresses, not the operator's.
+    contact_text = _PLACEHOLDER_ATTR.sub("", text) if contacts else ""
     for kind, rx in _PATTERNS:
-        for m in rx.finditer(text):
+        is_contact = kind in CONTACT_KINDS
+        if is_contact and not contacts:
+            continue
+        for m in rx.finditer(contact_text if is_contact else text):
             v = m.group(1)
             if kind == "contact_phone":
                 v = norm_phone(v)
@@ -298,4 +315,9 @@ def scan(text: str) -> Iterator[Hit]:
                 v = norm_uuid(v)
             if v:
                 yield Hit(kind, v)
+    if contacts:
+        for m in _WHATSAPP.finditer(contact_text):
+            # wa.me numbers are always international, written without the "+".
+            if v := norm_phone("+" + m.group(1)):
+                yield Hit("contact_phone", v)
     yield from scan_params(text)

@@ -29,7 +29,9 @@ def _js_unescape(s: str) -> str:
             return chr(int(e[1:], 16))
         return _SIMPLE.get(e, e)
 
-    return _JS_ESC.sub(sub, s)
+    out = _JS_ESC.sub(sub, s)
+    # Re-pair UTF-16 surrogate escapes (emoji) and drop lone ones, so values serialise as UTF-8.
+    return out.encode("utf-16", "surrogatepass").decode("utf-16", "replace")
 
 
 def aio_config(text: str) -> dict | None:
@@ -157,8 +159,8 @@ def form_body_fields(body: str, mime: str) -> str | None:
 
 # --------------------------------------------------------------------------- MHTML
 
-def mhtml_parts(data: bytes) -> Iterator[tuple[int, str, str]]:
-    """(part index, content type, text) for each textual part of an MHTML archive."""
+def mhtml_parts(data: bytes) -> Iterator[tuple[int, str, str, str]]:
+    """(part index, content type, Content-Location, text) for each textual part of an MHTML archive."""
     msg = email.message_from_bytes(data, policy=email.policy.default)
     for i, part in enumerate(msg.walk()):
         if part.is_multipart():
@@ -174,4 +176,4 @@ def mhtml_parts(data: bytes) -> Iterator[tuple[int, str, str]]:
             text = payload.decode(part.get_content_charset() or "utf-8", "replace")
         except LookupError:
             text = payload.decode("utf-8", "replace")
-        yield i, ct, text
+        yield i, ct, str(part.get("Content-Location") or ""), text

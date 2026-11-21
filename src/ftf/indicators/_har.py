@@ -55,13 +55,22 @@ def entries(path: Path) -> Iterator[Entry]:
     for i, e in enumerate(items):
         if not isinstance(e, dict):
             continue
-        req = e.get("request") or {}
-        resp = e.get("response") or {}
+        req = e.get("request")
+        resp = e.get("response")
+        if not isinstance(req, dict):
+            continue
+        if not isinstance(resp, dict):
+            resp = {}
         url = req.get("url") or ""
         if not isinstance(url, str) or url.startswith(("data:", "blob:", "chrome", "about:")):
             continue
-        post = req.get("postData") or {}
-        headers = {str(h.get("name", "")).lower(): str(h.get("value", "")) for h in resp.get("headers") or [] if isinstance(h, dict)}
+        post = req.get("postData")
+        if not isinstance(post, dict):
+            post = {}
+        raw_headers = resp.get("headers")
+        if not isinstance(raw_headers, list):
+            raw_headers = []
+        headers = {str(h.get("name", "")).lower(): str(h.get("value", "")) for h in raw_headers if isinstance(h, dict)}
         content = resp.get("content") or {}
         yield Entry(
             index=i,

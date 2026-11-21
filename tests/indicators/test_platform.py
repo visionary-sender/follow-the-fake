@@ -87,7 +87,7 @@ def _capture(tmp_path: Path) -> tuple[Incident, Capture]:
     (tmp_path / "case" / "page.html").write_text(_aio_page(), encoding="utf-8")
     (tmp_path / "case" / "net.har").write_text(json.dumps(_har_doc()), encoding="utf-8")
     (tmp_path / "case" / "page_files").mkdir()
-    (tmp_path / "case" / "page_files" / f"{PIXEL}.pobrane").write_text("config", encoding="utf-8")
+    (tmp_path / "case" / "page_files" / f"{PIXEL}.pobrane").write_text("fbq.registerPlugin(1)", encoding="utf-8")
     (tmp_path / "case" / "page_files" / "jquery.min.js").write_text(f"fbq('init','{PIXEL2}9')", encoding="utf-8")
     cap = Capture(
         id="t-1/lander",
@@ -274,3 +274,87 @@ def test_beacon_posts_are_not_forms(tmp_path):
     cap = Capture(id="b-1/lander", stage=Stage.lander, artefacts=[Artefact(id="b-1/lander/a0", type=ArtefactType.har, path="n.har")])
     got = _index(platform.extract(Incident(id="b-1", source="synthetic", captures=[cap]), cap, tmp_path))
     assert not any(k in ("form_endpoint", "form_field_set") for k, _ in got)
+
+
+def _har_capture(tmp_path: Path, entries: list, cid: str = "h-1") -> tuple[Incident, Capture]:
+    (tmp_path / f"{cid}.har").write_text(json.dumps({"log": {"entries": entries}}), encoding="utf-8")
+    cap = Capture(id=f"{cid}/lander", stage=Stage.lander,
+                  artefacts=[Artefact(id=f"{cid}/lander/a0", type=ArtefactType.har, path=f"{cid}.har")])
+    return Incident(id=cid, source="synthetic", captures=[cap]), cap
+
+
+def _resp(body: str, mime: str = "text/html") -> dict:
+    return {"status": 200, "headers": [], "content": {"mimeType": mime, "text": body}}
+
+
+def test_collector_form_input_is_not_an_operator_contact(tmp_path):
+    entries = [
+        {"request": {"method": "POST", "url": "https://land.example.test/api/lead",
+                     "postData": {"mimeType": "application/json",
+                                  "text": '{"email":"analyst@cert.example","phone":"+48 601 234 567"}'}},
+         "response": _resp("<p>Thanks analyst@cert.example, we call +48 601 234 567</p>")},
+        {"request": {"method": "GET", "url": "https://land.example.test/ok?email=other%40cert.example"},
+         "response": _resp("<a href='tel:+48602345678'>desk</a>")},
+    ]
+    inc, cap = _har_capture(tmp_path, entries)
+    got = _index(platform.extract(inc, cap, tmp_path))
+    assert ("contact_email", "analyst@cert.example") not in got
+    assert ("contact_phone", "+48601234567") not in got
+    assert ("contact_email", "other@cert.example") not in got
+    assert got[("contact_phone", "+48602345678")] == {Observed.static}
+
+
+def test_malformed_har_entries_are_skipped(tmp_path):
+    entries = [
+        {"request": "GET /", "response": {}},
+        {"request": {"method": "POST", "url": "https://land.example.test/x", "postData": "name=a"}, "response": "oops"},
+        {"request": {"url": f"https://www.facebook.com/tr/?id={PIXEL}"}, "response": {"headers": "bad", "content": []}},
+    ]
+    inc, cap = _har_capture(tmp_path, entries)
+    got = _index(platform.extract(inc, cap, tmp_path))
+    assert got[("meta_pixel", PIXEL)] == {Observed.live}
+
+
+def test_library_bodies_skipped_kit_scripts_read(tmp_path):
+    entries = [
+        {"request": {"method": "GET", "url": "https://cdn.example.test/js/jquery-3.7.1.min.js"},
+         "response": _resp("/* author@jquery.example.org +48 602 345 678 */", "application/javascript")},
+        {"request": {"method": "GET", "url": "https://land.example.test/js/slick-init.js?v=2"},
+         "response": _resp(f"fbq('init', '{PIXEL2}')", "application/javascript")},
+    ]
+    inc, cap = _har_capture(tmp_path, entries)
+    got = _index(platform.extract(inc, cap, tmp_path))
+    assert ("contact_phone", "+48602345678") not in got
+    assert got[("meta_pixel", PIXEL2)] == {Observed.static}
+
+
+def test_pixel_filename_needs_signals_content(tmp_path):
+    (tmp_path / "p_files").mkdir()
+    (tmp_path / "p_files" / "1791460000123456").write_text("var t = 1;", encoding="utf-8")
+    cap = Capture(id="f-1/lander", stage=Stage.lander,
+                  artefacts=[Artefact(id="f-1/lander/a0", type=ArtefactType.asset, path="p_files/1791460000123456")])
+    got = _index(platform.extract(Incident(id="f-1", source="synthetic", captures=[cap]), cap, tmp_path))
+    assert ("meta_pixel", "1791460000123456") not in got
+
+
+def test_emoji_in_aio_names_serialises(tmp_path):
+    from ftf.indicators._html import aio_config
+
+    page = "<script>window.aio = JSON.parse('{\"campaign\":{\"name\":\"PL \\\\ud83d\\\\ude80 Camp\"}}');</script>"
+    cfg = aio_config(page)
+    assert cfg["campaign"]["name"] == "PL \U0001F680 Camp"
+    (tmp_path / "e.html").write_text(page, encoding="utf-8")
+    cap = Capture(id="e-1/lander", stage=Stage.lander,
+                  artefacts=[Artefact(id="e-1/lander/a0", type=ArtefactType.html, path="e.html")])
+    inc = Incident(id="e-1", source="synthetic", captures=[cap])
+    extract_all(Dataset(name="t", incidents=[inc]), tmp_path).to_json()
+
+
+def test_whatsapp_placeholders_and_encoded_query():
+    from ftf.indicators._ids import norm_path
+
+    hits = {(h.kind, h.value) for h in scan(
+        'https://wa.me/447911123456 <input placeholder="+48 512 345 678"> <input placeholder="+48 603 111 222">')}
+    assert ("contact_phone", "+447911123456") in hits
+    assert not any(k == "contact_phone" and v in ("+48512345678", "+48603111222") for k, v in hits)
+    assert norm_path("/order.php%3Fsrc%3Dfb") == "/order.php"

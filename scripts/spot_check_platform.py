@@ -140,15 +140,18 @@ def main(argv: list[str] | None = None) -> int:
         mark = "MATCH" if c["ok"] else "MISS "
         extra = f"  (no value in: {', '.join(c['absent_nodes'])})" if c["absent_nodes"] else ""
         print(f"  {mark} {c['test']:<8} {c['kind']:<22} {', '.join(c['nodes'])}{extra}")
-    print(f"captures: {len(timings)}; seconds per capture: mean {statistics.mean(timings):.3f}, "
-          f"median {statistics.median(timings):.3f}, max {max(timings):.3f}, total {sum(timings):.1f}")
+    if timings:
+        print(f"captures: {len(timings)}; seconds per capture: mean {statistics.mean(timings):.3f}, "
+              f"median {statistics.median(timings):.3f}, max {max(timings):.3f}, total {sum(timings):.1f}")
+    else:
+        print("captures: 0")
     print("indicators per kind (live):")
     for kind, n in sorted(per_kind.items()):
         print(f"  {kind:<22} {n:>4} ({per_kind_live[kind]})")
     if args.json:
         Path(args.json).write_text(json.dumps({
             "checks": checks, "matched": ok, "total": len(checks),
-            "seconds_per_capture": {"mean": statistics.mean(timings), "max": max(timings), "n": len(timings)},
+            "seconds_per_capture": {"mean": statistics.mean(timings) if timings else None, "max": max(timings, default=None), "n": len(timings)},
             "per_kind": per_kind, "per_kind_live": per_kind_live,
         }, indent=2))
     return 0 if ok == len(checks) else 1
