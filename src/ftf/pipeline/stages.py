@@ -9,7 +9,7 @@ landed. Owners: edit your adapter here when your public call changes; keep it on
 | ingest | Ingestion (HACK-9), fetch (HACK-17) | `ftf.ingest.ingest(inputs, root=..., name=..., indicators=True) -> Dataset`; URLs first `ftf.fetch.fetch_url(url, out_dir)` (online only) |
 | content features | Features (HACK-13/14/15) | `ftf.features.pipeline.extract(incident, raw_root, out_dir) -> Incident` |
 | enrichment | Enrichment (HACK-19) | `ftf.enrich.Enricher(Cache(path), offline=...).enrich(domain)` |
-| link/assign | Linking (HACK-21/22) | `ftf.linking.link_incident(base, incident)` |
+| link/assign | Linking (HACK-21/22) | `ftf.linking.link_incident(base, incident, base_dir=..., incident_dir=...)` |
 
 Without a library the fallback keeps the result valid: the input becomes one capture of a new
 incident (ad-hoc ids from `ftf.ingest.ids`, see `adhoc_ids`), the modalities it lacks are listed as
@@ -79,6 +79,7 @@ class RunContext:
     run_dir: Path
     fetch: bool = False  # live page fetching: sandbox only, never on the workbench or the jury's machine
     input_root: Optional[Path] = None  # artefact paths of the incident are relative to this
+    base_dir: Optional[Path] = None  # folder of the base dataset.json: the base's vector stores
     incident: Optional[Incident] = None
     links: list[Link] = field(default_factory=list)
     assignment: Optional[Assignment] = None
@@ -380,12 +381,12 @@ def link_assign(ctx: RunContext) -> tuple[str, str]:
             ctx.assignment = _review(inc, "the base holds no assignment for this incident")
         return "ok", f"precomputed in the base: {len(ctx.links)} link(s), decision {ctx.assignment.decision.value}"
     # Linking (HACK-21/22); Evaluation's baseline uses the same call shape.
-    # link_incident(base, incident, relation=campaign) -> IncidentResult(assignment, links)
+    # link_incident(base, incident, relation=campaign, backend=None, base_dir, incident_dir) -> IncidentResult
     link_incident = _optional("ftf.linking", "link_incident")
     if link_incident is None:
         ctx.assignment = _review(inc, "linking engine (HACK-21/22) not available: no link was scored, so this item needs review")
         return "not_available", "linking engine (HACK-21/22) not available yet; decision set to review"
-    result = link_incident(ctx.base, inc)
+    result = link_incident(ctx.base, inc, base_dir=ctx.base_dir, incident_dir=ctx.run_dir / "features")
     ctx.links = list(result.links)
     ctx.assignment = result.assignment
     extra = "" if ctx.base.campaigns else "; the base has no campaigns (build it with `ftf link`)"
