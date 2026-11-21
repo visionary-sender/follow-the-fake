@@ -151,6 +151,7 @@ h=$(printf '%s\n%s' "$salt" "$ip" | sha256sum | cut -c1-32)
 umask 022
 printf '{"name": "%s", "region": "%s", "zone": "%s", "ip_hash": "sha256:%s"}\n' "$name" "$region" "$zone" "$h" > /etc/ftf/egress.json.tmp
 mv /etc/ftf/egress.json.tmp /etc/ftf/egress.json
+grep -qx "sha256:$h" /etc/ftf/egress.history 2>/dev/null || echo "sha256:$h" >> /etc/ftf/egress.history
 cat /etc/ftf/egress.json
 REFRESH
 chmod 755 /usr/local/sbin/ftf-egress-refresh
@@ -303,12 +304,27 @@ case "$mode" in
     vm=$1; z=$(zone_of "$vm")
     busy=$(ssh_to "$vm" "$z" "sudo sh -c $(printf '%q' "$running_jobs")")
     [ -z "$busy" ] || die "$vm has running jobs ($busy); rotate between jobs"
-    ac=$(gcloud compute instances describe "$vm" --project "$PROJECT" --zone "$z" --format='value(networkInterfaces[0].accessConfigs[0].name)')
-    if [ -n "$ac" ]; then
-      gcloud compute instances delete-access-config "$vm" --project "$PROJECT" --zone "$z" --access-config-name "$ac" --quiet
-    fi
-    gcloud compute instances add-access-config "$vm" --project "$PROJECT" --zone "$z" --access-config-name external-nat
-    ssh_to "$vm" "$z" 'sudo /usr/local/sbin/ftf-egress-refresh'
+    hash_now() { ssh_to "$vm" "$z" 'cat /etc/ftf/egress.json 2>/dev/null' | sed -n 's/.*"ip_hash": "\([^"]*\)".*/\1/p'; }
+    # Every IP any worker of this rollout has had (salted hashes, one salt per rollout). A released
+    # ephemeral IP is often handed straight back, or later to another worker of the same region:
+    # retry until the IP is new to the rollout.
+    used=$(for w in $(targets all); do
+             ssh_to "$w" "$(zone_of "$w")" 'cat /etc/ftf/egress.history 2>/dev/null; cat /etc/ftf/egress.json 2>/dev/null'
+           done | sed -n 's/.*\(sha256:[0-9a-f]*\).*/\1/p' | sort -u)
+    for attempt in 1 2 3 4; do
+      ac=$(gcloud compute instances describe "$vm" --project "$PROJECT" --zone "$z" --format='value(networkInterfaces[0].accessConfigs[0].name)')
+      if [ -n "$ac" ]; then
+        gcloud compute instances delete-access-config "$vm" --project "$PROJECT" --zone "$z" --access-config-name "$ac" --quiet
+      fi
+      gcloud compute instances add-access-config "$vm" --project "$PROJECT" --zone "$z" --access-config-name external-nat
+      ssh_to "$vm" "$z" 'sudo /usr/local/sbin/ftf-egress-refresh' >/dev/null
+      new=$(hash_now)
+      if [ -n "$new" ] && ! printf '%s\n' "$used" | grep -qx "$new"; then
+        echo "egress.sh: $vm has a new IP ($new)" >&2; exit 0
+      fi
+      echo "egress.sh: $vm got an IP it used before (attempt $attempt)" >&2
+    done
+    die "$vm got no unused IP after 4 attempts"
     ;;
   pull)
     [ $# -eq 1 ] && name_ok "$1" || die "usage: pull <run>"
