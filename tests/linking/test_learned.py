@@ -330,3 +330,73 @@ def test_corpus_filters_certpl_and_uses_real_pages_only_as_brand_stop_list():
     (cap,) = [r for r in score_pair(ctx, "s0/lander", "s1/lander").rows if r.kind == "ad_caption"]
     assert cap.status is EvidenceStatus.hub_subsumed and "brand skin" in cap.note
     assert BackgroundCounts.from_json(json.loads(json.dumps(bg.to_json()))).brand == bg.brand
+
+
+# ---- review fixes ----
+
+
+def test_template_relation_keeps_cross_tenant_kit_evidence():
+    ds = platform_ds(PLATFORM + [ind(L.kit, "kit_asset_set", "kitset-const")])
+    on = score_pair(ScoringContext.from_dataset(ds), "x1/lander", "x2/lander", Relation.template)
+    off = score_pair(ScoringContext.from_dataset(ds, chain_rule=False), "x1/lander", "x2/lander", Relation.template)
+    assert on.bits == off.bits > 0
+
+
+def test_values_on_captures_without_tenant_or_owner_are_no_platform_constants():
+    ds = Dataset(name="synthetic", incidents=[
+        incident("l1", [ind(L.landing, "aio_landing", "landing-1"), ind(L.kit, "kit_asset_set", "kitset-1")]),
+        incident("l2", [ind(L.landing, "aio_landing", "landing-2"), ind(L.kit, "kit_asset_set", "kitset-1")]),
+    ])
+    assert Hierarchy.from_dataset(ds).level((L.kit, "kit_asset_set", "kitset-1")) is None
+
+
+def test_live_private_gate_ignores_ids_zeroed_by_the_chain_rule():
+    def inc(iid, camp):
+        cid = f"{iid}/lander"
+        rows = [(L.tenant, "aio_cdn_tenant", "tenant-1", Level.tenant, False),
+                (L.owner, "aio_owner", "owner-1", Level.operator, False),
+                (L.owner, "aio_campaign", camp, Level.campaign, False),
+                (L.tracking_account, "meta_pixel", "pixel-1", Level.operator, True)]
+        return Incident(id=iid, source="synthetic", captures=[Capture(id=cid, stage="lander")], indicators=[
+            Indicator(id=f"{cid}/{n}", capture_id=cid, layer=ly, kind=k, level=lv, value=v,
+                      observed=Observed.live if live else Observed.static, extractor="synthetic@0")
+            for n, (ly, k, v, lv, live) in enumerate(rows)])
+    ds = Dataset(name="synthetic", incidents=[inc("g1", "camp-1"), inc("g2", "camp-2"), inc("g3", "camp-2")])
+    s = score_pair(ScoringContext.from_dataset(ds), "g1/lander", "g2/lander", Relation.operator)
+    (pixel,) = [r for r in s.rows if r.kind == "meta_pixel"]
+    assert pixel.status is EvidenceStatus.hub_subsumed and not s.live_private
+
+
+def test_a_page_shape_next_to_the_landing_id_is_not_a_second_landing_term():
+    shape = ind(L.landing, "page_url_shape", "/x/{id}/y")
+    ds = Dataset(name="synthetic", incidents=[
+        incident("w1", chain("tenant-1", "owner-1", "camp-1", "landing-1") + [shape]),
+        incident("w2", chain("tenant-1", "owner-1", "camp-1", "landing-1") + [shape]),
+    ])
+    s = score_pair(ScoringContext.from_dataset(ds), "w1/lander", "w2/lander")
+    landing_terms = [r.bits for r in s.rows if r.layer is L.landing and r.bits > 0]
+    assert len(landing_terms) == 1
+
+
+def test_kind_without_own_positive_pairs_keeps_the_prior_entry():
+    ds = learning_ds()
+    extra = incident("lonely", PLATFORM + chain("tenant-1", "owner-1", "camp-1", "landing-1") +
+                     [ind(L.tracking_account, "google_ads_id", "ads-1")])
+    other = incident("lonely2", PLATFORM + chain("tenant-3", "owner-3", "camp-4", "landing-4") +
+                     [ind(L.tracking_account, "google_ads_id", "ads-1")])
+    table, rep = learn_weights(ds.model_copy(update={"incidents": ds.incidents + [extra, other]}))
+    assert table.kinds["google_ads_id"] == HAND_TABLE.kinds["google_ads_id"]
+    assert rep["kinds"]["google_ads_id"]["fallback"] == "no positive pairs"
+
+
+def test_corpus_containing_the_sample_is_not_counted_twice():
+    ds = big_campaign_ds()
+    ctx = ScoringContext.from_dataset(ds, background=BackgroundCounts.from_dataset(ds), chain_rule=False)
+    (landing,) = [r for r in score_pair(ctx, "big0/lander", "big7/lander").rows if r.kind == "aio_landing"]
+    assert landing.bits == pytest.approx(HAND_TABLE.kinds["aio_landing"].bits)
+
+
+def test_link_with_a_bad_weights_file_exits_cleanly(tmp_path):
+    ds_path = tmp_path / "ds.json"
+    ds_path.write_text(learning_ds().to_json())
+    assert main(["link", str(ds_path), "-o", str(tmp_path / "o.json"), "--weights", str(tmp_path / "nope.json")]) == 2

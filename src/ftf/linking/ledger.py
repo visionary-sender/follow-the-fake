@@ -186,13 +186,14 @@ class ScoringContext:
 
     def rarity(self, key: tuple[Layer, str, str], k: int) -> float:
         """Bits taken off a shared value for being common: log2(k) over the sample's pre-groups, or with
-        background counts log2[(c + α)/(1 + α)], c = corpus operators + sample pre-groups (0 for one operator)."""
+        background counts log2[(c + α)/(1 + α)], c = max(corpus operators, sample pre-groups) (0 for one
+        operator). The max, not the sum: a corpus that contains the scored sample must not count it twice."""
         if self.background is not None and self.background.is_brand(*key):
             return math.inf  # brand skin: also on a real outlet page, a hub
         if self.background is None or not self.background.knows(key[0], key[1]):
             return math.log2(max(k, 1))
         a = self.background.alpha
-        c = self.background.count(*key) + max(k, 1)
+        c = max(self.background.count(*key), k, 1)
         return math.log2((c + a) / (1 + a))
 
     def groups(self, key: tuple[Layer, str, str]) -> int:
@@ -235,7 +236,6 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
     conflict_rows: dict[Layer, list[_Candidate]] = defaultdict(list)
     other_rows: list[EvidenceRow] = []
     shared_cands: list[ChainRow] = []
-    live_private = False
 
     for key in sorted(set(va) | set(vb), key=lambda k: (list(Layer).index(k[0]), k[1])):
         layer, kind = key
@@ -278,8 +278,12 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
             ids = ids_of(xa, [best_norm]) + ids_of(xb, [best_norm])
             seen = _seen(ctx, key, best_norm)
             value = _short(xa.display[best_norm])
-            rarity_txt = (f"log2({best_k})" if ctx.background is None else "brand skin (on a real outlet page)"
-                          if math.isinf(best_rar) else f"{best_rar:.2f} (corpus + sample)")
+            if math.isinf(best_rar):
+                rarity_txt = "brand skin (on a real outlet page)"
+            elif ctx.background is not None and ctx.background.knows(layer, kind):
+                rarity_txt = f"{best_rar:.2f} (corpus operators)"
+            else:
+                rarity_txt = f"log2({best_k})"
             if scale == 0:
                 other_rows.append(EvidenceRow(
                     layer=layer, kind=kind, status=EvidenceStatus.shared, value=value, seen_in=seen,
@@ -296,13 +300,12 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
             note = f"{_fmt_weight(entry.bits, scale)} − {rarity_txt} rarity"
             if entry.private:
                 note += f"; operator-private, {how}"
-                live_private = live_private or best_live
             if len(common) > 1:
                 note += f"; {len(common)} values shared, best kept"
             shared_cands.append(ChainRow(EvidenceRow(
                 layer=layer, kind=kind, status=EvidenceStatus.shared, value=value, bits=round(best_bits, 3),
                 seen_in=seen, indicator_ids=ids, note=note,
-            ), round(best_bits, 3), (layer, kind, best_norm)))
+            ), round(best_bits, 3), (layer, kind, best_norm), live_private=entry.private and best_live))
         elif entry.single_valued and scale > 0 and relation in w.conflict_relations:
             na, nb = sorted(xa.ids)[0], sorted(xb.ids)[0]
             conflict_rows[layer].append(_Candidate(EvidenceRow(
@@ -312,24 +315,26 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
                 note="single-valued, campaign-stable field differs",
             ), w.conflict_bits))
 
-    if ctx.hierarchy is not None:
+    if ctx.hierarchy is not None and relation in CHAIN_RELATIONS:
         shared_cands, subsumed = apply_chain_rule(shared_cands, ctx.hierarchy, _platform_cap(w, relation))
         other_rows += subsumed
     for c in shared_cands:
         shared_rows[c.key[0]].append(_Candidate(c.row, c.bits))
+    # a live operator-private id counts for the strict gate only if it still carries bits after the chain rule
+    live_private = any(c.live_private and c.bits > 0 for c in shared_cands)
 
-    chain_layers = set() if ctx.hierarchy is None else {ly for ly, k in ctx.kind_level if k in ctx.hierarchy.anchors}
+    slots = _chain_slots(ctx)
     rows: list[EvidenceRow] = []
     total = 0.0
     layers_positive = 0
     for layer in Layer:
         layer_bits = 0.0
-        # within a layer the best kind counts; in a layer holding a chain id (tenant, owner, aio campaign,
-        # landing) the best kind *per Indicator.level* counts, so a shared owner and a shared aio campaign
-        # are two levels, while an alias of the campaign id is not a second term
+        # within a layer the best kind counts; in a layer holding chain ids (tenant, owner, aio campaign,
+        # landing) the best kind per chain level counts, so a shared owner and a shared aio campaign are two
+        # terms, while an alias of the campaign id or a page shape next to the landing id is not (`_slot`)
         tops: dict[Level | None, _Candidate] = {}
         for c in sorted(shared_rows.get(layer, []), key=lambda c: -c.bits):
-            slot = ctx.kind_level.get((layer, c.row.kind)) if layer in chain_layers else None
+            slot = _slot(ctx, slots, layer, c.row.kind)
             top = tops.get(slot)
             if top is None:
                 tops[slot] = c
@@ -472,3 +477,40 @@ def _platform_cap(w: WeightTable, relation: Relation) -> float:
     bits = [e.bits * w.scale(k, Layer.platform, relation) for k, e in w.kinds.items() if e.layer is Layer.platform]
     bits.append(w.layer_defaults.get(Layer.platform, 0.0) * w.relation_scale.get(Layer.platform, {}).get(relation, 0.0))
     return max(bits)
+
+
+# The chain (platform ⊃ tenant ⊃ owner ⊃ aio campaign ⊃ landing) is the operator's own hierarchy: the chain
+# rule and per-level slots apply to these relations only. Template and tracking-account evidence (a kit or a
+# pixel shared across tenants) is exactly what those relations look for.
+CHAIN_RELATIONS = frozenset({Relation.operator, Relation.campaign, Relation.ecosystem})
+# The chain level a layer's own anchor names; non-anchor kinds of a chain layer share that slot.
+_LAYER_LEVEL = {Layer.tenant: Level.tenant, Layer.owner: Level.operator, Layer.landing: Level.landing}
+
+
+def _chain_slots(ctx: ScoringContext) -> dict[Layer, set[Level]]:
+    """Per layer, the chain levels of the anchor kinds observed in it (empty when the chain rule is off)."""
+    out: dict[Layer, set[Level]] = defaultdict(set)
+    if ctx.hierarchy is None:
+        return out
+    for layer, kind in ctx.kind_level:
+        level = ctx.hierarchy.anchors.get(kind)
+        if level is not None:
+            out[layer].add(level)
+    return out
+
+
+def _slot(ctx: ScoringContext, slots: dict[Layer, set[Level]], layer: Layer, kind: str) -> Level | None:
+    """Which term of its layer a kind competes for: anchors by their chain level; another kind joins the
+    anchor slot of its own Indicator.level if the layer has one (an alias of the campaign id), else the
+    slot of the layer's own anchor (a page shape next to the landing id)."""
+    present = slots.get(layer)
+    if not present:
+        return None
+    level = ctx.hierarchy.anchors.get(kind)
+    if level is not None:
+        return level
+    level = ctx.kind_level.get((layer, kind))
+    if level in present:
+        return level
+    own = _LAYER_LEVEL.get(layer)
+    return own if own in present else min(present, key=lambda lv: list(Level).index(lv))

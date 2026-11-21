@@ -106,7 +106,11 @@ def _level(caps: set[str], anchor_ids: Mapping[str, Mapping[Level, set[str]]]) -
     for i, lv in enumerate(present):
         if len(union[lv]) == 1:
             return lv if i > 0 and len(union[present[i - 1]]) >= 2 else None
-    return Level.platform if present else None
+    # no level agrees: a platform constant only if it spans several tenants, or several owners where no
+    # tenant is visible; carriers that differ only in landing or campaign ids say nothing about the platform
+    if len(union[Level.tenant]) >= 2 or (not union[Level.tenant] and len(union[Level.operator]) >= 2):
+        return Level.platform
+    return None
 
 
 def _parents(anchor_ids: Mapping[str, Mapping[Level, set[str]]]) -> dict[Level, Level | None]:
@@ -133,6 +137,7 @@ class ChainRow:
     row: EvidenceRow
     bits: float
     key: ValueKey
+    live_private: bool = False  # a live operator-private id (feeds the strict gate while it keeps bits)
 
 
 def apply_chain_rule(cands: list[ChainRow], hierarchy: Hierarchy, platform_cap: float) -> tuple[list[ChainRow], list[EvidenceRow]]:
@@ -164,11 +169,11 @@ def apply_chain_rule(cands: list[ChainRow], hierarchy: Hierarchy, platform_cap: 
         else:
             others.sort(key=lambda c: (-c.bits, c.key[1]))
         top, rest = others[0], others[1:]
-        if level is Level.platform and top.bits > platform_cap:
+        if level is Level.platform and 0 < platform_cap < top.bits:
             top = ChainRow(top.row.model_copy(update={
                 "bits": round(platform_cap, 3),
                 "note": f"{top.row.note}; platform-level value, capped at the platform term {platform_cap:g}",
-            }), round(platform_cap, 3), top.key)
+            }), round(platform_cap, 3), top.key, top.live_private)
         kept.append(top)
         subsumed += [_subsume(c, f"{name}-level value, the {name} is already counted by {top.key[1]}") for c in rest]
     return kept, subsumed

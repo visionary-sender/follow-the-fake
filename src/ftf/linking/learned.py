@@ -18,8 +18,7 @@ labelled self-supervision, 07 §4 E1). Its aliases (e.g. the campaign name next 
 sit in the same layer and are held out with it.
 
 Weight of a kind under a learned relation: bits = log2[(s + (1 − s)·u)/u], with u the frequency
-of a value carried by one operator (background corpus pooled with the sample when given, the
-sample's operators otherwise; unique-by-construction ids use the type prior 1/N). Relations
+of a value carried by one operator (over the larger of the background corpus and the sample; unique-by-construction ids use the type prior 1/N). Relations
 without labels keep the prior's absolute bits. Kinds without positive data, without a usable u,
 or with prior weight 0 (dates, flags) keep the prior entry.
 """
@@ -178,7 +177,7 @@ def learn_weights(
             s = (x + kappa * s_layer[layer]) / (n + kappa)
             negs = [(a, b) for a, b in neg_pairs if feats[a].get((layer, kind)) and feats[b].get((layer, kind))]
             neg_shared = sum(1 for a, b in negs if feats[a][(layer, kind)] & feats[b][(layer, kind)])
-            ks[kind], kn[kind] = s, n + rel["layers"][layer.value]["n_eff"]
+            ks[kind], kn[kind] = s, n  # a kind is learned only from its own positive pairs
             rel["kinds"][kind] = {
                 "layer": layer.value, "s": round(s, 3), "n_pos": npairs, "n_pos_shared": nshared,
                 "n_eff": round(n, 2), "shrinkage_weight": round(n / (n + kappa), 3),
@@ -243,7 +242,7 @@ def learn_weights(
 
 
 def _reference_u(ctx, background: BackgroundCounts | None) -> dict[str, dict]:
-    """Per kind: u of a value carried by exactly one operator, pooling background and sample."""
+    """Per kind: u of a value carried by exactly one operator, over the larger of background and sample."""
     groups: dict[str, set[str]] = defaultdict(set)
     values: dict[str, set[str]] = defaultdict(set)
     layer_of: dict[str, Layer] = {}
@@ -261,8 +260,9 @@ def _reference_u(ctx, background: BackgroundCounts | None) -> dict[str, dict]:
         source = "sample"
         st = background.stats(layer_of[kind], kind) if background else None
         if st is not None:
-            n += st.n_operators
-            v += st.n_values
+            # max, not sum: the corpus may contain the sample itself (see `ScoringContext.rarity`)
+            n = max(n, st.n_operators)
+            v = max(v, st.n_values)
             unique = max(unique, st.unique_share) if st.n_values else unique
             source = "sample+background"
         if n < 2:

@@ -17,7 +17,7 @@ from ftf.contract.models import Dataset, Relation
 from ftf.linking.assign import combine, link_incident
 from ftf.linking.backend import Backend
 from ftf.linking.grouping import ALL_RELATIONS, link_dataset
-from ftf.linking.learn_commands import add_weights_argument, context_from_args
+from ftf.linking.learn_commands import add_weights_argument, context_from_args, load_weights_arg
 from ftf.linking.ledger import ScoringContext, level_of, score_pair, threshold, verdict
 from ftf.linking.types import PairScore
 
@@ -110,8 +110,16 @@ def register_assign(subparsers: argparse._SubParsersAction) -> None:
     parser.set_defaults(func=run_assign)
 
 
-def _backend_factory(args: argparse.Namespace):
-    return lambda ds: Backend.from_context(context_from_args(ds, args))
+def _backend_factory(args: argparse.Namespace, prog: str):
+    """A backend factory for `--weights` (file read once), None without it, or an int exit code on a bad file."""
+    if not args.weights:
+        return None
+    try:
+        loaded = load_weights_arg(args)
+    except ValueError as exc:
+        print(f"ftf {prog}: {exc}", file=sys.stderr)
+        return 2
+    return lambda ds: Backend.from_context(context_from_args(ds, args, loaded))
 
 
 def _load(path: Path) -> Dataset:
@@ -124,9 +132,12 @@ def _write(ds: Dataset, path: Path) -> None:
 
 
 def run_link(args: argparse.Namespace) -> int:
+    factory = _backend_factory(args, "link")
+    if isinstance(factory, int):
+        return factory
     ds = _load(args.input)
     relations = list(dict.fromkeys(Relation(r) for r in args.relation)) if args.relation else list(ALL_RELATIONS)
-    out = link_dataset(ds, relations, backend=_backend_factory(args)(ds) if args.weights else None)
+    out = link_dataset(ds, relations, backend=factory(ds) if factory else None)
     _write(out, args.out)
     n_caps = sum(len(i.captures) for i in out.incidents)
     print(f"{len(out.incidents)} incidents, {n_caps} captures -> {args.out}")
@@ -141,6 +152,9 @@ def run_link(args: argparse.Namespace) -> int:
 
 
 def run_assign(args: argparse.Namespace) -> int:
+    factory = _backend_factory(args, "assign")
+    if isinstance(factory, int):
+        return factory
     base = _load(args.collection)
     new = _load(args.new)
     relation = Relation(args.relation)
@@ -160,7 +174,7 @@ def run_assign(args: argparse.Namespace) -> int:
             print(f"ftf assign: duplicate_of points at unknown captures: {', '.join(missing)}", file=sys.stderr)
             return 2
         for inc in ready:
-            res = link_incident(current, inc, relation, backend=_backend_factory(args) if args.weights else None)
+            res = link_incident(current, inc, relation, backend=factory)
             results.append(res)
             data = combine(current, [inc]).model_dump(mode="json")
             data["links"] += [l.model_dump(mode="json") for l in res.links]

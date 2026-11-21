@@ -65,9 +65,21 @@ def add_weights_argument(parser: argparse.ArgumentParser) -> None:
                         help="learned weights from `ftf learn-weights` (default: the hand table)")
 
 
-def context_from_args(ds: Dataset, args: argparse.Namespace) -> ScoringContext:
+def load_weights_arg(args: argparse.Namespace):
+    """(table, background) from `--weights`, read once; None without the flag. Raises ValueError on a bad file."""
     path = getattr(args, "weights", None)
     if path is None:
+        return None
+    try:
+        table, bg, _ = load_weights(path)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise ValueError(f"cannot read weights {path}: {exc}") from None
+    return table, bg
+
+
+def context_from_args(ds: Dataset, args: argparse.Namespace, loaded=None) -> ScoringContext:
+    loaded = loaded if loaded is not None else load_weights_arg(args)
+    if loaded is None:
         return ScoringContext.from_dataset(ds, weights=HAND_TABLE)
-    table, bg, _ = load_weights(path)
+    table, bg = loaded
     return ScoringContext.from_dataset(ds, weights=table, background=bg)
