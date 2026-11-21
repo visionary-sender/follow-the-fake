@@ -27,7 +27,7 @@ def _plain(text: str) -> None:
 def _evidence(edge: R.Edge) -> None:
     st.caption(
         f"{R.defang(edge.link_id)} ·{R.RELATION_LABEL[edge.relation]} · {edge.tier} · "
-        f"evidence in bits: {edge.score_bits:.1f}"
+        f"evidence in bits: {edge.bits_text}"
     )
     st.dataframe(pd.DataFrame(R.evidence_rows(edge)), hide_index=True, width="stretch")
 
@@ -88,7 +88,7 @@ if choice is not None:
     sub = graph.subgraph([c for c in choice.capture_ids if c in graph])
     for _, _, d in sub.edges(data=True):
         for e in d["edges"]:
-            with st.expander(f"{R.defang(e.a)} ↔ {R.defang(e.b)} · {e.tier} · {e.score_bits:.1f} bits"):
+            with st.expander(f"{R.defang(e.a)} ↔ {R.defang(e.b)} · {e.tier} · {e.bits_text} bits"):
                 _evidence(e)
     if choice.source == "campaign":
         piv = R.indicator_view(ds, choice.id)

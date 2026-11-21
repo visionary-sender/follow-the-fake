@@ -136,3 +136,29 @@ def test_fixture_tracking_account_link_and_no_collector_edges():
     for c in fx.campaigns:
         R.indicator_view(fx, c.id)
     assert len(R.campaign_summary(fx)) == len(fx.campaigns)
+
+
+def _variant(**changes):
+    doc = dataset().model_dump(mode="json")
+    for key, fn in changes.items():
+        fn(doc[key])
+    return type(dataset()).model_validate(doc)
+
+
+def test_unscored_link_keeps_level_and_renders():
+    def unscore(links):
+        next(l for l in links if l["id"] == "L-px")["score_bits"] = None
+    ds = _variant(links=unscore)
+    (e,) = R.edges(ds, Relation.tracking_account)
+    assert e.score_bits is None and e.bits == 0.0 and e.bits_text == "n/a" and e.tier == "Strong"
+    assert "n/a" in edge_hover(e)
+    assert network_figure(R.relation_graph(ds, Relation.tracking_account)).data
+    assert R.explain_pair(ds, "i1/lander", "i2/lander")[0].direct
+
+
+def test_campaign_ignores_links_of_another_relation():
+    def add_link(camps):
+        camps[0]["link_ids"].append("L-k23")  # template link listed on the tracking campaign
+    ds = _variant(campaigns=add_link)
+    (s,) = R.campaign_summary(ds, Relation.tracking_account)
+    assert s.n_links == 1 and [t.kind for t in s.top_indicators] == ["meta_pixel"]

@@ -34,7 +34,7 @@ def edge_hover(edge) -> str:
     """Hover text for one `Edge`: relation, tier, bits and the shared indicators."""
     lines = [
         f"<b>{_safe(edge.link_id)}</b> · {_safe(edge.relation.value)} · {_safe(edge.tier)}",
-        f"evidence in bits: {edge.score_bits:.1f}",
+        f"evidence in bits: {edge.bits_text}",
     ]
     for s in edge.shared[:8]:
         lines.append(f"{_safe(s.layer)} / {_safe(s.kind)}: {_safe(s.value, 60)} ({s.bits:.1f} bits)")
@@ -59,11 +59,11 @@ def network_figure(g: nx.Graph, highlight: set[str] | None = None, seed: int = 7
     highlight = highlight or set()
     for u, v, d in g.edges(data=True):
         (x0, y0), (x1, y1) = pos[u], pos[v]
-        best = max(d["edges"], key=lambda e: e.score_bits)
+        best = max(d["edges"], key=lambda e: e.bits)
         hover = "<br>—<br>".join(edge_hover(e) for e in d["edges"])
         fig.add_trace(go.Scatter(
             x=[x0, x1], y=[y0, y1], mode="lines", hoverinfo="skip", showlegend=False,
-            line=dict(width=_width(best.score_bits), color=TIER_COLOUR[best.tier]),
+            line=dict(width=_width(best.bits), color=TIER_COLOUR[best.tier]),
         ))
         # Hover on line segments is unreliable in plotly; put it on an invisible midpoint marker.
         fig.add_trace(go.Scatter(

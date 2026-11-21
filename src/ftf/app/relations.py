@@ -71,9 +71,12 @@ def review_threshold_bits(ds: Dataset) -> float:
     return math.log2(max(n, 2))
 
 
-def tier(level: LinkLevel, score_bits: float, threshold: float) -> str:
-    """UI tier of a link: its level's label, or "Insufficient alone" below the threshold."""
-    if score_bits < threshold:
+def tier(level: LinkLevel, score_bits: float | None, threshold: float) -> str:
+    """UI tier of a link: its level's label, or "Insufficient alone" below the threshold.
+
+    An unscored link (e.g. hand-labelled) keeps its level's label: there is no score to compare.
+    """
+    if score_bits is not None and score_bits < threshold:
         return INSUFFICIENT
     return LEVEL_LABEL[level]
 
@@ -115,12 +118,21 @@ class Edge:
     b: str
     relation: Relation
     level: LinkLevel
-    score_bits: float
+    score_bits: float | None  # None: the link carries no score (e.g. hand-labelled)
     tier: str
     method: str
     shared: tuple[Shared, ...]
     excluded: tuple[EvidenceRow, ...] = ()  # collector rows, shown greyed, never an edge
     other: tuple[EvidenceRow, ...] = ()  # conflict / missing / hub_subsumed rows
+
+    @property
+    def bits(self) -> float:
+        """Score for sorting and edge width; an unscored link counts as 0."""
+        return self.score_bits if self.score_bits is not None else 0.0
+
+    @property
+    def bits_text(self) -> str:
+        return "n/a" if self.score_bits is None else f"{self.score_bits:.1f}"
 
 
 @dataclass(frozen=True)
@@ -265,8 +277,8 @@ def relation_graph(ds: Dataset, relation: Relation, threshold: float | None = No
             g[e.a][e.b]["edges"].append(e)
         else:
             g.add_edge(e.a, e.b, edges=[e])
-        best = max(g[e.a][e.b]["edges"], key=lambda x: x.score_bits)
-        g[e.a][e.b]["bits"] = best.score_bits
+        best = max(g[e.a][e.b]["edges"], key=lambda x: x.bits)
+        g[e.a][e.b]["bits"] = best.bits
         g[e.a][e.b]["tier"] = best.tier
     return g
 
@@ -294,9 +306,13 @@ def clusters(ds: Dataset, relation: Relation, threshold: float | None = None) ->
 
 
 def _campaign_link_ids(ds: Dataset, campaign, g: nx.Graph | None = None) -> list[str]:
-    """The campaign's own link ids, else the drawable links of its relation inside it."""
+    """The campaign's own links of its relation with both ends inside it, else the drawable
+    links of its relation inside it."""
     if campaign.link_ids:
-        return list(campaign.link_ids)
+        inside = set(campaign.capture_ids)
+        by_id = {l.id: l for l in ds.links}
+        return [lid for lid in campaign.link_ids
+                if by_id[lid].relation is campaign.relation and {by_id[lid].a, by_id[lid].b} <= inside]
     if g is None:
         g = relation_graph(ds, campaign.relation)
     inside = set(campaign.capture_ids)
@@ -402,7 +418,7 @@ def explain_pair(ds: Dataset, a: str, b: str, threshold: float | None = None) ->
         path = _strongest_path(search, a, b) or (_strongest_path(g, a, b) if search is not g else None)
         if path is None:
             continue
-        hops = tuple(max(g[u][v]["edges"], key=lambda e: e.score_bits) for u, v in zip(path, path[1:]))
+        hops = tuple(max(g[u][v]["edges"], key=lambda e: e.bits) for u, v in zip(path, path[1:]))
         out.append(PairExplanation(rel, RELATION_LABEL[rel], False, tuple(path), hops, common))
     return out
 
