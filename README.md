@@ -236,6 +236,9 @@ ftf scan --source google_bq --bq-project my-gcp-project --since 2026-10-22   # r
   `ad_collation_id`, `ad_display_domain`, `creative_url` (creative); `landing_url`,
   `landing_domain` (landing). The search term is kept as `scan_keyword` in the collector layer,
   so it never links two ads.
+- **Dates**: `--since` filters by last shown (Google, BigQuery) or listing date (CERT
+  Polska); for Meta it is passed as the Ad Library start-date filter, so ads that started
+  earlier and still run are not found.
 - **Politeness**: a few keywords per run, one request at a time with `--delay` seconds between
   requests (default 5), a hard cap of `--max-ads` ads per source per run (default 150) and
   `--max-per-keyword` (default 50). The browser loads no images, media or fonts itself.
@@ -275,7 +278,8 @@ timer (`deploy/scanner/`) that runs `ftf scan --download-creatives` as the unpri
 saved as soon as it finishes, so a run stopped half-way keeps what it found.
 `scripts/scanner-sandbox.sh status` shows the timer, the runs and the queue.
 `scripts/scanner-sandbox.sh authorize-workbench` (once) and `scripts/scanner-sandbox.sh pull`
-copy the output from the sandbox to the workbench (`/data/derived/scanner/`) over the internal
+(a read-only mirror: queue statuses are changed with `ftf.scanner.mark` on the sandbox copy,
+which a pull overwrites on the workbench) copy the output from the sandbox to the workbench (`/data/derived/scanner/`) over the internal
 network, with a key restricted to one read-only command, and sync it to
 `gs://follow-the-fake-data/outputs/scanner/`. Nothing passes through the laptop.
 

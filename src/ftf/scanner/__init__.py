@@ -80,9 +80,12 @@ def pending(out: Path) -> list[dict]:
     return [i for i in queue(out) if i.get("status") == "pending"]
 
 
-def mark(out: Path, keys: list[str], status: str) -> int:
-    """Set the status (pending / assigned / rejected) of queue items by key; returns how many changed."""
-    return set_queue_status(Path(out), keys, status)
+def mark(out: Path, keys: list[str], status: str, wait: float = 300.0) -> int:
+    """Set the status (pending / assigned / rejected) of queue items by key; returns how many changed.
+
+    Waits up to `wait` seconds while a scan holds the queue, then raises `Locked`.
+    """
+    return set_queue_status(Path(out), keys, status, wait=wait)
 
 
 __all__ = ["ScannedAd", "SOURCES", "QUEUE_STATUSES", "Locked", "scan", "queue", "pending", "mark", "load_incident"]

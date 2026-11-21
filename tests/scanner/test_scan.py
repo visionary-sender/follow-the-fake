@@ -256,3 +256,28 @@ def test_library_api_scan_queue_and_mark(tmp_path, monkeypatch):
         scanner.mark(tmp_path, ["meta:1002"], "done")
     with pytest.raises(ValueError):
         scanner.scan(["tiktok"], out=tmp_path)
+
+
+def test_mark_waits_for_lock_then_gives_up(tmp_path):
+    from ftf import scanner
+
+    run(tmp_path, {"meta": fake_source([[meta_rec(1)]])})
+    with Store(tmp_path):
+        with pytest.raises(Locked):
+            scanner.mark(tmp_path, ["meta:1001"], "assigned", wait=0)
+    assert scanner.mark(tmp_path, ["meta:1001"], "assigned", wait=0) == 1
+
+
+def test_unreadable_dataset_is_set_aside(tmp_path):
+    (tmp_path / "dataset.json").write_text('{"contract_version": "9.0.0", "name": "old"}')
+    s = run(tmp_path, {"meta": fake_source([[meta_rec(1)]])})
+    assert s["new"] == 1 and len(dataset(tmp_path).incidents) == 1
+    assert list(tmp_path.glob("dataset.invalid-*.json"))
+
+
+def test_cli_fails_when_only_skipped(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        scan_run, "scan",
+        lambda out, sources, **kw: {"run_id": "r", "new": 0, "sources": {"google_atc": {"collected": 0, "new": 0, "queries": [{"status": "blocked"}, {"status": "skipped"}]}}},
+    )
+    assert main(["scan", "--source", "google_atc", "--out", str(tmp_path)]) == 1

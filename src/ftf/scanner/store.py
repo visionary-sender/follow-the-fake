@@ -25,6 +25,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import time
 from pathlib import Path
 from typing import Iterable
 
@@ -37,18 +38,25 @@ class Locked(RuntimeError):
 
 
 class Store:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, wait: float = 0.0):
         self.root = Path(root)
+        self.wait = wait  # seconds to wait for the lock (0: fail at once, as a scan does)
         self._lock_fd = None
 
     def __enter__(self) -> "Store":
         self.root.mkdir(parents=True, exist_ok=True)
         fd = os.open(self.root / ".lock", os.O_RDWR | os.O_CREAT, 0o644)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            os.close(fd)
-            raise Locked(f"another scan holds {self.root / '.lock'}") from None
+        deadline = time.monotonic() + self.wait
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() < deadline:
+                    time.sleep(1.0)
+                    continue
+                os.close(fd)
+                raise Locked(f"another scan holds {self.root / '.lock'}") from None
         self._lock_fd = fd
         return self
 
@@ -149,24 +157,30 @@ def update_dataset(root: Path, name: str, new_incidents: list) -> None:
 
     path = Path(root) / "dataset.json"
     if path.exists():
-        ds = Dataset.from_json(path.read_text(encoding="utf-8"))
-        known = {i.id for i in ds.incidents}
-        incidents = ds.incidents + [i for i in new_incidents if i.id not in known]
+        try:
+            old = Dataset.from_json(path.read_text(encoding="utf-8")).incidents
+        except ValueError:
+            # Unreadable or from an incompatible contract version: keep it aside, start a new one.
+            os.replace(path, path.with_name(f"dataset.invalid-{int(time.time())}.json"))
+            old = []
+        known = {i.id for i in old}
+        incidents = old + [i for i in new_incidents if i.id not in known]
     else:
         incidents = list(new_incidents)
     ds = Dataset(name=name, description="Ads found by `ftf scan`, one incident per ad", incidents=incidents)
     _atomic_write(path, ds.to_json() + "\n")
 
 
-def set_queue_status(root: Path, keys: Iterable[str], status: str) -> int:
+def set_queue_status(root: Path, keys: Iterable[str], status: str, wait: float = 300.0) -> int:
     """Mark queue items (by key) as assigned / rejected / pending; returns how many changed.
 
-    Takes the store lock, so it never interleaves with a running scan.
+    Takes the store lock, so it never interleaves with a running scan; waits up to `wait`
+    seconds for a running scan to finish, then raises `Locked`.
     """
     if status not in QUEUE_STATUSES:
         raise ValueError(f"status must be one of {QUEUE_STATUSES}")
     wanted = set(keys)
-    with Store(root) as store:
+    with Store(root, wait=wait) as store:
         items = store.read_queue()
         changed = 0
         for item in items:

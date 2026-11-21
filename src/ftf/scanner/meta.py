@@ -366,10 +366,13 @@ def _search_one(context, keyword, since, country, cap, delay, max_scrolls, timeo
             res.evidence["graphql_errors"] = sorted(set(errors))[:5]
             if any(RATE_LIMIT in e for e in errors) and res.status != "blocked":
                 res.status = "throttled"  # first page kept, pagination refused
-    except PlaywrightError as exc:
+    except Exception as exc:  # timeouts, a crashed page: keep the ads parsed so far
         res.status = "error"
         res.evidence = {"error": f"{type(exc).__name__}: {exc}"[:500], "ads_seen": len(seen)}
     finally:
-        page.close()
+        try:
+            page.close()
+        except Exception:
+            pass
     res.records = fresh()[:cap]
     return res

@@ -256,5 +256,5 @@ def cmd_scan(args: argparse.Namespace) -> int:
     }
     print(json.dumps(short, ensure_ascii=False))
     # Exit 0 when at least one source answered; a fully failed run is an error for the timer.
-    ok = any(q["status"] in ("ok", "empty", "skipped", "throttled") for d in summary["sources"].values() for q in d["queries"])
+    ok = any(q["status"] in ("ok", "empty", "throttled") for d in summary["sources"].values() for q in d["queries"])
     return 0 if ok or not summary["sources"] else 1
