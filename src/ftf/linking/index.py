@@ -81,15 +81,20 @@ class VectorView:
 
 
 def dataset_digest(ds: Dataset) -> str:
-    """Identity of a linked base: its capture ids and its campaigns (relation, id, members)."""
+    """Identity of a linked base: everything the saved index is built from.
+
+    Incidents, captures (stage, duplicate_of), indicators (capture, layer, kind, value, observed,
+    artefact) and campaigns. Re-enriching the base or re-flagging a decoy changes it.
+    """
     h = hashlib.sha256()
     for inc in ds.incidents:
-        h.update(inc.id.encode())
+        h.update(inc.id.encode() + b"\x01")
         for c in inc.captures:
-            h.update(b"\x00" + c.id.encode() + b"\x00" + (c.duplicate_of or "").encode())
-        h.update(b"\x01")
+            h.update("\x00".join((c.id, c.stage.value, c.duplicate_of or "", ",".join(sorted(a.id + "=" + a.type.value for a in c.artefacts)))).encode() + b"\x02")
+        for i in inc.indicators:
+            h.update("\x00".join((i.id, i.capture_id, i.layer.value, i.kind, i.value or "", i.observed.value, i.provenance.artefact_id or "")).encode() + b"\x03")
     for camp in ds.campaigns:
-        h.update(f"{camp.relation.value}\x00{camp.id}\x00{','.join(camp.capture_ids)}\x02".encode())
+        h.update(f"{camp.relation.value}\x00{camp.id}\x00{','.join(camp.capture_ids)}\x04".encode())
     return h.hexdigest()
 
 
@@ -396,8 +401,11 @@ class CandidateIndex:
     # --- queries ----------------------------------------------------------------------------
 
     def probe_keys(self, incident: Incident) -> set[Key]:
+        return self._keys(incident.indicators)
+
+    def _keys(self, indicators: Iterable) -> set[Key]:
         out = set()
-        for ind in incident.indicators:
+        for ind in indicators:
             if ind.value is None or not _informative_kind(self.weights, ind.kind, ind.layer):
                 continue
             norm = normalise(ind.value, ind.layer)
@@ -466,32 +474,66 @@ class CandidateIndex:
 
     # --- assignment support -----------------------------------------------------------------
 
-    def extend(self, incident: Incident) -> ScoringContext:
-        """Scoring context of the base plus `incident` (the index itself is not changed)."""
+    def _check_new(self, incident: Incident) -> None:
         if self._ctx is None or self._extras is None:
             raise ValueError("the index has no scoring context; load it with the base dataset (or call attach)")
         if incident.id in self.incidents:
             raise ValueError(f"incident {incident.id} is already in the collection")
+        # The linear path rejects these when it validates base + incident; the index must too.
+        reused = sorted({c.id for c in incident.captures if c.id in self._ctx.canonical})
+        reused += sorted({i.id for i in incident.indicators if i.id in self._ctx.indicator_incident})
+        if reused:
+            raise ValueError(f"incident {incident.id} reuses ids already in the collection: {', '.join(reused[:5])}")
+
+    def extend(self, incident: Incident) -> ScoringContext:
+        """Scoring context of the base plus `incident` (the index itself is not changed)."""
+        self._check_new(incident)
+        assert self._ctx is not None and self._extras is not None
         return extend_context(self._ctx, self._extras, incident)[0]
 
     def add(self, incident: Incident) -> None:
         """Add an assigned incident to the base (rarity, τ, duplicates); campaigns stay as they are.
 
-        This is what `ftf assign` does between incidents. The index then no longer matches the
-        original base file, so it leaves the cache.
+        This is what `ftf assign` does between incidents. The overlays of `extend_context` are
+        written into the index's own context in place, so lookups stay one level deep however
+        many incidents are added. The index then no longer matches the original base file, so it
+        leaves the cache.
         """
-        if self._ctx is None or self._extras is None:
-            raise ValueError("the index has no scoring context; load it with the base dataset (or call attach)")
-        if incident.id in self.incidents:
-            raise ValueError(f"incident {incident.id} is already in the collection")
-        self._ctx, self._extras = extend_context(self._ctx, self._extras, incident)
+        self._check_new(incident)
+        ctx, ex = self._ctx, self._extras
+        assert ctx is not None and ex is not None
+        ext, ext_ex = extend_context(ctx, ex, incident)
+        flat = {}
+        for name in ("canonical", "incident_of", "indicator_incident", "values", "layers", "index", "group_of"):
+            new, old = getattr(ext, name), getattr(ctx, name)
+            if isinstance(new, ChainMap) and new.maps[1] is old:
+                old.update(new.maps[0])  # the overlay holds copies, so writing it in place is safe
+                flat[name] = old
+            else:
+                flat[name] = dict(new)  # recomputed (pre-groups)
+        regrouped = not isinstance(ext.group_of, ChainMap)
+        self._ctx = replace(ext, **flat)
+        for name in ("live_private", "owners"):
+            new, old = getattr(ext_ex, name), getattr(ex, name)
+            old.update(new.maps[0])
+        ex.incidents = ext_ex.incidents
         self._added.append(incident)
+        base_members = set()
+        for rel_map in self.campaign_of.values():
+            base_members |= rel_map.keys()
         for cap in incident.captures:
             self.canonical[cap.id] = cap.duplicate_of or cap.id
             self.stage[cap.id] = cap.stage
-        # The incident's captures are in no campaign, so they never propose one (no postings);
-        # its values only update the rarity counts.
-        for key in self.probe_keys(incident):
+        # The incident's own captures are in no campaign, so they propose none. But a capture that
+        # duplicates a campaign member merges its values into that member: those values must
+        # reach the member's campaigns from now on.
+        for ind in incident.indicators:
+            canon = self.canonical[ind.capture_id]
+            if canon != ind.capture_id and canon in base_members:
+                for key in self._keys([ind]):
+                    self.postings.setdefault(key, set()).add(canon)
+        keys = set(self.postings) if regrouped else self.probe_keys(incident)
+        for key in keys:
             self.counts[key] = (len(self._ctx.index.get(key, ())), self._ctx.groups(key))
         for layer, mods in modalities_of([incident]).items():
             self.modalities.setdefault(layer, set()).update(mods)

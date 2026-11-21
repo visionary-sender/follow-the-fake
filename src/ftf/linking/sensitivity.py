@@ -88,8 +88,14 @@ def link_flips(ctx: ScoringContext, a: str, b: str, relation: Relation, delta: f
             s = link_state(score_pair(tables.context((layer,), d), a, b, relation), tau)
             if s != state:
                 flips.append({"layer": layer.value, "delta": d, "to": s})
-    worst_d = -delta if state == "link" else delta
-    worst = link_state(score_pair(tables.context(SCORING_LAYERS, worst_d), a, b, relation), tau)
+    # Worst case: every layer at once, against the verdict (down for a link, up for no link,
+    # both ways for review).
+    worst_d, worst = 0.0, state
+    for d in {"link": (-delta,), "no link": (delta,)}.get(state, (-delta, delta)):
+        s = link_state(score_pair(tables.context(SCORING_LAYERS, d), a, b, relation), tau)
+        if s != state:
+            worst_d, worst = d, s
+            break
     return {
         "a": ps.a,
         "b": ps.b,

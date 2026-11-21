@@ -154,6 +154,8 @@ def _indexed_setup(
     if weights is not None:
         ctx = replace(ctx, weights=weights)
     if backend is not None:
+        if weights is not None:
+            raise ValueError("weights= needs the hand-table ledger backend")
         # A custom scorer (tests) needs its own view of base + incident; candidate search still
         # comes from the index, and every shared value proposes campaigns.
         if index._base is None:
@@ -236,7 +238,10 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
                     return camp, be.score(probe[0], members[0], relation), {}
                 return None
 
-        scored = _select(campaigns, setup.reachable(dup_of) | dup_ids, score, quick)
+        # Every collection capture the incident duplicates (decoys too) takes in the incident's
+        # values, so its campaigns must be scored even when no shared value reaches them.
+        merged_into = sorted({canon[c.id] for c in incident.captures if canon[c.id] not in own})
+        scored = _select(campaigns, setup.reachable(merged_into) | dup_ids, score, quick)
         dup_camps = [camp for camp in campaigns if camp.id in dup_ids]
     scored.sort(key=_order)
 

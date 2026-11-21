@@ -214,3 +214,104 @@ def test_extend_context_leaves_the_base_context_unchanged():
     for inc in new:
         extend_context(idx._ctx, idx._extras, inc)
     assert _ctx_view(idx._ctx) == before
+
+
+# --- review fixes -------------------------------------------------------------------------
+
+
+def _small_base() -> Dataset:
+    b = sc.Builder()
+
+    def inc(iid, vals, stage="lander"):
+        cap = b.capture(f"{iid}-l", stage)
+        return sc.Incident(id=iid, source="synthetic", captures=[cap], indicators=[b.indicator(cap, k, v, live) for k, v, live in vals])
+
+    camp = [("aio_cdn_tenant", "tq.cdn.example", True), ("aio_landing", "lq.example", True)]
+    incs = [inc(f"a{i}", camp) for i in range(3)] + [inc(f"z{i}", [("aio_landing", f"z{i}.example", True)]) for i in range(3)]
+    return link_dataset(sc.dataset(incs), [Relation.campaign])
+
+
+def _dup_incident(iid: str, of: str, stage: str = "lander", extra: bool = False):
+    b = sc.Builder()
+    b.n = 1000
+    caps, inds = [], []
+    if extra:
+        p = b.capture(f"{iid}-p", "lander")
+        caps.append(p)
+        inds += [b.indicator(p, "meta_pixel", "pxq", True), b.indicator(p, "kit_asset_set", "kit-q", False)]
+    d = b.capture(f"{iid}-d", stage, duplicate_of=of)
+    caps.append(d)
+    inds += [b.indicator(d, "meta_pixel", "pxq", True), b.indicator(d, "kit_asset_set", "kit-q", False)]
+    return sc.Incident(id=iid, source="synthetic", captures=caps, indicators=inds)
+
+
+def _carrier(iid: str):
+    b = sc.Builder()
+    b.n = 2000
+    p = b.capture(f"{iid}-l", "lander")
+    return sc.Incident(id=iid, source="synthetic", captures=[p], indicators=[b.indicator(p, "meta_pixel", "pxq", True), b.indicator(p, "kit_asset_set", "kit-q", False)])
+
+
+def test_values_merged_into_a_member_by_an_added_duplicate_are_reachable():
+    base = _small_base()
+    i1, i2 = _dup_incident("i1", "a0-l"), _carrier("i2")
+    lin1 = link_incident(base, i1)
+    lin2 = link_incident(combine(base, [i1]), i2)
+    idx = CandidateIndex.build(base, cache=False)
+    assert link_incident(base, i1, index=idx).assignment == lin1.assignment
+    idx.add(i1)
+    fast2 = link_incident(base, i2, index=idx)
+    assert lin2.assignment.decision is Decision.assign
+    assert fast2.assignment == lin2.assignment and fast2.links == lin2.links
+
+
+def test_values_merged_by_the_incidents_own_decoy_duplicate_are_reachable():
+    base = _small_base()
+    inc = _dup_incident("i3", "a0-l", stage="decoy", extra=True)
+    lin = link_incident(base, inc)
+    assert lin.assignment.decision is Decision.assign
+    fast = link_incident(base, inc, index=CandidateIndex.build(base, cache=False))
+    assert fast.assignment == lin.assignment and fast.links == lin.links
+
+
+def test_many_adds_keep_lookups_one_level_deep():
+    from collections import ChainMap
+
+    incs = sc.corpus(80, seed=5)
+    base = link_dataset(sc.dataset(incs[:20]), [Relation.campaign])
+    idx = CandidateIndex.build(base, cache=False)
+    known = {c.id for i in incs[:20] for c in i.captures}
+    for inc in incs[20:]:
+        if all(c.duplicate_of is None or c.duplicate_of in known for c in inc.captures):
+            idx.add(inc)
+            known |= {c.id for c in inc.captures}
+    for name in ("canonical", "incident_of", "indicator_incident", "values", "layers", "index", "group_of"):
+        assert not isinstance(getattr(idx._ctx, name), ChainMap), name
+    assert not isinstance(idx._extras.live_private, ChainMap)
+    full = ScoringContext.from_dataset(combine(base, idx._added))
+    assert _ctx_view(idx._ctx) == _ctx_view(full)
+
+
+def test_index_rejects_reused_capture_or_indicator_ids():
+    base, new = _split()
+    idx = CandidateIndex.build(base, cache=False)
+    taken = base.incidents[0].captures[0]
+    clash = sc.Incident(id="clash", source="synthetic", captures=[taken.model_copy()], indicators=[])
+    with pytest.raises(ValueError, match="reuses ids"):
+        link_incident(base, clash, index=idx)
+
+
+def test_digest_follows_indicator_values_and_stages():
+    base, _ = _split()
+    data = base.model_dump(mode="json")
+    ind = next(i for i in data["incidents"][0]["indicators"] if i["value"])
+    ind["value"] = ind["value"] + "-changed"
+    with pytest.raises(ValueError, match="digest"):
+        CandidateIndex.build(base, cache=False).attach(Dataset.model_validate(data))
+
+
+def test_cli_assign_refuses_index_with_linear(tmp_path):
+    base, new = _split()
+    (tmp_path / "l.json").write_text(base.to_json())
+    (tmp_path / "n.json").write_text(sc.dataset(new[:1]).to_json())
+    assert cli.main(["assign", str(tmp_path / "l.json"), str(tmp_path / "n.json"), "-o", str(tmp_path / "o.json"), "--linear", "--index", str(tmp_path / "x.json")]) == 2

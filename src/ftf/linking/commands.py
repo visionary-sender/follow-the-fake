@@ -147,6 +147,9 @@ def run_assign(args: argparse.Namespace) -> int:
     if not any(c.relation is relation for c in base.campaigns):
         print(f"ftf assign: {args.collection} has no {relation.value} campaigns; run `ftf link` with that relation first", file=sys.stderr)
         return 2
+    if args.linear and args.index:
+        print("ftf assign: --index and --linear exclude each other", file=sys.stderr)
+        return 2
     index: Optional[CandidateIndex] = None
     if not args.linear:
         try:
