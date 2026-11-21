@@ -5,7 +5,9 @@ Each extractor family exposes:
 * ``features_for_image(path) -> list[Feature]`` (where it applies to a still image, so the
   video family can run it on keyframes), and
 * ``apply(ds, raw_root, out_dir) -> Dataset``: adds that family's indicators to every relevant
-  artefact of a contract ``Dataset`` and writes vectors under ``out_dir/vectors/``.
+  artefact of a contract ``Dataset`` and writes vectors under ``out_dir/vectors/``. Use one
+  ``IndicatorWriter`` per extractor name per run: creating one replaces that extractor's earlier
+  output.
 
 Similarities are exported as raw inputs (hashes as values, embeddings as vectors); turning them
 into evidence is the linking engine's job, so no thresholds live here.
@@ -141,12 +143,15 @@ class VectorStore:
             if old_model != self.model:
                 raise ValueError(f"vector store {self.slug} holds {old_model!r}, not {self.model!r}")
             old_keys, old_rows = load_vectors(self.out_dir, self.store)
+            if old_rows.shape[1] != rows.shape[1]:
+                raise ValueError(f"{self.model}: stored dim {old_rows.shape[1]} != {rows.shape[1]}")
             new = set(keys)
             keep = [i for i, k in enumerate(old_keys) if k not in new]
             if keep:
                 keys = [old_keys[i] for i in keep] + keys
                 rows = np.concatenate([old_rows[keep], rows])
-        # Write both files under temporary names, then swap them in, so rows and keys stay aligned.
+        # Write both files under temporary names, then swap them in; load_vectors checks that
+        # rows and keys still line up in case a crash fell between the two replaces.
         tmp_npy, tmp_keys = d / f".{self.slug}.npy.tmp", d / f".{self.slug}.keys.json.tmp"
         with open(tmp_npy, "wb") as f:
             np.save(f, rows)
@@ -159,7 +164,28 @@ def load_vectors(out_dir: Path, store: str) -> tuple[list[str], np.ndarray]:
     """Keys and matrix of a store written by ``VectorStore.save``."""
     base = Path(out_dir) / store
     meta = json.loads(base.with_name(base.name + ".keys.json").read_text())
-    return meta["keys"], np.load(base.with_name(base.name + ".npy"))
+    rows = np.load(base.with_name(base.name + ".npy"))
+    if len(meta["keys"]) != rows.shape[0]:
+        raise ValueError(f"vector store {store}: {len(meta['keys'])} keys but {rows.shape[0]} rows")
+    return meta["keys"], rows
+
+
+def prune_vectors(out_dir: Path, store: str, keys: set[str]) -> None:
+    """Remove the given keys from a saved store (no-op if the store does not exist)."""
+    base = Path(out_dir) / store
+    if not keys or not base.with_name(base.name + ".npy").exists():
+        return
+    meta = json.loads(base.with_name(base.name + ".keys.json").read_text())
+    old_keys, rows = load_vectors(out_dir, store)
+    keep = [i for i, k in enumerate(old_keys) if k not in keys]
+    if len(keep) == len(old_keys):
+        return
+    tmp_npy, tmp_keys = base.with_name(f".{base.name}.npy.tmp"), base.with_name(f".{base.name}.keys.json.tmp")
+    with open(tmp_npy, "wb") as f:
+        np.save(f, rows[keep])
+    tmp_keys.write_text(json.dumps({"model": meta["model"], "keys": [old_keys[i] for i in keep]}))
+    os.replace(tmp_npy, base.with_name(base.name + ".npy"))
+    os.replace(tmp_keys, base.with_name(base.name + ".keys.json"))
 
 
 class IndicatorWriter:
@@ -167,7 +193,8 @@ class IndicatorWriter:
 
     Creating a writer removes indicators an earlier run of the same extractor (same name, any
     version) left in the dataset, so re-running a family replaces its output instead of
-    duplicating it. Their vector rows are overwritten when the same ids are written again.
+    duplicating it; ``save()`` removes their vector rows unless the same key was written again.
+    A dataset whose links, campaigns or assignments cite those indicators is refused.
     """
 
     def __init__(self, ds: Dataset, out_dir: Path, extractor: str):
@@ -176,6 +203,20 @@ class IndicatorWriter:
         self.extractor = extractor
         self.stores: dict[str, VectorStore] = {}
         name = extractor.split("@", 1)[0]
+        dropped = [
+            i for inc in ds.incidents for i in inc.indicators if i.extractor.split("@", 1)[0] == name
+        ]
+        if dropped:
+            cited = {iid for link in ds.links for row in link.evidence for iid in row.indicator_ids}
+            if cited & {i.id for i in dropped} or ds.campaigns or ds.assignments:
+                raise ValueError(
+                    f"dataset already has linking output built on {name!r} indicators; "
+                    "re-run features on the captures-only dataset"
+                )
+        self.dropped_vectors: dict[str, set[str]] = {}
+        for i in dropped:
+            if i.vector_ref is not None:
+                self.dropped_vectors.setdefault(i.vector_ref.store, set()).add(i.id)
         for inc in ds.incidents:
             inc.indicators = [i for i in inc.indicators if i.extractor.split("@", 1)[0] != name]
         self.ids = {ind.id for inc in ds.incidents for ind in inc.indicators}
@@ -241,6 +282,9 @@ class IndicatorWriter:
         )
 
     def save(self) -> None:
+        written = {s.store: set(s.keys) for s in self.stores.values()}
+        for store, keys in self.dropped_vectors.items():
+            prune_vectors(self.out_dir, store, keys - written.get(store, set()))
         for store in self.stores.values():
             store.save()
 

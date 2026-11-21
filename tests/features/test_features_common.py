@@ -111,6 +111,40 @@ def test_invalid_indicator_stores_no_vector(raw, tmp_path):
     assert w.stores["m"].keys == [ok.id]
 
 
+def test_rerun_prunes_orphan_vectors_and_refuses_linked(raw, tmp_path):
+    ds = dataset_from_files([raw / "case 1" / "Zrzut ekranu.png"], raw)
+    inc, cap = ds.incidents[0], ds.incidents[0].captures[0]
+    w = IndicatorWriter(ds, tmp_path, "faces@0")
+    refs = [w.add(inc, cap, None, Feature(kind="face_embedding", vector=np.ones(2) * k, model="m")).vector_ref
+            for k in (1, 2, 3)]
+    w.save()
+    w2 = IndicatorWriter(ds, tmp_path, "faces@1")
+    w2.add(inc, cap, None, Feature(kind="face_embedding", vector=np.ones(2), model="m"))
+    w2.save()
+    keys, mat = load_vectors(tmp_path, refs[0].store)
+    assert keys == [f"{cap.id}/face_embedding/0"] and mat.shape == (1, 2)
+
+    from ftf.contract.models import EvidenceRow, Link
+    ds.links = [Link(id="l", a=cap.id, b="other", relation="campaign", level="loose", method="t",
+                     evidence=[EvidenceRow(layer="creative", kind="face_embedding", status="shared",
+                                           indicator_ids=[f"{cap.id}/face_embedding/0"])])]
+    with pytest.raises(ValueError, match="linking output"):
+        IndicatorWriter(ds, tmp_path, "faces@2")
+
+
+def test_load_vectors_checks_alignment_and_dim(tmp_path):
+    s = VectorStore(tmp_path, "m")
+    s.add("k", np.ones(2))
+    s.save()
+    s3 = VectorStore(tmp_path, "m")
+    s3.add("k2", np.ones(3))
+    with pytest.raises(ValueError, match="stored dim"):
+        s3.save()
+    (tmp_path / f"{s.store}.keys.json").write_text(json.dumps({"model": "m", "keys": ["a", "b"]}))
+    with pytest.raises(ValueError, match="2 keys but 1 rows"):
+        load_vectors(tmp_path, s.store)
+
+
 def test_vector_store_slugs_and_model_check(tmp_path):
     a, b = VectorStore(tmp_path, "a/b"), VectorStore(tmp_path, "a_b")
     assert a.slug != b.slug
