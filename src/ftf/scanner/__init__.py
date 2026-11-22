@@ -24,7 +24,7 @@ import tempfile
 from datetime import date
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Union
 
 from ftf.contract import Incident
 from ftf.scanner.records import SOURCES
@@ -45,7 +45,7 @@ class ScannedAd:
 
 def scan(
     sources: Optional[list[str]] = None,
-    keywords: Optional[list[str]] = None,
+    keywords: Optional[Union[list[str], dict[str, list[str]]]] = None,
     since: Optional[date] = None,
     *,
     out: Optional[Path] = None,
@@ -53,8 +53,10 @@ def scan(
 ) -> list[ScannedAd]:
     """Run one scan and return the new ads (capture folder, ad.json fields, provisional Incident).
 
-    `options` are the CLI's: cert_filter, max_ads, max_per_keyword, delay, download_creatives,
-    max_creatives. Raises `Locked` if another scan holds `out`.
+    `keywords` is a list for every keyword source (meta, google_atc), or a dict per source, as read
+    by `ftf.scanner.run.load_keywords`. There are no built-in terms: a keyword source without terms
+    raises ValueError. `options` are the CLI's: cert_filter, max_ads, max_per_keyword, delay,
+    download_creatives, max_creatives. Raises `Locked` if another scan holds `out`.
     """
     from ftf.scanner.run import scan as _scan
 

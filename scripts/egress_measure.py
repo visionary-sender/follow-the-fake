@@ -27,9 +27,7 @@ from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 CLOAKED = ("bot_wall", "decoy", "empty")
-# Google searches advertiser names and domains: HACK-20's three terms plus a few more of the kind.
-ATC_KEYWORDS = ["invest", "trading", "crypto", "forex", "bitcoin", "broker", "inwestycje", "kryptowaluty"]
-META_KEYWORDS = ["platforma inwestycyjna", "pasywny dochód", "Brzoska", "Glapiński"]  # HACK-20's defaults
+# No built-in search terms (HACK-60): pass them with --atc-keywords and --meta-keywords.
 EGRESS_FILE = Path("/etc/ftf/egress.json")
 
 
@@ -129,6 +127,9 @@ def probe_row(source: str, keyword: str, summary: dict | None, rc: int, seconds:
 def cmd_probe(args: argparse.Namespace) -> int:
     args.out.mkdir(parents=True, exist_ok=True)
     plan = [("google_atc", k) for k in args.atc_keywords] + [("meta", k) for k in args.meta_keywords]
+    if not plan:
+        print("egress_measure: pass --atc-keywords and/or --meta-keywords", file=sys.stderr)
+        return 2
     rows_path = args.out / "probe.jsonl"
     for i, (source, kw) in enumerate(plan):
         if i:
@@ -290,8 +291,8 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("probe")
     p.add_argument("--scanner", required=True, help="the `ftf` executable of a tree with ftf.scanner")
     p.add_argument("--out", type=Path, required=True)
-    p.add_argument("--atc-keywords", type=lambda s: [k for k in s.split(",") if k], default=ATC_KEYWORDS)
-    p.add_argument("--meta-keywords", type=lambda s: [k for k in s.split(",") if k], default=META_KEYWORDS)
+    p.add_argument("--atc-keywords", type=lambda s: [k for k in s.split(",") if k], default=[], help="comma-separated google_atc terms")
+    p.add_argument("--meta-keywords", type=lambda s: [k for k in s.split(",") if k], default=[], help="comma-separated meta terms")
     p.add_argument("--max-ads", type=int, default=50)
     p.add_argument("--delay", type=float, default=5.0, help="seconds between requests within one scan")
     p.add_argument("--pause", type=float, default=20.0, help="seconds between two scans")
