@@ -14,7 +14,7 @@ Challenge data lives in a private bucket and never in this repository.
 
 ## Quick start
 
-- **Jury:** build and run the container image, see [Container](#container).
+- **Jury:** build and run the container image, see [Container](#container) and the full run instructions in [docs/container.md](docs/container.md).
 - **One item:** `ftf analyze INPUT --base dataset.json --out result.json` runs ingestion, enrichment and linking on one ad, page, URL or keyword against a campaign base, and prints the decision (assign, new or review).
 - **Campaign tables:** `ftf export --base dataset.json --out DIR` writes the linked dataset as CSV tables, a validated copy of the dataset and `campaign_patterns.md`.
 - **Demo app:** `ftf serve --base dataset.json` (needs the `app` extra), see [Run the demo app on the VM](#run-the-demo-app-on-the-vm).
@@ -48,6 +48,10 @@ gcloud compute ssh ftf-workbench --project follow-the-fake --zone europe-central
 
 Docker on the VM is a one-time setup: `sudo apt-get install -y docker.io`.
 Remove dangling images afterwards with `sudo docker image prune -f`.
+
+The jury run in full (first start with the organiser's folder, a prebuilt base bundle, the
+environment variables, offline and online modes, and the image leak check) is in
+[docs/container.md](docs/container.md).
 
 ## Demo walkthrough
 
@@ -139,7 +143,7 @@ The hour-4 slice result, with case numbers only: held-out case `do_udostepnienia
 | `src/ftf/pipeline/` | end-to-end analysis (`ftf analyze`) and the export (`ftf export`); stage adapters in `stages.py` |
 | `src/ftf/app/` | Streamlit demo app (`ftf serve`); evidence ledger in `ledger.py`, campaign views in `relations.py` |
 | `src/ftf/contract/` | the data contract (pydantic models); see `docs/contract.md` |
-| `docs/` | `contract.md`, `methodology.md`, and the details of the fetcher, scanner and enrichment |
+| `docs/` | `contract.md`, `methodology.md`, `container.md` (the jury run), and the details of the fetcher, scanner and enrichment |
 | `tests/` | pytest suite, run on the workbench VM |
 | `scripts/vm.sh` | cloud dev loop: sync to the workbench VM, run tests or commands there |
 | `scripts/check_no_organiser_values.py` | fails if organiser values reach tracked files or commit messages |

@@ -1,0 +1,122 @@
+# Container: running the jury image
+
+One image holds the `ftf` command, the demo web app and the safe URL fetcher. It needs a CPU
+only (no GPU), none of our keys and none of our cloud. It contains no organiser data, no campaign
+base and no secrets (`scripts/image_leak_check.py` checks the built image). Run every command from
+the repository root, because the run command reads the Chromium seccomp profile from
+`docker/seccomp-chromium.json`. The entry point is `docker/entrypoint.sh`: it runs `ftf <arguments>`,
+or, with no arguments, builds the base if needed and serves the app.
+
+## 1. Build
+
+Building needs internet access for pip and Playwright's Chromium. It takes about 5 minutes and
+the image is about 1.6 GB.
+
+```bash
+docker build -t ftf .
+```
+
+## 2. First run with the organiser's dataset folder
+
+Mount the folder read-only at `/data/raw` and a writable volume at `/base`. On first start the
+container builds the campaign base from the folder (`ftf build-base`: ingest → content features →
+linking, about 2 minutes on 2 CPUs for the challenge set), then serves the app. Later starts reuse
+the base in the volume.
+
+```bash
+docker volume create ftf-base
+docker run --rm --name ftf \
+  --read-only --tmpfs /tmp:rw,nosuid,nodev,size=512m --tmpfs /home/ftf:rw,nosuid,nodev,size=256m,uid=10001,gid=10001 \
+  --cap-drop=ALL --cap-add=SYS_CHROOT --security-opt no-new-privileges \
+  --security-opt seccomp=docker/seccomp-chromium.json \
+  --shm-size=1g --pids-limit=512 --memory=4g --cpus=2 \
+  -p 127.0.0.1:8501:8501 \
+  -v "/path/to/organiser-folder:/data/raw:ro" \
+  -v ftf-base:/base \
+  ftf
+```
+
+Open <http://127.0.0.1:8501>. Inside the container the app listens on `0.0.0.0` (Docker's port
+publishing needs it); `-p 127.0.0.1:...` keeps it reachable from this machine only. The hardening
+flags are the fetcher's (see [Running the fetcher in the container](fetcher.md#running-fetcher-in-container))
+plus `uid=10001,gid=10001` on the `/home/ftf` tmpfs: Docker mounts it root-owned with mode 0700, and
+the app (Streamlit, the Public Suffix List cache) needs a writable home.
+
+## 3. Run with a prebuilt base
+
+If you were handed a base bundle, mount it at `/base` (read-only is fine) and leave out
+`/data/raw`; nothing is rebuilt:
+
+```bash
+docker run --rm --name ftf <same flags as above> -p 127.0.0.1:8501:8501 \
+  -v "/path/to/base-bundle:/base:ro" ftf
+```
+
+To rebuild a base by hand, or to build one into a host folder (`chmod 777` it first, the
+container user is uid 10001):
+
+```bash
+docker run --rm <same flags> -v "/path/to/organiser-folder:/data/raw:ro" -v ftf-base:/base \
+  ftf build-base --raw /data/raw --out /base --force
+```
+
+`ftf build-base --raw DIR --out DIR [--offline] [--force]` exits 1 and writes no `dataset.json` if no
+linkable indicator is left after ingest and features (an empty base never reaches the app), and 2
+on bad arguments or an existing base without `--force`. With no arguments the container builds
+(if needed) and serves; with arguments it runs `ftf <arguments>`, e.g. `ftf --help`.
+
+## Base bundle layout
+
+What `/base` holds:
+
+```
+dataset.json             contract Dataset: incidents, indicators, links, campaigns (FTF_BASE)
+vectors/                 embeddings that VectorRef.store points to (only when feature models run)
+enrichment/cache.json    domain enrichment cache (optional; used as FTF_ENRICH_CACHE if present)
+build-report.json        which build stages ran or were skipped
+```
+
+The enrichment cache is derived from organiser domains, so it is never baked into the image; it
+travels only inside a privately handed-over base bundle.
+
+## Environment variables
+
+| Variable | Default in the image | Meaning |
+|---|---|---|
+| `FTF_BASE` | `/base/dataset.json` if present | campaign base the app and `ftf analyze` use |
+| `FTF_BASE_DIR` | `/base` | where the entry point looks for and builds the base |
+| `FTF_RAW_ROOT` | `/data/raw` | organiser folder; artefact paths in the base are relative to it |
+| `FTF_OFFLINE` | unset | `1` forces every network lookup off (enrichment, build-base) |
+| `FTF_FETCH` | unset | `1` lets the app fetch a submitted URL live with the safe fetcher, only while "Online enrichment" is ticked and `FTF_OFFLINE` is not set |
+| `FTF_ENRICH_CACHE` | `/base/enrichment/cache.json` if present | enrichment cache file |
+| `FTF_PORT` | `8501` | app port inside the container |
+
+## Offline and online
+
+The jury's machine has internet access. In the app, "Online enrichment" (off by default) allows
+registry and DNS lookups for submitted domains. Live page fetching is additionally off unless the
+container gets `-e FTF_FETCH=1` and "Online enrichment" is ticked (`FTF_OFFLINE=1` overrides both).
+It then runs only under the hardened flags above; the fetcher refuses to run as root and keeps
+Chromium's sandbox on. A dead or cloaked page is a normal result, not an error. Building the base
+makes no network requests.
+
+On the workbench VM the same image runs with `--network none` or `-e FTF_OFFLINE=1`: nothing there
+contacts scam infrastructure.
+
+## Resources
+
+2 CPUs and 4 GB memory are enough: the app idles at about 150 MB, and building the base for the
+challenge set takes about 2 minutes. Disk: the image (about 1.6 GB) plus a few MB of base.
+
+## Checking the image before handing it over
+
+Scan the image on the VM. It exits 1 on any hit and prints paths only, never contents:
+
+```bash
+python3 -I scripts/image_leak_check.py ftf:dev --raw /data/raw --docker "sudo docker"
+```
+
+It flags `.git`, capture formats, base files (`dataset.json`, `cache.json`, `vectors/`), credential
+files, files under `/data` or `/base`, stray images, key and token patterns, organiser case folder
+names, and byte copies of organiser files (512 bytes or larger). Afterwards remove dangling images
+with `sudo docker image prune -f`.
