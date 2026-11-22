@@ -45,21 +45,22 @@ one decision by one actor, so a layer counts once when it is combined with other
 
 | Layer | Example kinds | Level | Live or static | Where it comes from |
 |---|---|---|---|---|
-| `creative` | `ad_caption`, `ad_title`, `meta_ad_id`, `meta_ad_name`, `image_phash` | campaign, capture | static | Ad-library records (scanner), saved creatives; `image_phash` is planned (content features, below) |
+| `creative` | `ad_caption`, `ad_title`, `ad_display_domain`, `meta_ad_id`, `meta_ad_name`, `image_phash` | campaign, capture | static | Ad-library records (scanner), saved creatives; `image_phash` is planned (content features, below) |
 | `distribution_account` | `meta_campaign_id`, `meta_adset_id`, `advertiser_page_name`, `aio_source` | operator, campaign | static, live for ids in requests | ad-manager ids in ad-library records and in page code |
 | `tracking_account` | `meta_pixel`, `capi_gateway`, `google_ads_id`, `google_analytics_id`, `gtm_container`, `tiktok_pixel`, `clarity_id`, `push_client_id` | operator (analytics ids: campaign-level weight) | live when in recorded traffic, else static | HAR requests and saved page code (`ftf.indicators.platform`) |
-| `tracker_instance` | `xid_tracker_machine`, `tracker_postback` | operator | live | decoded click ids and conversion postbacks in traffic |
+| `tracker_instance` | `xid_tracker_machine`, `tracker_postback`, `chain_host`, `chain_domain` (click-tracker hops) | operator | live | decoded click ids and conversion postbacks in traffic |
 | `kit` | `asset_sha256`, `asset_norm_sha256`, `inline_script_sha256`, `dom_skeleton_sha256`, `dom_skeleton_lsh`, `aio_lander_template` | landing, platform | static | Hashes of saved assets, normalised inline scripts and the page's tag skeleton (`ftf.indicators.kit`) |
 | `platform` | `platform_name`, `aio_sdk_asset`, `aio_action_files`, `uniqueizer_hue_rotate` | platform | static | Constants that a platform injects into every page it hosts |
 | `tenant` | `aio_cdn_tenant` (single-valued), `aio_handle_key`, `aio_flow` | tenant, campaign | live or static | Account and tenant configuration in page code and traffic |
 | `owner` | `aio_owner` (single-valued), `aio_campaign`, `aio_campaign_name` | operator, campaign | live or static | Operator configuration in page code and traffic |
-| `landing` | `aio_landing`, `aio_landing_name`, `page_url_shape` | landing | live or static | Landing ids in paths and traffic; URL shapes with values removed |
+| `landing` | `aio_landing`, `aio_landing_name`, `landing_host`, `landing_domain`, `ad_landing_domain`, `redirect_chain_shape`, `page_url_shape` | landing | live or static | Landing ids in paths and traffic; URL shapes with values removed |
 | `offer` | `contact_email`, `contact_phone`, `contact_telegram`, `aio_advertiser`, `offer_id`, `form_endpoint`, `form_field_set` | operator, campaign | static, live for form posts | Contact data in page code, form endpoints and field sets, affiliate offer ids |
-| `infrastructure` | `third_party_host`, `third_party_domain`, `registrar`, `nameserver`, `a_record_ip`, `mx`, `cert_san_sibling`, `cert_issuer`, `created_date` | platform, operator, tenant, landing | live (a lookup or a cache of one) | Third-party hosts in the page (`ftf.indicators.kit`); registry, DNS and certificate lookups (`ftf.enrich`, see [enrichment.md](enrichment.md)) |
+| `infrastructure` | `third_party_host`, `third_party_domain`, `chain_domain` (cloaker hops), `registrar`, `nameserver`, `a_record_ip`, `mx`, `cert_san_sibling`, `cert_issuer`, `created_date` | platform, operator, tenant, landing | live (a lookup or a cache of one) | Third-party hosts in the page (`ftf.indicators.kit`); registry, DNS and certificate lookups (`ftf.enrich`, see [enrichment.md](enrichment.md)) |
 | `collector` | `aio_fingerprint`, `browser_fingerprint`, `analyst_ip`, `analyst_geo`, `user_agent`, `viewport`, `screen_size`, `fbclid_session`, `local_path`, `os_username`, `capture_time`, `capture_day`, `fetch_outcome` | capture | either | Describes the analyst or the capture tool, never the scam (section 4) |
 
-Kinds and their layers are declared in `ftf.indicators._ids.KINDS`, `ftf.indicators.kit._KINDS`
-and `ftf.enrich.domain`. The extractors read files as inert text and never fetch a URL found in a
+Kinds and their layers are declared in `ftf.indicators._ids.KINDS`, `ftf.indicators.kit._KINDS`,
+`ftf.indicators.domains` (the landing's own hosts, the redirect chain and the displayed domain of an
+ad, HACK-48; the page's own URLs come from `ftf.indicators._pages`) and `ftf.enrich.domain`. The extractors read files as inert text and never fetch a URL found in a
 capture. The content layers (text embeddings, image hashes, faces) are **scaffolding only** in this
 release: `ftf.features` produces no calibrated similarities yet, so the scores below use the
 identifier, kit, infrastructure and ad-text indicators that are implemented.
@@ -105,7 +106,13 @@ subtracts the rarity term:
   An incident with no such id is its own group.
 - A value whose weight after rarity is below `hub_bits` = 0.5 bit is a **hub**. It is kept in the
   ledger as `hub_subsumed` with 0 bits, because a value that common says nothing about one campaign.
+- With a background corpus (`ftf link --background`), the rarity term takes corpus counts for the
+  values the corpus knows: `log2[(c + α)/(1 + α)]`, where `c` is the larger of the corpus operator count
+  and the sample's pre-groups (`ftf.linking.background`). A brand asset from the stop-list is removed.
+  Without a corpus, the pre-group count above is used. The default run has no corpus.
 - A value carried by more than 500 captures never proposes a candidate pair (`HUB_POSTINGS`).
+- The priors above are the **hand table**. `ftf link --weights FILE` replaces them with a learned table
+  (HACK-23, `ftf.linking.learned`), which keeps the same fields. The default run uses the hand table.
 
 ### 5.2 How layers are scored against a relation
 
@@ -174,6 +181,26 @@ clears the bar by 4.8 bits.
 If the item had no HAR, the tracking layer would be missing, the score would fall by 3.0 bits to
 12.2 (still above the bar), and the ledger would say "only on one side; other side lacks the
 tracking_account layer" with 0 bits. The missing layer costs the item nothing.
+
+### 5.5 Chain rule and explain-away (on by default)
+
+The ids of one operator form a chain: platform ⊃ tenant ⊃ owner ⊃ aio campaign ⊃ landing. A value
+that is shared by many owners is a platform constant, and a value that names one owner sits at the
+owner level. The level of each value is discovered from the data (`ftf.linking.hierarchy`), so the
+ledger does not need a hand-written level for every kind.
+
+- **One term per level.** A shared fine id counts the level it names and the coarser levels its
+  parent ids determine. Values at the same level count once, however many of them match (the best
+  one counts). The platform constants together count as one platform term, capped at the platform
+  layer's weight.
+- **Explain-away.** If two captures share the coarser ids (the same tenant or owner) but differ on a
+  chain id (another campaign of the same owner), the shared coarse ids no longer count for the
+  campaign relation: "same owner, other campaign" predicts them as well as "same campaign" does. Those
+  rows become `hub_subsumed`, with 0 bits, and the conflict row explains why.
+
+The worked example in 5.4 is computed with the per-layer rule that sections 5.1 to 5.3 describe. With
+the chain rule on, the tenant and landing terms are set by the discovered levels, so for a real pair
+read the ledger rows that `ftf score` or `ftf export` writes rather than recomputing the example.
 
 ## 6. Relations and grouping
 
@@ -260,7 +287,7 @@ at scale. The design targets 10^5 incidents; that target is a plan, not a result
 - **The numbers are priors.** The structure (rarity over groups, the best value per layer, bits
   added across layers, collector exclusion, missing as 0) is the method. The weights and thresholds
   are explicit, auditable guesses, set from the cross-case reading and not fitted. A learned table
-  (HACK-23) would replace the hand table without changing the ledger. A ±2-bit sensitivity sweep is
+  (HACK-23) exists as an option (`--weights`), but the default run keeps the hand table. A ±2-bit sensitivity sweep is
   part of the evaluation protocol and is not yet run; links that flip under it will be flagged.
 - **No true negatives in the case sample.** Every case is a scam, so every cross-campaign pair is a
   hard negative from a correlated population. The background corpus that would give real rarity

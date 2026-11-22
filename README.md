@@ -66,7 +66,7 @@ The full description is in [docs/methodology.md](docs/methodology.md). Its weigh
 1. **Captures.** A visit or a saved item (ad, pre-lander, lander, decoy) is one capture, with the modalities it has and the ones it lacks. Exact duplicates collapse onto one capture first.
 2. **Indicators per layer.** Identifiers and features come from saved files and recorded traffic: tracking accounts, operator and tenant configuration, page-kit fingerprints, landing ids, infrastructure facts and ad text. Each indicator sits in one layer and is marked live (seen in traffic) or static (seen in saved files).
 3. **Collector exclusion.** Values that describe the analyst or the capture tool (fingerprints, addresses, user agents, screen sizes, capture times) are excluded by type. They never link anything.
-4. **Evidence in bits.** A shared value is worth the log2 of how much more likely it is under "same campaign" than under "different campaign". Rarity is counted over groups of incidents, not over pages. The best value of a layer counts, the layers add up, a conflict on a single-valued operator id costs 4 bits and forbids a link, and a missing layer counts 0.
+4. **Evidence in bits.** A shared value is worth the log2 of how much more likely it is under "same campaign" than under "different campaign". Rarity is counted over groups of incidents, not over pages. The ids of one operator form a chain (platform, tenant, owner, campaign, landing), and a value is counted once, at the level the data shows it belongs to. The best value of a layer counts, the layers add up, a conflict on a single-valued operator id costs 4 bits and forbids a link, and a missing layer counts 0.
 5. **Relations and grouping.** Each of the five relations has its own partition. Clustering is greedy average linkage with cannot-links, so one false match does not chain two campaigns together.
 6. **Assign, new or review.** An item is assigned to a campaign when it clears the bar (the threshold plus log2 of the number of campaigns), declared new when it scores at least 3 bits below the threshold and could still reach it, and otherwise sent to review.
 7. **Explanation.** Each link carries its ledger: one row per layer and value, with its status, bits, the groups that carry it and the supporting indicator ids.
@@ -116,7 +116,7 @@ The hour-4 slice result, with case numbers only: held-out case `do_udostepnienia
 
 ## Limitations
 
-- **The weights are priors.** They are explicit, hand-set bits, not fitted to the data, and the case sample is 25 scams with no true negatives. Section 9 of [docs/methodology.md](docs/methodology.md) lists what that implies. A learned table is planned (HACK-23).
+- **The weights are priors.** They are explicit, hand-set bits, not fitted to the data, and the case sample is 25 scams with no true negatives. Section 9 of [docs/methodology.md](docs/methodology.md) lists what that implies. A learned table (HACK-23) can be passed with `ftf link --weights`, but the default run keeps the hand-set priors.
 - **The demo base is small.** The 2026-11-22 slice (a dated snapshot) is small, and the scaling figures in the methodology are design estimates and have not been measured.
 - **Content features are scaffolding.** Text embeddings, image hashes and faces do not yet carry bits, and the Visual layer is paused.
 - **Enrichment and live fetching depend on outside services.** When a service is down, the item carries less evidence and is more likely to go to review.
@@ -131,7 +131,7 @@ The hour-4 slice result, with case numbers only: held-out case `do_udostepnienia
 | `src/ftf/` | the Python package; `ftf` is the command-line entry point |
 | `src/ftf/ingest/` | case folders and captures become contract incidents |
 | `src/ftf/indicators/` | indicator extractors per layer (kinds in `_ids.py`), including collector traces |
-| `src/ftf/linking/` | evidence ledger, weights, relations and grouping, assignment |
+| `src/ftf/linking/` | evidence ledger, weights (hand table and learned), id hierarchy and chain rule, background rarity, relations and grouping, assignment |
 | `src/ftf/enrich/` | keyless domain enrichment (`ftf enrich-domain`) |
 | `src/ftf/fetch/` | safe URL fetcher (`ftf fetch`) |
 | `src/ftf/scanner/` | ad-library scanner (`ftf scan`) |
