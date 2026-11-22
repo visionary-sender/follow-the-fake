@@ -169,7 +169,7 @@ The tables below are the final evaluation report (HACK-29, `report.md` in `gs://
 
 Two results matter most for the claims above, and the tables below give the counts:
 
-- With platform ids hidden (E1), the Linking engine's campaign gate (HACK-53) trades recall for precision: it links no true campaign pairs, and it violates no must-not-link pair.
+- With platform ids hidden (E1), the Linking engine's campaign gate (HACK-53) trades recall for precision: it recovers 4 of 11 true campaign pairs, all 4 of its predicted campaign pairs are true, and it violates no must-not-link pair (0 of 37).
 - On the distractors (E4), the Linking engine passes every class except the synthetic kit copy (b), which is reported in its table rather than hidden.
 
 In the pair counts, `P` is out of the predicted pairs and `R` is out of the true pairs, as the report defines them.
@@ -177,7 +177,7 @@ In the pair counts, `P` is out of the predicted pairs and `R` is out of the true
 **Cases and incidents.** The evaluation counts 26 case folders. The organiser dataset has 28 incidents: the 25 case folders (15 in `BACKUP`, 10 in `do_udostepnienia`) and 3 ad-hoc inputs, each one URL from the organiser's scam-link list. The report's 26 case folders are those 25 plus one group for the three scam-link inputs. The E7 time split and the `input:` rows treat the three inputs as separate incidents.
 
 <!-- eval:build start -->
-Dataset build: `main 6ff9e3e`. Each table title states its evidence setting: E1, E6 and E7 run with platform ids hidden; E2, E3 and E4 run on all evidence (platform ids visible), the realistic setting. The labels and leak check use the platform ids as ground truth. Counts are raw: `P 2 of 11 pairs` means 2 of the 11 predicted pairs are true, and `R 2 of 12 pairs` means 2 of the 12 true pairs were found. Macro scores average over label groups first, then over groups. `baseline` is the loose floor; `linking` is the Linking engine.
+Dataset build: `main acb6f35 (ingest) + Visual features (all four families: text, image, faces, video; src/ftf/features unchanged 2dd0fd8..acb6f35)`. Each table title states its evidence setting: E1, E6 and E7 run with platform ids hidden; E2, E3 and E4 run on all evidence (platform ids visible), the realistic setting. The labels and leak check use the platform ids as ground truth. Counts are raw: `P 2 of 11 pairs` means 2 of the 11 predicted pairs are true, and `R 2 of 12 pairs` means 2 of the 12 true pairs were found. Macro scores average over label groups first, then over groups. `baseline` is the loose floor; `linking` is the Linking engine.
 <!-- eval:build end -->
 
 <!-- eval:ground-truth start -->
@@ -209,9 +209,9 @@ Dataset build: `main 6ff9e3e`. Each table title states its evidence setting: E1,
 
 | relation vs level | baseline pairwise | linking pairwise | baseline macro B-cubed P / R | linking macro B-cubed P / R | must-not-link violated, baseline | must-not-link violated, linking |
 |---|---|---|---|---|---|---|
-| campaign vs campaign | P 11 of 55 pairs, R 11 of 11 pairs | P 0 of 0 pairs, R 0 of 11 pairs | 0.29 / 1.00 over 7 groups | 1.00 / 0.81 over 7 groups | 31 of 37 pairs | 0 of 37 pairs |
-| operator vs owner | P 22 of 55 pairs, R 22 of 22 pairs | P 3 of 3 pairs, R 3 of 22 pairs | 0.40 / 1.00 over 5 groups | 1.00 / 0.75 over 5 groups | 1 of 1 pairs | 0 of 1 pairs |
-| operator vs tenant | P 22 of 55 pairs, R 22 of 23 pairs | P 3 of 3 pairs, R 3 of 23 pairs | 0.36 / 0.88 over 4 groups | 1.00 / 0.57 over 4 groups | 1 of 1 pairs | 0 of 1 pairs |
+| campaign vs campaign | P 11 of 66 pairs, R 11 of 11 pairs | P 4 of 4 pairs, R 4 of 11 pairs | 0.14 / 1.00 over 7 groups | 1.00 / 0.92 over 7 groups | 34 of 37 pairs | 0 of 37 pairs |
+| operator vs owner | P 22 of 66 pairs, R 22 of 22 pairs | P 3 of 3 pairs, R 3 of 22 pairs | 0.20 / 1.00 over 5 groups | 1.00 / 0.75 over 5 groups | 1 of 1 pairs | 0 of 1 pairs |
+| operator vs tenant | P 23 of 66 pairs, R 23 of 23 pairs | P 3 of 3 pairs, R 3 of 23 pairs | 0.25 / 1.00 over 4 groups | 1.00 / 0.57 over 4 groups | 1 of 1 pairs | 0 of 1 pairs |
 <!-- eval:e1-hidden end -->
 
 <!-- eval:e7-timesplit start -->
@@ -219,12 +219,12 @@ Dataset build: `main 6ff9e3e`. Each table title states its evidence setting: E1,
 
 | engine | reference folders | later items | correct assignment | wrong assignment | false accept | correct new | missed (new, should assign) | review | bridging folders | fragmented groups |
 |---|---|---|---|---|---|---|---|---|---|---|
-| baseline | 15 | 13 | 3 | 0 | 6 | 4 | 0 | 0 | 12 | 0 |
-| linking | 15 | 13 | 0 | 0 | 0 | 6 | 1 | 6 | 12 | 0 |
+| baseline | 15 | 13 | 3 | 0 | 7 | 3 | 0 | 0 | 12 | 0 |
+| linking | 15 | 13 | 0 | 0 | 0 | 5 | 1 | 7 | 12 | 0 |
 
 | case folder | date | expected | baseline verdict | linking verdict |
 |---|---|---|---|---|
-| do_udostepnienia:5 | - | new | correct new | review |
+| do_udostepnienia:5 | - | new | false accept | review |
 | input:15c96e9a0fe4 | - | new | correct new | review |
 | input:7a4b9bcf6948 | - | new | correct new | review |
 | input:dff1e493c8d3 | - | new | correct new | review |
@@ -235,7 +235,7 @@ Dataset build: `main 6ff9e3e`. Each table title states its evidence setting: E1,
 | do_udostepnienia:14 | 2026-10-12 | new | false accept | correct new |
 | do_udostepnienia:36 | 2026-10-19 | new | false accept | correct new |
 | do_udostepnienia:61 | 2026-10-20 | new | false accept | correct new |
-| do_udostepnienia:47 | 2026-10-27 | new | false accept | correct new |
+| do_udostepnienia:47 | 2026-10-27 | new | false accept | review |
 | do_udostepnienia:48 | 2026-10-28 | new | false accept | correct new |
 <!-- eval:e7-timesplit end -->
 
@@ -244,9 +244,9 @@ Dataset build: `main 6ff9e3e`. Each table title states its evidence setting: E1,
 
 | engine | protocol | mode | items | correct | wrong campaign | new | review | assigned | median capacity (bits) |
 |---|---|---|---|---|---|---|---|---|---|
-| baseline | loco | full | 8 | 0 | 8 | 0 | 0 | 8 | 75.00 |
-| baseline | loco_mixed | full | 2 | 1 | 1 | 0 | 0 | 2 | 110.00 |
-| baseline | loo_item | full | 8 | 5 | 3 | 0 | 0 | 8 | 75.00 |
+| baseline | loco | full | 8 | 0 | 8 | 0 | 0 | 8 | 153.00 |
+| baseline | loco_mixed | full | 2 | 1 | 1 | 0 | 0 | 2 | 223.00 |
+| baseline | loo_item | full | 8 | 5 | 3 | 0 | 0 | 8 | 153.00 |
 | linking | loco | full | 8 | 0 | 0 | 8 | 0 | 0 | 48.40 |
 | linking | loco_mixed | full | 2 | 1 | 0 | 0 | 1 | 1 | 48.40 |
 | linking | loo_item | full | 8 | 7 | 0 | 0 | 1 | 7 | 48.40 |
@@ -260,28 +260,28 @@ Counts are per item; a leave-one-group item stands for one whole group. A wrong 
 | engine | protocol | mode | items | correct | wrong campaign | new | review | assigned | median capacity (bits) |
 |---|---|---|---|---|---|---|---|---|---|
 | baseline | loco | ad_text | 8 | 0 | 0 | 8 | 0 | 0 | 0.00 |
-| baseline | loco | full | 8 | 0 | 8 | 0 | 0 | 8 | 75.00 |
-| baseline | loco | har | 8 | 0 | 7 | 1 | 0 | 7 | 64.00 |
-| baseline | loco | html | 8 | 0 | 8 | 0 | 0 | 8 | 33.50 |
-| baseline | loco | screenshot | 8 | 0 | 0 | 8 | 0 | 0 | 0.00 |
+| baseline | loco | full | 8 | 0 | 8 | 0 | 0 | 8 | 153.00 |
+| baseline | loco | har | 8 | 0 | 7 | 1 | 0 | 7 | 65.00 |
+| baseline | loco | html | 8 | 0 | 8 | 0 | 0 | 8 | 64.50 |
+| baseline | loco | screenshot | 8 | 0 | 6 | 2 | 0 | 6 | 6.00 |
 | baseline | loco | url | 8 | 0 | 0 | 8 | 0 | 0 | 0.00 |
 | baseline | loco_mixed | ad_text | 2 | 0 | 0 | 2 | 0 | 0 | 0.00 |
-| baseline | loco_mixed | full | 2 | 1 | 1 | 0 | 0 | 2 | 110.00 |
-| baseline | loco_mixed | har | 2 | 1 | 1 | 0 | 0 | 2 | 102.00 |
-| baseline | loco_mixed | html | 2 | 1 | 1 | 0 | 0 | 2 | 26.00 |
+| baseline | loco_mixed | full | 2 | 1 | 1 | 0 | 0 | 2 | 223.00 |
+| baseline | loco_mixed | har | 2 | 1 | 1 | 0 | 0 | 2 | 154.00 |
+| baseline | loco_mixed | html | 2 | 1 | 1 | 0 | 0 | 2 | 62.00 |
 | baseline | loco_mixed | screenshot | 2 | 0 | 0 | 2 | 0 | 0 | 0.00 |
 | baseline | loco_mixed | url | 2 | 0 | 0 | 2 | 0 | 0 | 0.00 |
 | baseline | loo_item | ad_text | 8 | 0 | 0 | 8 | 0 | 0 | 0.00 |
-| baseline | loo_item | full | 8 | 5 | 3 | 0 | 0 | 8 | 75.00 |
-| baseline | loo_item | har | 8 | 5 | 2 | 1 | 0 | 7 | 64.00 |
-| baseline | loo_item | html | 8 | 5 | 3 | 0 | 0 | 8 | 27.00 |
-| baseline | loo_item | screenshot | 8 | 0 | 0 | 8 | 0 | 0 | 0.00 |
+| baseline | loo_item | full | 8 | 5 | 3 | 0 | 0 | 8 | 153.00 |
+| baseline | loo_item | har | 8 | 5 | 2 | 1 | 0 | 7 | 65.00 |
+| baseline | loo_item | html | 8 | 5 | 3 | 0 | 0 | 8 | 63.00 |
+| baseline | loo_item | screenshot | 8 | 4 | 1 | 3 | 0 | 5 | 6.00 |
 | baseline | loo_item | url | 8 | 0 | 0 | 8 | 0 | 0 | 0.00 |
 | linking | loco | ad_text | 8 | 0 | 0 | 0 | 8 | 0 | 0.00 |
 | linking | loco | full | 8 | 0 | 0 | 8 | 0 | 0 | 48.40 |
 | linking | loco | har | 8 | 0 | 0 | 4 | 4 | 0 | 48.40 |
 | linking | loco | html | 8 | 0 | 0 | 8 | 0 | 0 | 44.90 |
-| linking | loco | screenshot | 8 | 0 | 0 | 0 | 8 | 0 | 0.00 |
+| linking | loco | screenshot | 8 | 0 | 0 | 0 | 8 | 0 | 4.00 |
 | linking | loco | url | 8 | 0 | 0 | 0 | 8 | 0 | 0.00 |
 | linking | loco_mixed | ad_text | 2 | 0 | 0 | 0 | 2 | 0 | 0.00 |
 | linking | loco_mixed | full | 2 | 1 | 0 | 0 | 1 | 1 | 48.40 |
@@ -291,9 +291,9 @@ Counts are per item; a leave-one-group item stands for one whole group. A wrong 
 | linking | loco_mixed | url | 2 | 0 | 0 | 0 | 2 | 0 | 0.00 |
 | linking | loo_item | ad_text | 8 | 0 | 0 | 0 | 8 | 0 | 0.00 |
 | linking | loo_item | full | 8 | 7 | 0 | 0 | 1 | 7 | 48.40 |
-| linking | loo_item | har | 8 | 5 | 0 | 0 | 3 | 5 | 48.40 |
+| linking | loo_item | har | 8 | 7 | 0 | 0 | 1 | 7 | 48.40 |
 | linking | loo_item | html | 8 | 0 | 0 | 5 | 3 | 0 | 44.90 |
-| linking | loo_item | screenshot | 8 | 0 | 0 | 0 | 8 | 0 | 0.00 |
+| linking | loo_item | screenshot | 8 | 0 | 0 | 0 | 8 | 0 | 4.00 |
 | linking | loo_item | url | 8 | 0 | 0 | 0 | 8 | 0 | 0.00 |
 <!-- eval:e3-degraded end -->
 
@@ -302,44 +302,44 @@ Counts are per item; a leave-one-group item stands for one whole group. A wrong 
 
 | distractor | expected | baseline passed | linking passed |
 |---|---|---|---|
-| natural must-not-link pair (a) | no link or campaign of relation campaign between the subjects and the paired capture | 5 of 43 | 43 of 43 |
+| natural must-not-link pair (a) | no link or campaign of relation campaign between the subjects and the paired capture | 3 of 43 | 43 of 43 |
 | synthetic kit copy (b) | no link or campaign of relation campaign, operator, tracking_account between the subjects and outside captures; never assigned (new or review); expected template link to the original (reported, not required) | 0 of 3 | 2 of 3 |
 | platform-only page (c) | no link or campaign of relation campaign, operator, template, tracking_account between the subjects and outside captures; never assigned (new or review) | 0 of 3 | 3 of 3 |
 | collector invariance (injected fingerprint) (d) | zero decisions change | 2 of 2 | 2 of 2 |
 | brand negative (e) | no link or campaign of relation campaign, operator, template, tracking_account between the subjects and outside captures; never assigned (new or review) | 9 of 58 | 58 of 58 |
 | celebrity-only context (f) | no link or campaign of relation campaign, operator, template, tracking_account between the subjects and outside captures; never assigned (new or review) | 0 of 2 | 2 of 2 |
 
-Must-not-link pairs violated: baseline 38 of 43, linking 0 of 43.
+Must-not-link pairs violated: baseline 40 of 43, linking 0 of 43.
 <!-- eval:e4-distractors end -->
 
 <!-- eval:e6-sensitivity start -->
 #### E6 sensitivity (linking table, moves of −2, −1, +1, +2 bits; platform ids hidden)
 
-Weights tested: 34 of 91 in the table; 16 flip no decision.
+Weights tested: 38 of 91 in the table; 15 flip no decision.
 
 | relation | pair links (unperturbed) | pair flips, all moves | fragile links (±2, one layer) | worst-case only |
 |---|---|---|---|---|
-| campaign | 1 | 0 | 0 of 1 | 1 |
-| ecosystem | 12 | 93 | 9 of 12 | 12 |
-| operator | 7 | 49 | 6 of 7 | 7 |
-| template | 1 | 8 | 0 of 1 | 1 |
+| campaign | 6 | 41 | 4 of 6 | 6 |
+| ecosystem | 12 | 207 | 4 of 12 | 12 |
+| operator | 7 | 55 | 6 of 7 | 7 |
+| template | 1 | 21 | 0 of 1 | 1 |
 | tracking_account | 0 | 3 | 0 of 0 | 0 |
 
-E7 verdicts, unperturbed: assign 0, new 7, review 6.
+E7 verdicts, unperturbed: assign 0, new 6, review 7.
 A cell `n (eff. x)` is a move that the 0-bit floor clamped: x is the change really made, in bits.
 
 | weight | bits | −2 | −1 | +1 | +2 | total |
 |---|---|---|---|---|---|---|
-| kind:aio_sdk_asset | 1.7 | 9 (eff. -1.7) | 9 | 0 | 16 | 34 |
-| kind:inline_script_sha256 | 3 | 0 | 0 | 5 | 20 | 25 |
-| kind:third_party_host | 1.5 | 6 (eff. -1.5) | 6 | 4 | 6 | 22 |
-| kind:form_field_set | 2 | 0 | 0 | 3 | 15 | 18 |
-| kind:meta_pixel | 3 | 3 | 3 | 0 | 4 | 10 |
-| kind:third_party_domain | 1.5 | 0 (eff. -1.5) | 0 | 4 | 6 | 10 |
-| kind:form_endpoint | 2 | 0 | 0 | 1 | 7 | 8 |
-| kind:platform_name | 1.7 | 0 (eff. -1.7) | 0 | 3 | 5 | 8 |
-| kind:asset_norm_sha256 | 2.5 | 0 | 0 | 2 | 4 | 6 |
-| kind:asset_sha256 | 2.5 | 0 | 0 | 2 | 4 | 6 |
+| kind:third_party_host | 1.5 | 15 (eff. -1.5) | 15 | 7 | 8 | 45 |
+| kind:inline_script_sha256 | 3 | 1 | 1 | 15 | 26 | 43 |
+| kind:aio_sdk_asset | 1.7 | 7 (eff. -1.7) | 7 | 9 | 16 | 39 |
+| kind:image_phash | 3 | 7 | 6 | 4 | 19 | 36 |
+| kind:form_field_set | 2 | 0 | 0 | 10 | 16 | 26 |
+| kind:third_party_domain | 1.5 | 0 (eff. -1.5) | 0 | 8 | 15 | 23 |
+| kind:asset_norm_sha256 | 2.5 | 0 | 0 | 5 | 16 | 21 |
+| kind:asset_sha256 | 2.5 | 0 | 0 | 4 | 15 | 19 |
+| kind:form_endpoint | 2 | 0 | 0 | 8 | 8 | 16 |
+| layer_default:creative | 1 | 0 (eff. -1) | 0 | 4 | 12 | 16 |
 
 Fragile links, by case folder (a fragile link flips under one layer moved ±2 bits):
 
@@ -347,19 +347,18 @@ Fragile links, by case folder (a fragile link flips under one layer moved ±2 bi
 |---|---|---|---|---|
 | operator | BACKUP:p1 | BACKUP:p3 | link | tracking_account -2 to review; kit -2 to review; platform -2 to review; infrastructure -2 to review |
 | operator | BACKUP:p1 | BACKUP:p4 | link | tracking_account -2 to review; kit -2 to review; platform -2 to review; infrastructure -2 to review |
-| operator | BACKUP:p1 | BACKUP:p7 | link | tracking_account -2 to review; kit -2 to review; platform -2 to review; infrastructure -2 to review |
-| operator | BACKUP:p3 | BACKUP:p4 | link | tracking_account -2 to review; kit -2 to review; platform -2 to review; infrastructure -2 to review |
+| operator | BACKUP:p1 | BACKUP:p7 | link | tracking_account -2 to review; infrastructure -2 to review |
+| operator | BACKUP:p3 | BACKUP:p4 | link | tracking_account -2 to review |
 | operator | BACKUP:p3 | BACKUP:p7 | link | tracking_account -2 to review; kit -2 to review; platform -2 to review; infrastructure -2 to review |
 | operator | BACKUP:p4 | BACKUP:p7 | link | tracking_account -2 to review; kit -2 to review; platform -2 to review; infrastructure -2 to review |
+| campaign | BACKUP:p15 | do_udostepnienia:1 | link | creative -2 to review; tracking_account -2 to review; kit -2 to review; platform -2 to review |
+| campaign | BACKUP:p15 | do_udostepnienia:2 | link | creative -2 to review; tracking_account -2 to review; kit -2 to review; platform -2 to review |
+| campaign | do_udostepnienia:1 | do_udostepnienia:2 | link | creative -2 to review; tracking_account -2 to review; kit -2 to review; platform -2 to review |
+| campaign | BACKUP:p1 | BACKUP:p7 | link | creative -2 to review; tracking_account -2 to review |
 | ecosystem | BACKUP:p1 | BACKUP:p3 | link | kit -2 to review |
 | ecosystem | BACKUP:p1 | BACKUP:p4 | link | kit -2 to review |
-| ecosystem | BACKUP:p1 | BACKUP:p7 | link | kit -2 to review |
 | ecosystem | BACKUP:p3 | BACKUP:p7 | link | kit -2 to review |
 | ecosystem | BACKUP:p4 | BACKUP:p7 | link | kit -2 to review |
-| ecosystem | BACKUP:p15 | do_udostepnienia:1 | link | tracking_account -2 to review; kit -2 to review; platform -2 to review |
-| ecosystem | BACKUP:p15 | do_udostepnienia:2 | link | tracking_account -2 to review; kit -2 to review; platform -2 to review |
-| ecosystem | do_udostepnienia:1 | do_udostepnienia:2 | link | tracking_account -2 to review; kit -2 to review; platform -2 to review |
-| ecosystem | BACKUP:p5 | do_udostepnienia:2 | link | kit -2 to review; infrastructure -2 to review |
 <!-- eval:e6-sensitivity end -->
 
 <!-- eval:run-status start -->
@@ -385,7 +384,7 @@ Fragile links, by case folder (a fragile link flips under one layer moved ±2 bi
 ## Limitations
 
 <!-- eval:limitations start -->
-The sample is small: 33 canonical captures in 26 case folders, 3 non-singleton campaign groups and 13 later items, so these counts are a regression check, not a benchmark. Cluster sizes are skewed: the largest campaign group holds 5 of 33 captures, so pair counts are dominated by it and macro-averages over groups are reported next to them. The E7 time split uses the organiser's source set instead of a capture date for 4 of 13 later items, so it tests organiser sets rather than dates. The reference base is not grown during E7: each later item is assigned against the reference folders alone, so later items never join one another or the base. The synthetic distractors (E4) are built from one organiser batch, so they test the engine on controlled edits rather than on other sources. The brand negatives are one batch of pages, so a clean E4 result says little about other brands or sources. Open-set assignment (E2, all evidence) gives 0 wrong-campaign assignments out of 7 assigned items for the Linking engine, against 3 of 8 for the baseline, over 8 leave-one-item and 8 leave-one-group items, so one error moves any rate by a large step. False accepts, assignments of items that should be new, are counted in E7 only. The sensitivity check moves 34 weights by ±1 and ±2 bits one at a time: 15 of 21 pair links change verdict under a single-layer ±2 move, so their verdicts depend on the hand-set priors and are flagged as fragile. With platform ids hidden (E1) the Linking engine recovers 0 of 11 true campaign pairs: recall without the platform layer is 0 of 11, while precision is safe, with 0 of 37 must-not-link pairs violated. Linking's campaign gate (HACK-53) means that with platform ids hidden it links 0 campaign pairs. The baseline recovers 11 of 11 and violates 31 of 37.
+The sample is small: 33 canonical captures in 26 case folders, 3 non-singleton campaign groups and 13 later items, so these counts are a regression check, not a benchmark. Cluster sizes are skewed: the largest campaign group holds 5 of 33 captures, so pair counts are dominated by it and macro-averages over groups are reported next to them. The E7 time split uses the organiser's source set instead of a capture date for 4 of 13 later items, so it tests organiser sets rather than dates. The reference base is not grown during E7: each later item is assigned against the reference folders alone, so later items never join one another or the base. The synthetic distractors (E4) are built from one organiser batch, so they test the engine on controlled edits rather than on other sources. The brand negatives are one batch of pages, so a clean E4 result says little about other brands or sources. Open-set assignment (E2, all evidence) gives 0 wrong-campaign assignments out of 7 assigned items for the Linking engine, against 3 of 8 for the baseline, over 8 leave-one-item and 8 leave-one-group items, so one error moves any rate by a large step. False accepts, assignments of items that should be new, are counted in E7 only. The sensitivity check moves 38 weights by ±1 and ±2 bits one at a time: 14 of 26 pair links change verdict under a single-layer ±2 move, so their verdicts depend on the hand-set priors and are flagged as fragile. With platform ids hidden (E1) the Linking engine recovers 4 of 11 true campaign pairs: recall without the platform layer is 4 of 11, while precision is safe, with 0 of 37 must-not-link pairs violated. The baseline recovers 11 of 11 and violates 34 of 37.
 <!-- eval:limitations end -->
 
 - **The weights are priors.** They are hand-set bits, not fitted to the data. Section 9 of [docs/methodology.md](docs/methodology.md) lists the limits. A learned table (HACK-23) can be passed with `ftf link --weights`, but the default run keeps the hand-set priors.

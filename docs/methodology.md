@@ -369,7 +369,7 @@ at scale. The design targets 10^5 incidents; that target is a plan, not a result
 - **The evaluation is a regression check, not a benchmark.** The final report's raw counts are in the
   README ("Evaluation results"). Its protocols are time split (E7), hidden-layer recovery (E1),
   leave-one-out (E2), degraded inputs (E3), distractors (E4) and a ±2-bit sensitivity sweep (E6). With
-  platform ids hidden the engine recovers 0 of 11 true campaign pairs and links none, so recall there is
-  0 of 11 while precision is safe. On the distractors it passes all natural must-not-link pairs, brand
+  platform ids hidden the engine recovers 4 of 11 true campaign pairs, and all 4 pairs it predicts are true,
+  so recall there is 4 of 11 while precision is safe. On the distractors it passes all natural must-not-link pairs, brand
   negatives, platform-only and celebrity-only pages, but one of three synthetic kit copies still fails.
   No accuracy figure is claimed here.
