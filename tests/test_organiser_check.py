@@ -86,3 +86,15 @@ def test_public_hosts_match_exactly_only(check):
     assert check._public("cert.pl")
     assert not check._public("cert.pl.attacker.example")
     assert not check._public("sub.facebook.com.invented")
+
+
+@pytest.mark.parametrize("domain", ["ads-twitter.com", "bing.com", "clarity.ms", "quora.com", "taboola.com"])
+def test_public_service_in_dataset_is_not_a_hit(check, tmp_path, domain):
+    ds = {"incidents": [{"id": "demo-1", "indicators": [
+        {"kind": "script_url", "layer": "landing", "value": f"https://{domain}/tag.js"},
+        {"kind": "aio_landing", "layer": "landing", "value": VALUE},
+    ]}]}
+    path = tmp_path / "dataset.json"
+    path.write_text(json.dumps(ds), encoding="utf-8")
+    root = _tree(tmp_path, {"src/a.py": f"HOST = '{domain}'\n"})
+    assert check.check(path, root, None) == 0
