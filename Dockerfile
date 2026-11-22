@@ -64,6 +64,7 @@ RUN if [ "$FTF_WITH_MODELS" != 0 ]; then \
 # gitignored build context. The folder may be empty (the build still works; faces are then embedded
 # but not named).
 COPY docker/build-context/faces-reference/ /opt/ftf-models/face-reference/
+RUN chmod -R a+rX /opt/ftf-models
 # Offline at run time: the weights are read from $FTF_MODEL_DIR and the reference set from
 # $FTF_FACES_REFERENCE; nothing is fetched from the hub. Global FTF_OFFLINE is not set (it would also
 # switch off the jury's live enrichment); the model loaders honour it on their own paths.
