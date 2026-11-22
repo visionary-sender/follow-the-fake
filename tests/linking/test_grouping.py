@@ -301,3 +301,10 @@ def test_ad_skips_a_lander_it_conflicts_with():
     be = stub_backend(ds)
     by_pair = {_pair(a, b): be.score(a, b, Relation.campaign) for a, b in (("m-ad", "m-l1"), ("m-ad", "m-l2"))}
     assert must_link_groups(ds, by_pair) == [["m-l2", "m-ad"]]
+
+
+def test_lander_duplicating_an_unknown_stage_capture_still_counts_as_a_lander():
+    f = incident("f", [cap("f-c1", "unknown")], {"f-c1": [(L.kit, "K1")]})
+    m = incident("m", [cap("m-x", duplicate_of="f-c1"), cap("m-y")], {"m-x": [(L.kit, "K1")], "m-y": [(L.offer, "O9")]})
+    part = _partition(group(stub_backend(dataset(f, m)), Relation.campaign)[0])
+    assert part == {frozenset({"f-c1", "m-x"}), frozenset({"m-y"})}

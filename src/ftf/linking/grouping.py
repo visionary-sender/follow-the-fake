@@ -68,8 +68,8 @@ SINGLE_VALUED_LAYERS = frozenset({Layer.platform, Layer.tenant, Layer.owner})  #
 PRIVATE_SINGLE_LAYERS = frozenset({Layer.tenant, Layer.owner})  # conflicts that are cannot-link
 CANNOT_LINK_RELATIONS = frozenset({Relation.operator, Relation.campaign})
 # Stages that end a redirect chain: an incident with several of them is not one ad's chain.
-# Unknown-stage captures (fetcher re-fetches of one URL, scanner listings) do not count: they
-# stay must-linked as before.
+# Unknown-stage captures (fetcher re-fetches of one URL, scanner listings) do not count, so an
+# incident of them alone stays must-linked; next to several landers they attach like an ad.
 END_STAGES = frozenset({Stage.lander})
 MIN_LAYERS: dict[Relation, int] = {
     Relation.template: 1,
@@ -228,13 +228,17 @@ def canonical_map(ds: Dataset) -> dict[str, str]:
 def incident_chain(incident: Incident, canon: dict[str, str], stage: dict[str, Stage]) -> tuple[list[str], list[str]]:
     """(end points, the rest) among an incident's canonical non-decoy captures, in capture order.
 
-    End points are the lander-stage captures; the rest are ad, pre-lander and unknown-stage captures.
+    End points are the captures whose own or canonical stage is lander (a lander duplicating
+    another incident's capture is still a lander here); the rest are ad, pre-lander and
+    unknown-stage captures.
     The chain is unambiguous, and may be must-linked whole, only with at most one end point.
     A capture counts as a decoy if it or its canonical capture is one.
     """
-    caps = list(dict.fromkeys(canon[c.id] for c in incident.captures if c.stage is not Stage.decoy and stage[canon[c.id]] is not Stage.decoy))
-    ends = [c for c in caps if stage[c] in END_STAGES]
-    return ends, [c for c in caps if c not in ends]
+    live = [c for c in incident.captures if c.stage is not Stage.decoy and stage[canon[c.id]] is not Stage.decoy]
+    caps = list(dict.fromkeys(canon[c.id] for c in live))
+    end_set = {canon[c.id] for c in live if c.stage in END_STAGES or stage[canon[c.id]] in END_STAGES}
+    ends = [c for c in caps if c in end_set]
+    return ends, [c for c in caps if c not in end_set]
 
 
 def must_link_groups(ds: Dataset, by_pair: dict[frozenset[str], PairScore]) -> list[list[str]]:
