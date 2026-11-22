@@ -118,9 +118,49 @@ travels only inside a privately handed-over base bundle.
 | `FTF_RAW_ROOT` | `/data/raw` | organiser folder; artefact paths in the base are relative to it |
 | `FTF_OFFLINE` | unset | `1` forces every network lookup off (enrichment, build-base) |
 | `FTF_FETCH` | `1` in the image | `1` lets the app and `ftf analyze` fetch a submitted URL live with the safe fetcher, only when online and `FTF_OFFLINE` is not set |
-| `FTF_ENRICH_CACHE` | `/base/enrichment/cache.json` if present | enrichment cache file |
+| `FTF_ENRICH_CACHE` | `/base/enrichment/cache.json` if the base comes from `/base` (serve mode); the package cache when present (both modes) | enrichment cache file, copied to a fresh `/tmp/ftf-enrichment.*` directory |
 | `FTF_PORT` | `8501` | app port inside the container |
 | `FTF_BRAND_STOPLIST` | `/opt/ftf-brand/brand-stoplist.json` | brand stop-list (hashed values of real outlet pages, from the build's `docker/brand-stoplist/` folder); `off` switches it off, a missing file warns and scores without it |
+| `FTF_PACKAGE` | unset | offline package folder (section below); each setting it provides is used only when unset |
+
+## Offline package
+
+The offline package is one folder with everything a run needs offline: the campaign base, the
+enrichment cache, the CPU models, the face reference set and the brand stop-list. It is distributed
+as a separate archive, not in git. Mount an unpacked copy read-only:
+
+```bash
+docker run ... -v "/path/to/offline-package:/data/package:ro" -e FTF_PACKAGE=/data/package ftf
+```
+
+```
+base/              campaign base: dataset.json, vectors/, keyframes/, text/
+enrichment/        cache.json: enrichment for the 26 organiser domains (RDAP and DNS 26/26, crt.sh 22/26)
+models/            CPU feature models (hf/, opencv_zoo/), as baked into the image
+face-reference/    public-figure reference set (manifest.json, embeddings.npy, images/)
+brand-stoplist/    brand-stoplist.json (hashed outlet digests, no page content)
+README.txt         what is inside and how to mount it
+```
+
+The entry point (`docker/entrypoint.sh`) sets each variable below from the package only when it is
+unset and the file or folder exists, so an explicit `-e` value always wins:
+
+| Variable | Set to |
+|---|---|
+| `FTF_BASE` | `base/dataset.json` |
+| `FTF_ENRICH_CACHE` | `enrichment/cache.json`, copied to a fresh `/tmp/ftf-enrichment.*` directory in both modes (online lookups update the copy) |
+| `FTF_MODEL_DIR` | `models/` |
+| `FTF_FACE_REFERENCE` | `face-reference/` |
+| `FTF_BRAND_STOPLIST` | `brand-stoplist/brand-stoplist.json` |
+
+The image sets `FTF_MODEL_DIR`, `FTF_FACE_REFERENCE` and `FTF_BRAND_STOPLIST` itself (Dockerfile `ENV`),
+so in the jury image the package's `models/`, `face-reference/` and `brand-stoplist/` are not read: the
+image uses its own copies. The package supplies the base and the enrichment cache there. With a package
+base present, the app does not rebuild the base, even if `/data/raw` is mounted.
+
+The settings are independent. An explicit `-e FTF_BASE` with the package cache mixes two sources, so
+set both or neither. In serve mode an explicit `-e FTF_BASE` is honoured: the build is skipped, and
+neither `/base` nor its enrichment cache is used. A set `FTF_PACKAGE` that is not a directory prints a warning and is ignored.
 
 ## Offline and online
 
@@ -154,6 +194,23 @@ present as above). Checks, run with the hardening flags of section 2 (`--memory=
   https://fetch-check.invalid/` (a reserved `.invalid` name, so no real host is contacted). Outcome
   `dead / dns_failure`, exit 0. The output folder is a tmpfs owned by uid 10001.
 - **Image leak check:** `scripts/image_leak_check.py ftf:dev` reports 0 hits across 28,438 entries.
+
+## Checks with the offline package
+
+Image built from this branch with DOCKER_BUILDKIT=1; its entry point matches
+`docker/entrypoint.sh` byte for byte. The package folder holds 331 files, 2.0 GB (base 209 files,
+models 20, face reference 99, enrichment 1, stop-list 1, README 1).
+Checks with the package mounted and `--network none` and `-e FTF_OFFLINE=1`:
+
+- **App:** `/_stcore/health` answers 200, the container runs with 0 restarts.
+- **Organiser case** (one case folder, `ftf analyze`): exit 0, decision `review`, base
+  precomputed indicators used.
+- **Invented keyword** (`ftf analyze --kind keyword`): exit 0, decision `review`, all stages ran or
+  skipped with a reason.
+- **Enrichment from the cache** is not exercised by these inputs; the offline URL check stopped at
+  "no registrable domain" (the invented name used the reserved `.invalid` TLD).
+- **Run with network on** (sandbox host): not done. The sandbox host has no container runtime set up,
+  and the image is 5.57 GB (5,568,589,990 bytes), too large to move there quickly.
 
 ## Checking the image before handing it over
 
