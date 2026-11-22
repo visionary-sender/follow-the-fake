@@ -39,10 +39,9 @@ def faces() -> str:
 
 
 def reference() -> str:
-    from ftf.features.faces.reference import load_reference
+    from ftf.features.faces.reference import load_reference, reference_dir
 
-    ref_dir = Path(os.environ.get("FTF_FACES_REFERENCE", ""))
-    if not (ref_dir / "rows.json").exists():
+    if not (reference_dir() / "manifest.json").exists():
         return "empty"
     return "ok" if load_reference() is not None else "fail"
 
