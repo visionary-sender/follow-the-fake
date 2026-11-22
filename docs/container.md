@@ -123,11 +123,11 @@ travels only inside a privately handed-over base bundle.
 | `FTF_BRAND_STOPLIST` | `/opt/ftf-brand/brand-stoplist.json` | brand stop-list (hashed values of real outlet pages, from the build's `docker/brand-stoplist/` folder); `off` switches it off, a missing file warns and scores without it |
 | `FTF_PACKAGE` | unset | offline package folder (section below); each setting it provides is used only when unset |
 
-## Offline package (HACK-92)
+## Offline package
 
-The offline package is one folder with everything the jury run needs offline: the final campaign
-base, External's enrichment cache, the CPU models, the face reference set and the brand stop-list.
-It is shared as an encrypted archive, never in git. Mount an unpacked copy read-only:
+The offline package is one folder with everything a run needs offline: the campaign base, the
+enrichment cache, the CPU models, the face reference set and the brand stop-list. It is distributed
+as a separate archive, not in git. Mount an unpacked copy read-only:
 
 ```bash
 docker run ... -v "/path/to/offline-package:/data/package:ro" -e FTF_PACKAGE=/data/package ftf
@@ -195,22 +195,22 @@ present as above). Checks, run with the hardening flags of section 2 (`--memory=
   `dead / dns_failure`, exit 0. The output folder is a tmpfs owned by uid 10001.
 - **Image leak check:** `scripts/image_leak_check.py ftf:dev` reports 0 hits across 28,438 entries.
 
-## Verified with the offline package (HACK-92, 2026-11-22)
+## Checks with the offline package
 
-Image `ftf:hack92` built on `ftf-workbench-2` from the branch (DOCKER_BUILDKIT=1); its entry point
-matches `docker/entrypoint.sh` byte for byte. The package (331 files, 2.0 GB: base 209 files, models 20,
-face reference 99, enrichment 1, stop-list 1, README 1) is in `gs://follow-the-fake-data/outputs/demo/offline-package/`.
+Image built from this branch with DOCKER_BUILDKIT=1; its entry point matches
+`docker/entrypoint.sh` byte for byte. The package folder holds 331 files, 2.0 GB (base 209 files,
+models 20, face reference 99, enrichment 1, stop-list 1, README 1).
 Checks with the package mounted and `--network none` and `-e FTF_OFFLINE=1`:
 
 - **App:** `/_stcore/health` answers 200, the container runs with 0 restarts.
-- **Organiser case** (`do_udostępnienia` case 1, `ftf analyze`): exit 0, decision `review`, base
+- **Organiser case** (one case folder, `ftf analyze`): exit 0, decision `review`, base
   precomputed indicators used.
 - **Invented keyword** (`ftf analyze --kind keyword`): exit 0, decision `review`, all stages ran or
   skipped with a reason.
 - **Enrichment from the cache** is not exercised by these inputs; the offline URL check stopped at
   "no registrable domain" (the invented name used the reserved `.invalid` TLD).
-- **Sandbox run** (network on, `ftf-sandbox`): not done. The sandbox has no Docker (its setup is
-  a venv, `scripts/sandbox.sh sync`) and the image is 5.57 GB (5,568,589,990 bytes), too big to move over IAP quickly.
+- **Run with network on** (sandbox host): not done. The sandbox host has no container runtime set up,
+  and the image is 5.57 GB (5,568,589,990 bytes), too large to move there quickly.
 
 ## Checking the image before handing it over
 
