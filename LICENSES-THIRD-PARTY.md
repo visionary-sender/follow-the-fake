@@ -69,3 +69,124 @@ including Chromium's bundled unmodified LGPL-2.1 FFmpeg.
 |---|---|
 | Playwright driver (Node.js, inside the playwright wheel) | Apache-2.0; bundled Node.js runtime MIT |
 | Chromium headless shell (`playwright install --only-shell chromium`) | BSD-3-Clause; bundles unmodified FFmpeg (LGPL-2.1) and other components under their own licences |
+
+## Debian system libraries of Chromium (HACK-68 named exception)
+
+Installed in the image by `playwright install --with-deps` (Dockerfile), unmodified, as
+Debian packages. Some are LGPL, MPL or GPL in part; owner decision 2026-11-22 accepts them
+as the only exception to the permissive allowlist. Licence per the package's copyright file.
+
+| Package | Licence |
+|---|---|
+| at-spi2-common | AFL-2.1; AFL-2.1 or GPL-2+; GPL-2; GPL-2+; LGPL-2+; LGPL-2.1+; public-domain |
+| fontconfig | free-form: HPND |
+| fontconfig-config | free-form: HPND |
+| fonts-freefont-ttf | GPL-3+; GPL-3+ with Special Font Exception |
+| fonts-ipafont-gothic | GPL-3+; IPA-1 |
+| fonts-liberation | GPL-2+; SIL-OFL-1.1 |
+| fonts-noto-color-emoji | Apache-2.0; SIL-1.1 |
+| fonts-tlwg-loma-otf | GPL-2+; GPL-2+ with Font exception; LPPL; other |
+| fonts-unifont | GFDL-NIV; GPL-2+ |
+| fonts-wqy-zenhei | GPL-2 with Font embedding exception; GPL-2 with Font embedding exception and M+ FONTS License; M+ FONTS License |
+| libasound2-data | LGPL-2.1+ |
+| libasound2t64 | LGPL-2.1+ |
+| libatk-bridge2.0-0t64 | AFL-2.1; AFL-2.1 or GPL-2+; GPL-2; GPL-2+; LGPL-2+; LGPL-2.1+; public-domain |
+| libatk1.0-0t64 | AFL-2.1; AFL-2.1 or GPL-2+; GPL-2; GPL-2+; LGPL-2+; LGPL-2.1+; public-domain |
+| libatomic1 | free-form: MIT, GPL, LGPL, BSD |
+| libatspi2.0-0t64 | AFL-2.1; AFL-2.1 or GPL-2+; GPL-2; GPL-2+; LGPL-2+; LGPL-2.1+; public-domain |
+| libavahi-client3 | free-form: GPL, LGPL, BSD |
+| libavahi-common-data | free-form: GPL, LGPL, BSD |
+| libavahi-common3 | free-form: GPL, LGPL, BSD |
+| libbrotli1 | MIT |
+| libcairo2 | free-form: HPND, LGPL, MPL |
+| libcom-err2 | 0BSD; Apache-2; BSD-3-Clause; BSD-3-Clause-Variant; BSD-4-Clause-CMU; Expat; GPL or MIT-US-export; GPL-2; GPL-2+; GPL-2+ with Texinfo exception; ISC; Kazlib; LGPL-2; Latex2e |
+| libcups2t64 | Apache-2.0; Apache-2.0-with-GPL2-LGPL2-Exception; Apache-2.0-with-GPL2-LGPL2-Exception or BSD-2-clause; BSD-2-Clause; FSFUL; Zlib |
+| libdatrie1 | GPL-2+; LGPL-2.1+ |
+| libdbus-1-3 | AFL-2.1; BSD-3-clause; BSD-3-clause and BSD-3-clause-generic; BSD-3-clause-generic; Expat; GPL-2+; GPL-2+ or AFL-2.1, and Expat and Tcl-BSDish; LGPL-2.1+; Tcl-BSDish; g10-permissive |
+| libdrm-amdgpu1 | free-form: MIT |
+| libdrm-common | free-form: MIT |
+| libdrm-intel1 | free-form: MIT |
+| libdrm2 | free-form: MIT |
+| libedit2 | BSD-3-clause |
+| libelf1t64 | BSD-2-clause; GFDL-NIV-1.3; GPL-3+; GPL-3+ with Bison exception; LGPL-2.1+; LGPL-3+ or GPL-2+ |
+| libexpat1 | MIT |
+| libfontconfig1 | free-form: HPND |
+| libfontenc1 | free-form: MIT |
+| libfreetype6 | BSD-3-Clause; BSL-1.0; Expat; FSFAP; FTL; FTL and Expat; GPL-2+; GPL-3+; MIT-Modern-Variant; MIT-SMC; OpenGroup-MIT; Public-Domain; Zlib |
+| libfribidi0 | LGPL-2.1+ |
+| libgbm1 | Apache-2.0; BSD-2-clause; BSD-3-google; BSL; GPL; GPL-1+; GPL-2; GPL-2 or MIT; Khronos; MIT; MLAA; SGI |
+| libgl1 | Apache-2.0; BSD-1-clause; GPL; GPL-3+; MIT; public-domain |
+| libgl1-mesa-dri | Apache-2.0; BSD-2-clause; BSD-3-google; BSL; GPL; GPL-1+; GPL-2; GPL-2 or MIT; Khronos; MIT; MLAA; SGI |
+| libglib2.0-0t64 | AFL-2.0; AFL-2.0 or LGPL-2.1+; Apache-2.0 with LLVM exception; CC-BY-SA-3.0; CC0-1.0; CC0-1.0 or Mingw-PD; Expat; FSFULLR; GPL-2+; Iconv-PD; Janik-permissive; Janik-permissive and old-glib-tests; Kuchling-PD; LGPL-2+; LGPL-2.1+; LGPL-2.1+ and Kuchling-PD and Plumb-PD; LGPL-3+; Mingw-PD; Plumb-PD; Unicode-DFS-2016; bzip2-1.0.6; cmph; old-glib-tests |
+| libglvnd0 | Apache-2.0; BSD-1-clause; GPL; GPL-3+; MIT; public-domain |
+| libglx-mesa0 | Apache-2.0; BSD-2-clause; BSD-3-google; BSL; GPL; GPL-1+; GPL-2; GPL-2 or MIT; Khronos; MIT; MLAA; SGI |
+| libglx0 | Apache-2.0; BSD-1-clause; GPL; GPL-3+; MIT; public-domain |
+| libgnutls30t64 | Apache-2.0; BSD-3-Clause; CC0 license; Expat; FSFAP; GPLv3+; LGPLv2.1+; LGPLv3+_or_GPLv2+; The main library is licensed under GNU Lesser |
+| libgraphite2-3 | Artistic; Artistic or GPL-1+; GPL-1+; GPL-2+; LGPL-2.1+; LGPL-2.1+ or GPL-2+ or MPL-1.1; LGPL-2.1+ or MPL-1.1 or GPL-2+; MPL-1.1; custom-sil-open-font-license; public-domain |
+| libgssapi-krb5-2 | free-form: MIT, GPL, BSD |
+| libharfbuzz0b | Apache-2.0; CC0-1.0; Expat; FSFAP; FSFUL; FSFULLR; GPL-2+ with AutoConf exception; GPL-2+ with Font exception; GPL-2+ with LibTool exception; GPL-3+; GPL-3+ with AutoConf exception; ISC; LGPL-2.1+; MIT; Monotype; OFL-1.1; UFL-1.0; Unicode |
+| libice6 | free-form: X11, HPND |
+| libidn2-0 | Expat; GPL-2+; GPL-3+; LGPL-3+; LGPL-3+ or GPL-2+; Unicode |
+| libk5crypto3 | free-form: MIT, GPL, BSD |
+| libkeyutils1 | GPL-2+; LGPL-2+ |
+| libkrb5-3 | free-form: MIT, GPL, BSD |
+| libkrb5support0 | free-form: MIT, GPL, BSD |
+| libllvm19 | APACHE-2-LLVM-EXCEPTIONS; BSD-3-Clause; BSD-3-clause; MIT; Python; solar-public-domain |
+| libnspr4 | MPL-2.0 |
+| libnss3 | BSD-3; MPL-2.0; Zlib; public-domain |
+| libp11-kit0 | Apache-2.0; BSD-3-clause; FSFAP; FSFULLR; GPL-2+ with Autoconf-data exception; GPL-3+ with Autoconf-data exception; ISC; LGPL-2.1+; X11; customFSFUL; customFSFULLRWD |
+| libpango-1.0-0 | Apache-2; Apache-2 and Bitstream-Vera and OFL-1.1; Bitstream-Vera; Chromium-BSD-style; Example; ICU; LGPL-2+; LGPL-2+ and ICU; LGPL-2+ and LGPL-2.1+; LGPL-2+ and TCL; LGPL-2.1+; OFL-1.1; TCL; Unicode |
+| libpciaccess0 | free-form: MIT, GPL |
+| libpixman-1-0 | free-form: MIT |
+| libpng16-16t64 | Apache-2.0; BSD-3-clause; BSD-like-with-advertising-clause; GPL-2+; GPL-2+ or BSD-like-with-advertising-clause; expat; libpng; libpng OR Apache-2.0 OR BSD-3-clause |
+| libsensors-config | GPL-2; GPL-2+; LGPL-2.1+; Linux-man-pages-copyleft |
+| libsensors5 | GPL-2; GPL-2+; LGPL-2.1+; Linux-man-pages-copyleft |
+| libsm6 | free-form: HPND |
+| libtasn1-6 | free-form: GPL, LGPL |
+| libthai-data | GPL-2+; LGPL-2.1+ |
+| libthai0 | GPL-2+; LGPL-2.1+ |
+| libunistring5 | BSD-3-clause or LGPL-2.1+; BSD-3-clause or LGPL-3+; FreeSoftware; GFDL-1.2+ or GPL-3+ or LGPL-3; GFDL-1.3+; GPL-2+; GPL-2+ with distribution exception; GPL-2+ with distribution exception, Expat and GPL-2+; GPL-3+; ISC or LGPL-2.1+; LGPL-2+; LGPL-2+ or LGPL-3+; LGPL-2.1+; LGPL-3; LGPL-3+; Unicode-DFS-2016; X11; bsd-3-clause; gfdl-1.2+; gfdl-1.3+; isc; public-domain; unicode-dfs-2016 |
+| libunwind8 | Expat; GPL-2+ |
+| libvulkan1 | Apache-2.0; MIT; MIT or Apache-2.0 |
+| libwayland-server0 | X11 |
+| libx11-6 | free-form: X11, MIT, HPND, BSD |
+| libx11-data | free-form: X11, MIT, HPND, BSD |
+| libx11-xcb1 | free-form: X11, MIT, HPND, BSD |
+| libxau6 | free-form: HPND |
+| libxaw7 | free-form: X11, MIT, HPND |
+| libxcb-dri3-0 | free-form: MIT |
+| libxcb-glx0 | free-form: MIT |
+| libxcb-present0 | free-form: MIT |
+| libxcb-randr0 | free-form: MIT |
+| libxcb-render0 | free-form: MIT |
+| libxcb-shm0 | free-form: MIT |
+| libxcb-sync1 | free-form: MIT |
+| libxcb-xfixes0 | free-form: MIT |
+| libxcb1 | free-form: MIT |
+| libxcomposite1 | free-form: MIT, HPND |
+| libxdamage1 | free-form: HPND |
+| libxdmcp6 | free-form: X11, HPND |
+| libxext6 | free-form: X11, MIT, HPND |
+| libxfixes3 | free-form: MIT, HPND |
+| libxfont2 | free-form: MIT, HPND, BSD |
+| libxi6 | free-form: MIT, HPND |
+| libxkbcommon0 | free-form: MIT |
+| libxkbfile1 | free-form: HPND |
+| libxml2 | ISC; MIT-1 |
+| libxmu6 | free-form: MIT, HPND |
+| libxpm4 | free-form: MIT |
+| libxrandr2 | free-form: HPND |
+| libxrender1 | free-form: HPND |
+| libxshmfence1 | free-form: HPND |
+| libxt6t64 | free-form: X11, MIT, HPND |
+| libxxf86vm1 | free-form: MIT |
+| libz3-4 | Expat; GPL-2+ |
+| mesa-libgallium | Apache-2.0; BSD-2-clause; BSD-3-google; BSL; GPL; GPL-1+; GPL-2; GPL-2 or MIT; Khronos; MIT; MLAA; SGI |
+| x11-common | free-form: MIT, GPL |
+| x11-xkb-utils | free-form: MIT, HPND |
+| xfonts-encodings | free-form: public domain |
+| xfonts-scalable | free-form: Bitstream font licence |
+| xfonts-utils | free-form: MIT, HPND, BSD |
+| xkb-data | free-form: X11, MIT, HPND |
+| xserver-common | free-form: X11, MIT, HPND, BSD |
+| xvfb | free-form: X11, MIT, HPND, BSD |

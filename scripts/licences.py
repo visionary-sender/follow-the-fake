@@ -8,12 +8,18 @@ project venv (on the VM: `scripts/vm.sh licences`).
     python scripts/licences.py --check    # exit 1 if the committed table is stale or a
                                           # licence is not on the permissive allowlist
 
+    python scripts/licences.py --audit-image FILE
+                                          # FILE: `package<TAB>licence` rows of the system packages
+                                          # the image's Chromium step added (see docs/licences.md)
+
 Policy (owner, 2026-11-21): the permissive allowlist applies to production dependencies, i.e.
 what ships in the jury's container. Named exceptions: certifi (unmodified MPL-2.0 CA bundle) and
 the optional `fetch` extra, Playwright plus its browser binaries (Chromium, with its bundled
 unmodified LGPL-2.1 FFmpeg, and the Node.js driver). LGPL, GPL and MPL stay denied for everything
 else. The Python packages of the `fetch` extra are listed from metadata like any other; the browser
 binaries it downloads (`playwright install`) carry no metadata, so `FETCH_BINARIES` lists them.
+HACK-68 (owner, 2026-11-22): the Debian system libraries Chromium needs are a named exception too,
+see `CHROMIUM_TSV`.
 """
 
 from __future__ import annotations
@@ -51,6 +57,26 @@ EXCEPTIONS = {
 }
 
 
+# HACK-68 named exception (owner decision, 2026-11-22): the Debian system libraries that Chromium
+# needs, installed in the image by `playwright install --with-deps` (Dockerfile). They are used
+# unmodified, and some are LGPL, MPL or GPL in part. Only the packages in CHROMIUM_TSV are accepted,
+# each with exactly the licence its copyright file records. Everything else still needs a
+# permissive licence. The file is generated from the built image; docs/licences.md has the steps.
+CHROMIUM_TSV = ROOT / "scripts" / "chromium-debian-packages.tsv"
+
+
+def load_chromium_packages(path: Path = CHROMIUM_TSV) -> dict[str, str]:
+    packages: dict[str, str] = {}
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        name, _, licence = line.partition("\t")
+        if not licence or name in packages:
+            raise SystemExit(f"{path.name}: bad or duplicate row for {name!r}")
+        packages[name] = licence
+    return packages
+
+
 # Binaries the `fetch` extra downloads at image build (`playwright install`): no package metadata.
 FETCH_PIN = "playwright==1.64.1"  # must equal the `fetch` extra in pyproject.toml
 FETCH_BINARIES = [
@@ -82,9 +108,10 @@ def licence_of(dist: metadata.Distribution) -> str:
 def is_permissive(licence: str) -> bool:
     """At least one OR-alternative must have every AND part permissive."""
     expr = licence.replace("(", " ").replace(")", " ")
-    for alt in re.split(r"\s+OR\s+|\s*/\s*|;", expr, flags=re.IGNORECASE):
+    for alt in re.split(r"\s+OR\s+|\s*/\s*", expr, flags=re.IGNORECASE):
         alt = re.sub(r"\s+WITH\s+\S+", "", alt.strip(), flags=re.IGNORECASE)  # exceptions only add rights
-        parts = re.split(r"\s+AND\s+", alt, flags=re.IGNORECASE)
+        # `;` separates Debian License: fields, and every one of them applies (AND, not OR).
+        parts = re.split(r"\s+AND\s+|\s*;\s*", alt, flags=re.IGNORECASE)
         if all(_part_permissive(p) for p in parts):
             return True
     return False
@@ -111,6 +138,23 @@ def shown_licence(name: str, licence: str) -> str:
     if exception is not None and licence == exception["licence"]:
         return exception["shown_as"]
     return licence
+
+
+def is_allowed_system(name: str, licence: str, chromium: dict[str, str]) -> bool:
+    """Permissive licence, or the HACK-68 exception: listed in CHROMIUM_TSV with the same licence."""
+    return chromium.get(name) == licence or is_permissive(licence)
+
+
+def audit_image(rows: dict[str, str], chromium: dict[str, str]) -> list[str]:
+    """Compare the system packages of a built image with the HACK-68 list. Returns the errors."""
+    errors = [
+        f"not permissive and not the HACK-68 exception: {name} ({licence})"
+        for name, licence in sorted(rows.items())
+        if not is_allowed_system(name, licence, chromium)
+    ]
+    errors += [f"listed in {CHROMIUM_TSV.name} but absent from the image: {name}"
+               for name in sorted(set(chromium) - set(rows))]
+    return errors
 
 
 def dependencies() -> dict[str, metadata.Distribution]:
@@ -161,14 +205,43 @@ def render() -> str:
         "|---|---|",
     ]
     lines += [f"| {name} | {lic} |" for name, lic in FETCH_BINARIES]
+    chromium = load_chromium_packages()
+    lines += [
+        "",
+        "## Debian system libraries of Chromium (HACK-68 named exception)",
+        "",
+        "Installed in the image by `playwright install --with-deps` (Dockerfile), unmodified, as",
+        "Debian packages. Some are LGPL, MPL or GPL in part; owner decision 2026-11-22 accepts them",
+        "as the only exception to the permissive allowlist. Licence per the package's copyright file.",
+        "",
+        "| Package | Licence |",
+        "|---|---|",
+    ]
+    lines += [f"| {name} | {lic} |" for name, lic in sorted(chromium.items())]
     return "\n".join(lines) + "\n"
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--audit-image", metavar="FILE",
+                        help="package<TAB>licence rows of the image's Chromium system packages")
     args = parser.parse_args()
     table = render()
+    if args.audit_image:
+        rows: dict[str, str] = {}
+        for number, line in enumerate(Path(args.audit_image).read_text().splitlines(), 1):
+            if not line.strip():
+                continue
+            name, sep, licence = line.partition("\t")
+            if not sep or not licence or name in rows:
+                raise SystemExit(f"{args.audit_image}:{number}: expected a unique `package<TAB>licence` row")
+            rows[name] = licence
+        errors = audit_image(rows, load_chromium_packages())
+        for e in errors:
+            print(e, file=sys.stderr)
+        print(f"audited {len(rows)} image system packages: {len(errors)} errors", file=sys.stderr)
+        return 1 if errors else 0
     if not args.check:
         sys.stdout.write(table)
         return 0

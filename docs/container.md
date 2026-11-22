@@ -9,8 +9,11 @@ or, with no arguments, builds the base if needed and serves the app.
 
 ## 1. Build
 
-Building needs internet access for pip and Playwright's Chromium. It takes about 5 minutes and
-the image is about 1.6 GB.
+Building needs internet access for pip, apt and Playwright's Chromium. It takes about 5 minutes and
+the image is 1.63 GB (1,631,734,508 bytes, measured on the workbench on 2026-11-22). The image
+includes Playwright's headless Chromium (`/opt/ms-playwright/chromium_headless_shell-1248`) with
+its Debian system libraries, which `ftf fetch` needs; their licences are in
+[`licences.md`](licences.md) section 2a.
 
 ```bash
 docker build -t ftf .
@@ -118,7 +121,20 @@ contacts scam infrastructure.
 ## Resources
 
 2 CPUs and 4 GB memory are enough: the app idles at about 150 MB, and building the base for the
-challenge set takes about 2 minutes. Disk: the image (about 1.6 GB) plus a few MB of base.
+challenge set takes about 2 minutes. Disk: the image (1.63 GB) plus a few MB of base.
+
+## Verified on the workbench (HACK-72, 2026-11-22)
+
+Built on `ftf-workbench` from the branch with `sudo docker build -t ftf:dev .` (1.63 GB, Chromium
+present as above). Checks, run with the hardening flags of section 2 (`--memory=4g --cpus=2`):
+
+- **App:** `docker run -d` with `-e FTF_OFFLINE=1`, no organiser folder and no base (the entry point
+  then starts the app without a base). `/_stcore/health` answers HTTP 200, the app page answers
+  HTTP 200, the container is running with 0 restarts.
+- **Fetch with no network:** `docker run --rm --network none <same flags> ftf:dev fetch --out /out
+  https://fetch-check.invalid/` (a reserved `.invalid` name, so no real host is contacted). Outcome
+  `dead / dns_failure`, exit 0. The output folder is a tmpfs owned by uid 10001.
+- **Image leak check:** `scripts/image_leak_check.py ftf:dev` reports 0 hits across 28,438 entries.
 
 ## Checking the image before handing it over
 
