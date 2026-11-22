@@ -10,18 +10,28 @@ license = "LicenseRef-Proprietary"
 requires-python = ">=3.11"
 dynamic = ["version"]
 dependencies = [
+    "datasketch>=1.6,<3",
+    "lxml>=5,<7",
     "numpy>=2,<3",
     "pydantic>=2,<3",
     "tldextract>=5.4,<6",
 ]
 
 [project.optional-dependencies]
+app = [
+    "networkx>=3.2,<4",
+    "plotly>=5.24,<7",
+    "streamlit>=1.40,<2",
+]
 # Models and native libraries for ftf.features (OCR, embeddings, faces, video); heavy, so opt-in.
 features = [
 ]
 dev = [
     "packaging>=24",
     "pytest==9.2.0",
+]
+fetch = [
+    "playwright==1.64.1",
 ]
 
 [project.scripts]
@@ -35,3 +45,8 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+
+[tool.setuptools.package-data]
+
+"ftf.indicators" = ["stoplist.json"]
