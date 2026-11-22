@@ -40,6 +40,13 @@ def _row(template: float, tracking: float, operator: float, campaign: float, eco
 # campaign, ecosystem). Kit assets establish the template and only weakly the campaign; a pixel
 # establishes the tracking account; platform, tenant and owner say nothing about the template
 # (kits are copied across platforms).
+#
+# Tracking accounts and tracker instances stay at 1.0 for campaign (HACK-53), although one pixel or
+# CAPI gateway spans several campaigns of one owner (07 §2.2, §2.3). Separating those campaigns is the
+# job of the campaign gate (`CAMPAIGN_EVIDENCE_*` below, applied in `ledger.score_pair`), not of the
+# scale: on the organiser set E1, E7 and the campaign/operator P/R counts were identical at 0.5, 0.8
+# and 1.0 once the gate was on, while any scale below ~0.94 drops the static pixel of 07 §2.5 (c)
+# (a copied kit) under hub_bits and turns that worked example from campaign review into no link.
 RELATION_SCALE: dict[Layer, dict[Relation, float]] = {
     Layer.creative: _row(0.5, 0.0, 0.5, 1.0, 1.0),
     Layer.distribution_account: _row(0.0, 0.5, 1.0, 1.0, 0.5),
@@ -234,6 +241,30 @@ HAND_TABLE = WeightTable(
         L.collector: 0.0,
     },
 )
+
+# Campaign-level evidence (HACK-53): what one campaign has and another campaign of the same owner does not.
+# Under the campaign relation the D1 gate needs at least one shared row of this kind (see `ledger.score_pair`):
+# the operator's tracking accounts, tracker instances, kit, platform, tenant, owner, offer contacts and
+# shared hosting are common to all of that operator's campaigns. An explicit list of kinds, never a layer
+# fallback: the same layers also hold operator-level kinds (advertiser page or account, traffic source),
+# ecosystem or capture facts (ad platform, start date, format) and template structure (URL, form and chain
+# shapes, the cloned article's page title). Campaign-level: the ad and its creative (ad id and name,
+# caption, image pack), the ad account's campaign and ad set, the landing (aio landing id or name, the
+# scam's own host or domain), the aio campaign id or name and an affiliate offer id. A value the
+# discovered id hierarchy places at campaign or landing level also counts (`ledger.score_pair`).
+CAMPAIGN_EVIDENCE_KINDS = frozenset({
+    "meta_ad_id", "meta_ad_name", "ad_caption", "image_phash",
+    "meta_campaign_id", "meta_campaign_name", "meta_adset_id", "meta_adset_name",
+    "aio_landing", "aio_landing_name", "landing_host", "landing_domain", "ad_landing_domain", "ad_display_domain",
+    "aio_campaign", "aio_campaign_name", "offer_id",
+})
+
+
+def is_campaign_evidence(layer: Layer, kind: str) -> bool:
+    """A shared value of this kind tells one campaign from another of the same operator (`layer` unused:
+    the kind decides, so a kind filed in an unexpected layer keeps its meaning)."""
+    return kind in CAMPAIGN_EVIDENCE_KINDS
+
 
 # Values that record a failed lookup, not evidence (HACK-19 writes `unknown` when a source is down).
 IGNORED_VALUES = frozenset({"unknown"})

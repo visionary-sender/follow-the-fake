@@ -23,6 +23,16 @@ Rules (07 §2.2, §3 D1):
 - Within a layer only the best shared kind counts (layers are dependent inside); across layers
   the bits add. A conflict on a single-valued, campaign-stable field (platform / tenant / owner)
   adds `conflict_bits` once per layer (the worst one).
+- Campaign gate (HACK-53): under the campaign relation the D1 gate (≥2 positive layers or a live
+  operator-private id) also needs one positive shared value of campaign-level evidence (`weights.CAMPAIGN_EVIDENCE_KINDS`:
+  the ad and its creative, ad account campaign or ad set, landing or own domain, aio campaign, offer id; or a
+  value the id hierarchy places at campaign or landing level; for a kind without a weight entry in the creative,
+  distribution or landing layer, its own `Indicator.level` campaign or landing), read before the chain rule and the
+  within-layer max. A value the hierarchy places at operator level or above never counts,
+  and a differing aio campaign id without a shared aio landing closes the gate. Without it `layers_positive` is capped at 1 and `live_private` is false, so
+  every consumer of the gate (verdict, grouping, assignment, link level) sees at most a review: one
+  operator's pixel, CAPI gateway and kit span several of its campaigns (07 §2.2, §2.3). The bits
+  are untouched.
 - Missing data is 0, never negative. A `missing` row appears only when one side lacks the layer.
 - Collector indicators never contribute: a shared collector value is a `collector_excluded` row
   with 0 bits.
@@ -53,7 +63,7 @@ from ftf.contract.models import (
 from ftf.linking.background import BackgroundCounts
 from ftf.linking.hierarchy import ANCHOR_KINDS, ChainRow, Hierarchy, apply_chain_rule
 from ftf.linking.types import METHOD, PairScore
-from ftf.linking.weights import HAND_TABLE, IGNORED_VALUES, WeightTable
+from ftf.linking.weights import HAND_TABLE, IGNORED_VALUES, WeightTable, is_campaign_evidence
 
 # Typical campaign size m (in captures) per relation, for the prior log-odds −log2(n/m) (07 §2.4).
 # Hand-set: an aio campaign in the sample spans ~3 captures; a tracking account or operator spans
@@ -314,6 +324,30 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
                 note="single-valued, campaign-stable field differs",
             ), w.conflict_bits))
 
+    # campaign gate (HACK-53), read before the chain rule and the within-layer max: those only decide which
+    # row carries a level's bits, so a shared aio campaign id that loses its slot to a kit value constant on
+    # that campaign still proves the campaign
+    def proves_campaign(c: ChainRow) -> bool:
+        level = ctx.hierarchy.level(c.key) if ctx.hierarchy is not None else None
+        if level in (Level.campaign, Level.landing):
+            return True
+        if level is not None:
+            return False  # the value spans several campaigns of its owner (or more), whatever its kind
+        if is_campaign_evidence(c.key[0], c.key[1]):
+            return True
+        # a kind without a weight entry in a campaign-ish layer: its own Indicator.level decides
+        return (c.key[1] not in w.kinds and c.key[0] in _CAMPAIGN_FALLBACK_LAYERS
+                and ctx.kind_level.get(c.key[:2]) in (Level.campaign, Level.landing))
+
+    campaign_evidence = relation is not Relation.campaign or (
+        any(c.bits > 0 and proves_campaign(c) for c in shared_cands)
+        # two different aio campaign ids and no shared landing: two campaigns, whatever else they share
+        and not (
+            any(r.row.kind == "aio_campaign" for rs in conflict_rows.values() for r in rs)
+            and not any(c.bits > 0 and c.key[1] == "aio_landing" for c in shared_cands)
+        )
+    )
+
     if ctx.hierarchy is not None and relation in CHAIN_RELATIONS:
         shared_cands, subsumed = apply_chain_rule(shared_cands, ctx.hierarchy, _platform_cap(w, relation))
         other_rows += subsumed
@@ -365,6 +399,10 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
             else:
                 chain_positive = True
     layers_positive += chain_positive
+    if not campaign_evidence:
+        # operator-level evidence alone (accounts, kit, hosting) never makes a campaign link: review at most
+        layers_positive = min(layers_positive, 1)
+        live_private = False
     rows += other_rows
     order = list(Layer)
     rows.sort(key=lambda r: (order.index(r.layer), r.kind))
@@ -506,6 +544,9 @@ def _platform_cap(w: WeightTable, relation: Relation) -> float:
 # rule and per-level slots apply to these relations only. Template and tracking-account evidence (a kit or a
 # pixel shared across tenants) is exactly what those relations look for.
 CHAIN_RELATIONS = frozenset({Relation.operator, Relation.campaign, Relation.ecosystem})
+# Layers in which a kind without a weight entry may count as campaign evidence by its own Indicator.level
+# (HACK-53 campaign gate); elsewhere an unknown kind never opens the gate.
+_CAMPAIGN_FALLBACK_LAYERS = frozenset({Layer.creative, Layer.distribution_account, Layer.landing})
 # The chain level a layer's own anchor names; non-anchor kinds of a chain layer share that slot.
 _LAYER_LEVEL = {Layer.tenant: Level.tenant, Layer.owner: Level.operator, Layer.landing: Level.landing}
 
