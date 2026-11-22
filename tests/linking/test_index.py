@@ -235,16 +235,18 @@ def _small_base() -> Dataset:
 
 
 def _dup_incident(iid: str, of: str, stage: str = "lander", extra: bool = False):
+    # The caption is campaign-level evidence: the HACK-53 gate needs one under campaign, and the base lacks it,
+    # so a0 stays reachable only through values a duplicate merges in.
     b = sc.Builder()
     b.n = 1000
     caps, inds = [], []
     if extra:
         p = b.capture(f"{iid}-p", "lander")
         caps.append(p)
-        inds += [b.indicator(p, "meta_pixel", "pxq", True), b.indicator(p, "kit_asset_set", "kit-q", False)]
+        inds += [b.indicator(p, "meta_pixel", "pxq", True), b.indicator(p, "kit_asset_set", "kit-q", False), b.indicator(p, "ad_caption", "caption-q", False)]
     d = b.capture(f"{iid}-d", stage, duplicate_of=of)
     caps.append(d)
-    inds += [b.indicator(d, "meta_pixel", "pxq", True), b.indicator(d, "kit_asset_set", "kit-q", False)]
+    inds += [b.indicator(d, "meta_pixel", "pxq", True), b.indicator(d, "kit_asset_set", "kit-q", False), b.indicator(d, "ad_caption", "caption-q", False)]
     return sc.Incident(id=iid, source="synthetic", captures=caps, indicators=inds)
 
 
@@ -252,7 +254,7 @@ def _carrier(iid: str):
     b = sc.Builder()
     b.n = 2000
     p = b.capture(f"{iid}-l", "lander")
-    return sc.Incident(id=iid, source="synthetic", captures=[p], indicators=[b.indicator(p, "meta_pixel", "pxq", True), b.indicator(p, "kit_asset_set", "kit-q", False)])
+    return sc.Incident(id=iid, source="synthetic", captures=[p], indicators=[b.indicator(p, "meta_pixel", "pxq", True), b.indicator(p, "kit_asset_set", "kit-q", False), b.indicator(p, "ad_caption", "caption-q", False)])
 
 
 def test_values_merged_into_a_member_by_an_added_duplicate_are_reachable():

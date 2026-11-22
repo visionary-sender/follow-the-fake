@@ -112,7 +112,7 @@ def test_multi_valued_tracker_shares_one_value_without_conflict(kind):
     layer = HAND_TABLE.kinds[kind].layer
     a = [ind(layer, kind, "trk-1", live=True), ind(layer, kind, "trk-2", live=True)]
     b = [ind(layer, kind, "trk-1", live=True), ind(layer, kind, "trk-3", live=True)]
-    s = score_pair(_pair(a, b), "x/lander", "y/lander", Relation.campaign)
+    s = score_pair(_pair(a, b), "x/lander", "y/lander", Relation.operator)  # campaign: gated (HACK-53)
     assert row(s, kind).status is EvidenceStatus.shared
     assert row(s, kind).bits == pytest.approx(3.0)
     assert s.live_private
