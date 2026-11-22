@@ -73,7 +73,11 @@ from ftf.linking.background import BackgroundCounts, default_brand, digest
 from ftf.linking.hierarchy import ANCHOR_KINDS, ChainRow, Hierarchy, apply_chain_rule
 from ftf.linking.similarity import OPERATOR_FACTOR, ContentViews, view_evidence
 from ftf.linking.types import METHOD, PairScore, decision_bits
-from ftf.linking.weights import HAND_TABLE, IGNORED_VALUES, WeightTable, is_campaign_evidence
+from ftf.linking.weights import (
+    HAND_TABLE, IGNORED_VALUES, KIT_BUILD_ANCHORS, KIT_BUILD_CORROBORATION, KIT_BUILD_MAX_GROUPS,
+    KIT_BUILD_PAGE_SLOT, KIT_BUILD_RELATIONS, KIT_BUILD_SCALE, KIT_BUILD_SLOTS, KIT_BUILD_STRUCTURE, WeightTable,
+    is_campaign_evidence,
+)
 
 # Typical campaign size m (in captures) per relation, for the prior log-odds −log2(n/m) (07 §2.4).
 # Hand-set: an aio campaign in the sample spans ~3 captures; a tracking account or operator spans
@@ -316,12 +320,15 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
     conflict_rows: dict[Layer, list[_Candidate]] = defaultdict(list)
     other_rows: list[EvidenceRow] = []
     shared_cands: list[ChainRow] = []
+    build = kit_build(ctx, va, vb, relation)
 
     for key in sorted(set(va) | set(vb), key=lambda k: (list(Layer).index(k[0]), k[1])):
         layer, kind = key
         xa, xb = va.get(key), vb.get(key)
         entry = w.weight(kind, layer)
         scale = w.scale(kind, layer, relation)
+        if build and kind in KIT_BUILD_STRUCTURE:
+            scale = max(scale, KIT_BUILD_SCALE)
         if xa is None or xb is None:
             present = xa or xb
             side = "a" if xa is not None else "b"
@@ -383,6 +390,8 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
                 note += f"; operator-private, {how}"
             if len(common) > 1:
                 note += f"; {len(common)} values shared, best kept"
+            if build and kind in KIT_BUILD_STRUCTURE:
+                note += "; corroborated landing build (HACK-84)"
             shared_cands.append(ChainRow(EvidenceRow(
                 layer=layer, kind=kind, status=EvidenceStatus.shared, value=value, bits=round(best_bits, 3),
                 seen_in=seen, indicator_ids=ids, note=note,
@@ -405,6 +414,8 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
             return True
         if level is not None:
             return False  # the value spans several campaigns of its owner (or more), whatever its kind
+        if build and c.key[1] in KIT_BUILD_STRUCTURE:
+            return True
         if is_campaign_evidence(c.key[0], c.key[1]):
             return True
         # a kind without a weight entry in a campaign-ish layer: its own Indicator.level decides
@@ -460,6 +471,8 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
         # id) must not escape the conditioning by outscoring it
         for c in sorted(shared_rows.get(layer, []), key=lambda c: ((layer, c.row.kind) not in chain_kinds, -c.bits)):
             slot = _slot(ctx, slots, layer, c.row.kind)
+            if build and layer is Layer.kit:
+                slot = KIT_BUILD_SLOTS.get(c.row.kind, KIT_BUILD_PAGE_SLOT)
             if not c.content:
                 id_tops.setdefault(slot, c)
             top = tops.get(slot)
@@ -653,6 +666,26 @@ def _substantive(ctx: ScoringContext, key: tuple[Layer, str, str]) -> bool:
     if level is None:
         level = ctx.kind_level.get(key[:2])
     return level not in _SKIN_LEVELS
+def kit_build(ctx: ScoringContext, va: dict, vb: dict, relation: Relation) -> bool:
+    """Corroborated landing build (HACK-84, `weights.KIT_BUILD_*`): the two captures share a page skeleton or
+    inline script carried by at most KIT_BUILD_MAX_GROUPS pre-groups, backed by a second such structure kind or
+    by a rare shared creative or masked text template. Brand-skin values (on a real outlet page) never count."""
+    if relation not in KIT_BUILD_RELATIONS:
+        return False
+    rare: set[str] = set()
+    for key in set(va) & set(vb):
+        kind = key[1]
+        if kind not in KIT_BUILD_STRUCTURE and kind not in KIT_BUILD_CORROBORATION:
+            continue
+        for norm in set(va[key].ids) & set(vb[key].ids):
+            k = ctx.groups((key[0], kind, norm))
+            if k <= KIT_BUILD_MAX_GROUPS and not math.isinf(ctx.rarity((key[0], kind, norm), k, relation)):
+                rare.add(kind)
+                break
+    structure = rare & KIT_BUILD_STRUCTURE
+    return bool(rare & KIT_BUILD_ANCHORS) and (len(structure) >= 2 or bool(rare & KIT_BUILD_CORROBORATION))
+
+
 # Layers in which a kind without a weight entry may count as campaign evidence by its own Indicator.level
 # (HACK-53 campaign gate); elsewhere an unknown kind never opens the gate.
 _CAMPAIGN_FALLBACK_LAYERS = frozenset({Layer.creative, Layer.distribution_account, Layer.landing})

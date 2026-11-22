@@ -171,7 +171,16 @@ platforms.
    (an ad, a celebrity's face or photo) can be reused by anyone. Without such a row the pair counts
    at most one positive layer and no live private id, so it never links or assigns. Its bits stay in
    the ledger, and an assignment explains it under the ecosystem relation instead.
-5. **Missing is 0 bits, never negative.** If one capture has a layer and the other does not (for
+5. **Corroborated landing build (HACK-84, campaign relation).** A copied kit alone is template
+   evidence: under the campaign relation the kit layer counts at half scale and does not open the
+   campaign gate. One campaign's captures, however, usually share one landing build. When the pair
+   shares a whole-page skeleton or a normalised inline script that at most 2 pre-groups carry, and
+   something independent backs it (a second such rare structure kind, or a rare shared creative
+   image or masked text template), the structure kinds count at full scale, count as campaign
+   evidence, and the page structure and the page script take one kit-layer term each. A build shared
+   by three or more pre-groups, or with nothing backing it, stays template-level. Constants:
+   `weights.KIT_BUILD_*`; the check is `ledger.kit_build`.
+6. **Missing is 0 bits, never negative.** If one capture has a layer and the other does not (for
    example, no HAR for one of them), the ledger shows a `missing` row with 0 bits. A missing modality
    is not a penalty. Section 6 uses it to say what an item could still add.
 
