@@ -1,6 +1,6 @@
 """Convert a pre-v1 scanner snapshot (batch 0) into the scanner's v1 per-capture layout.
 
-Batch 0 was collected by an early HACK-20 scanner that wrote one `runs/<run>/incidents-<source>.json`
+Batch 0 was collected by an early scanner that wrote one `runs/<run>/incidents-<source>.json`
 per source, hash-named creatives under `creatives/`, and `queue.jsonl`. The v1 scanner (on main,
 `ftf.scanner`) writes one folder per item with `capture.json` + `ad.json` (+ `creative-<n>.<ext>`),
 which `ftf ingest` reads. Rather than keep a legacy reader, this rebuilds each item as an

@@ -50,7 +50,7 @@ def load_spec(path: str | os.PathLike | None = None) -> GroundTruthSpec:
     if not file.is_file():
         raise FileNotFoundError(
             f"ground-truth spec not found: {file}; on the VM: gcloud storage rsync -r "
-            "gs://follow-the-fake-data/outputs/evaluation/ground-truth-spec/ /data/derived/evaluation/ground-truth-spec/"
+            f"gs://{os.environ.get('FTF_BUCKET', '<FTF_BUCKET>')}/outputs/evaluation/ground-truth-spec/ /data/derived/evaluation/ground-truth-spec/"
         )
     return GroundTruthSpec.from_dict(json.loads(file.read_text(encoding="utf-8")))
 

@@ -1,4 +1,4 @@
-"""Learned stability: per-layer persistence s from the scammers' own campaign objects (07 §2.3, §3 D2, §4 E1).
+"""Learned stability: per-layer persistence s from the scammers' own campaign objects.
 
 The aio platform exposes campaign and owner ids (`aio_campaign`, `aio_owner`, Ingestion's kinds).
 Pairs of captures inside one aio campaign (relation `campaign`) or one aio owner (relation
@@ -6,7 +6,7 @@ Pairs of captures inside one aio campaign (relation `campaign`) or one aio owner
 
 For every layer, and every kind with data, persistence is the share of positive pairs (both sides
 carrying the layer / kind) that share a value. Missing on either side is skipped, never counted as
-a disagreement (MAR, 07 §1.2). Pairs inside one group are dependent, so a group of m carriers
+a disagreement (MAR). Pairs inside one group are dependent, so a group of m carriers
 contributes m − 1 effective observations at its own sharing rate (macro-weighting: a big campaign
 does not dominate). Beta shrinkage toward the prior:
 
@@ -14,7 +14,7 @@ does not dominate). Beta shrinkage toward the prior:
     s_kind  = (x_eff_kind + κ·s_layer) / (n_eff_kind + κ)
 
 The label's own layer is held out: it is never estimated from the pairs it defines (attacker-
-labelled self-supervision, 07 §4 E1). Its aliases (e.g. the campaign name next to the campaign id)
+labelled self-supervision). Its aliases (e.g. the campaign name next to the campaign id)
 sit in the same layer and are held out with it.
 
 Weight of a kind under a learned relation: bits = log2[(s + (1 − s)·u)/u], times the prior's
@@ -42,7 +42,7 @@ from ftf.linking.weights import HAND_TABLE, PRIVATE_LAYERS, KindWeight, WeightTa
 KAPPA = 4.0  # Beta prior strength (pseudo-observations) toward the prior / layer estimate
 MAX_NEG_PAIRS = 20000  # negatives only feed report counts
 # Learned bits may lower a prior freely but raise it by at most this much: ~20 positive pairs and a corpus of
-# tens of operators cannot measure how often a value is copied with a kit (07 §2.2 items 4 and 10, ±2 bits).
+# tens of operators cannot measure how often a value is copied with a kit (±2 bits).
 MAX_RAISE = 2.0
 S_CLIP = (0.02, 0.98)
 LABELS: dict[Relation, str] = {Relation.campaign: "aio_campaign", Relation.operator: "aio_owner"}
@@ -291,7 +291,7 @@ def _reference_u(ctx, background: BackgroundCounts | None) -> dict[str, dict]:
         type_prior = unique >= TYPE_PRIOR_SHARE
         u = 1.0 / n if type_prior else (1.0 + alpha) / (n + alpha * v)
         # never rarer than one operator in N: a multi-valued kind (asset hashes) has V >> N, and the Dirichlet
-        # denominator alone would claim log2(V) bits the N operators cannot support (07 §1.2, cap log2 N)
+        # denominator alone would claim log2(V) bits the N operators cannot support (cap log2 N)
         u = max(u, 1.0 / n)
         out[kind] = {"u": min(u, 1.0), "N": n, "V": v, "source": source, "type_prior": type_prior,
                      "layer": layer_of[kind]}

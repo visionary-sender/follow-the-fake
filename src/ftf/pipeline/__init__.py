@@ -1,4 +1,4 @@
-"""End-to-end analysis of one submitted item (HACK-30, the integrator).
+"""End-to-end analysis of one submitted item (the integrator).
 
 `analyze(AnalysisInput, base)` runs ingest → content features → enrichment → link/assign and
 returns an `AnalysisResult` (contract `Incident`, `Link`s, `Assignment`, similar base items and

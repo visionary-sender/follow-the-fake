@@ -264,7 +264,7 @@ def _crop_status_bar(path: Path) -> Path:
 
 
 def _builtin_image_features(path: Path) -> list[Feature]:
-    """Stopgap while the image family (HACK-14) is not installed: a 64-bit pHash."""
+    """Stopgap while the image family is not installed: a 64-bit pHash."""
     return [Feature(kind="image_phash", value=str(_phash(path)))]
 
 

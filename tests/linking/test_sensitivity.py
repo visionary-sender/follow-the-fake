@@ -1,4 +1,4 @@
-"""Fragile-link flags (HACK-25, 07 E6): a link within 2 bits of τ is flagged, a strong one is not."""
+"""Fragile-link flags: a link within 2 bits of τ is flagged, a strong one is not."""
 
 from __future__ import annotations
 

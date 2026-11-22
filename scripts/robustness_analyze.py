@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Robustness pass over `ftf analyze` (HACK-79).
+"""Robustness pass over `ftf analyze`.
 
 Runs `ftf analyze` offline, one subprocess per input with a timeout, over:
   - every organiser case folder (raw/do_*/*),
