@@ -40,7 +40,19 @@ RESERVED_DOMAINS = (
     "example", "test", "invalid", "local", "example.com", "example.org", "example.net", "noreply.github.com",
 )
 # Invented fixtures that look like captured pages (path -> reason). Nothing else may be committed raw.
-RAW_ALLOWED = {"tests/scanner/fixtures/meta_ssr.html": "invented SSR fixture"}
+RAW_ALLOWED = {
+    "tests/scanner/fixtures/meta_ssr.html": "invented SSR fixture",
+    **{
+        f"docs/figures/{name}.png": "chart generated from evaluation outputs by scripts/make_figures*.py"
+        for name in (
+            "baseline_vs_model",
+            "evidence_separation",
+            "layer_ablation",
+            "rarity_rank_frequency",
+            "sensitivity",
+        )
+    },
+}
 # Test files whose e-mail and phone literals are invented (sequential digits, reserved or made-up
 # domains); their secrets are still checked. Path -> reason.
 PERSONAL_ALLOWED = {
