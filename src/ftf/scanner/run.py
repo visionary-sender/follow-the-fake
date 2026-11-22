@@ -56,7 +56,7 @@ def load_keywords(path: Path) -> dict[str, list[str]]:
     """
     out: dict[str, list[str]] = {}
     section = None
-    for number, raw in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), start=1):
+    for number, raw in enumerate(Path(path).read_text(encoding="utf-8-sig").splitlines(), start=1):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue

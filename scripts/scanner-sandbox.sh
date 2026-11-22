@@ -122,8 +122,10 @@ case "$mode" in
     cfg=$(workbench_pub "$CFG_KEY" hack20-workbench-config-to-sandbox)
     line1="restrict,command=\"tar -C /opt/hack-20/data --exclude=./.lock -czf - .\" $pub"
     line2="restrict,command=\"umask 027 && cat > $KW_FILE.new && mv -f $KW_FILE.new $KW_FILE\" $cfg"
+    # Base64 keeps the two lines one shell word on the sandbox, whatever characters the keys hold.
+    keys_b64=$(printf '%s\n%s\n' "$line1" "$line2" | base64 | tr -d '\n')
     ssh_to "$SANDBOX" "sudo install -d -o hack20xfer -g hack20xfer -m 700 /home/hack20xfer/.ssh &&
-      printf '%s\n' $(printf '%q' "$line1") $(printf '%q' "$line2") | sudo tee /home/hack20xfer/.ssh/authorized_keys >/dev/null &&
+      printf '%s' $keys_b64 | base64 -d | sudo tee /home/hack20xfer/.ssh/authorized_keys >/dev/null &&
       sudo chown hack20xfer: /home/hack20xfer/.ssh/authorized_keys && sudo chmod 600 /home/hack20xfer/.ssh/authorized_keys"
     echo "scanner-sandbox.sh: $WORKBENCH may now read /opt/hack-20/data and write $KW_FILE on $SANDBOX ($ip)" >&2
     ;;
