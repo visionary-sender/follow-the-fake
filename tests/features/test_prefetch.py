@@ -127,10 +127,14 @@ def test_reference_copy_from_local_dir_must_match_manifest(tmp_path, monkeypatch
 
     bad = tmp_path / "bad"
     bad.mkdir()
+    np.save(bad / "embeddings.npy", np.zeros((1, 128), np.float32))
     (bad / "rows.json").write_text(json.dumps({"manifest_sha": "0" * 12}))
     monkeypatch.setenv("FTF_MODEL_DIR", str(tmp_path / "other"))
     with pytest.raises(RuntimeError, match="manifest"):
         prefetch._fetch_reference(str(bad))
+    cache = tmp_path / "other" / "faces-reference"
+    leftovers = list(cache.glob("*")) if cache.exists() else []
+    assert leftovers == []  # no half-written set is left behind
 
 
 def test_reference_from_gcs_runs_gcloud_rsync(tmp_path, monkeypatch):
@@ -139,6 +143,7 @@ def test_reference_from_gcs_runs_gcloud_rsync(tmp_path, monkeypatch):
     def fake_run(cmd, check):
         seen.append(cmd)
         dest = Path(cmd[-1])
+        np.save(dest / "embeddings.npy", np.zeros((1, 128), np.float32))
         (dest / "rows.json").write_text(json.dumps({"manifest_sha": reference.manifest_sha()}))
         return None
 

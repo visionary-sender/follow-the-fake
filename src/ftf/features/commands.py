@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 from ftf.features import prefetch as models
-from ftf.features.common import add_io_args, load_input, model_dir, write_dataset
+from ftf.features.common import load_input, model_dir, write_dataset
 from ftf.features.offline import offline
 from ftf.features.pipeline import FAMILIES, apply_all, available_families
 
@@ -20,9 +20,13 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser(
         "features", help="extract visual and content features (text, image, faces, video)"
     )
-    add_io_args(p)
-    # `features prefetch` takes no --out; extraction still requires it (checked in run()).
-    next(a for a in p._actions if a.dest == "out").required = False
+    # The I/O flags of add_io_args, with --out optional: `features prefetch` takes no output dir.
+    p.add_argument("--dataset", type=Path, help="input contract dataset JSON")
+    p.add_argument(
+        "--files", type=Path, nargs="+", help="DEV ONLY: raw files to wrap one capture each"
+    )
+    p.add_argument("--raw-root", type=Path, default=Path("/data/raw"))
+    p.add_argument("--out", type=Path, help="output directory (required for extraction)")
     p.add_argument(
         "--families",
         default=None,
@@ -66,8 +70,9 @@ def run(args: argparse.Namespace) -> int:
     if args.out is None:
         raise SystemExit("--out is required")
     families = _families(args.families)
+    names = families if families is not None else available_families()
     if offline():
-        gone = models.missing(families if families is not None else available_families())
+        gone = models.missing(names)
         if gone:
             raise SystemExit(
                 f"FTF_OFFLINE=1 but these model files are not in {model_dir()}:\n  "
@@ -75,6 +80,6 @@ def run(args: argparse.Namespace) -> int:
                 + "\nrun `ftf features prefetch` once with network access (same FTF_MODEL_DIR)"
             )
     ds = load_input(args)
-    ds = apply_all(ds, args.raw_root, args.out, families)
+    ds = apply_all(ds, args.raw_root, args.out, names)
     print(write_dataset(ds, args.out))
     return 0

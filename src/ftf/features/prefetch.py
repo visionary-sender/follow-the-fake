@@ -115,33 +115,53 @@ def _reference_dir() -> Path:
 def _reference_present() -> bool:
     env = os.environ.get("FTF_FACES_REFERENCE")
     dirs = ([Path(env)] if env else []) + [_reference_dir()]
-    return any((d / "rows.json").exists() and (d / "embeddings.npy").exists() for d in dirs)
+    return any(_complete(d) for d in dirs)
+
+
+def _complete(d: Path) -> bool:
+    return (d / "rows.json").exists() and (d / "embeddings.npy").exists()
 
 
 def _fetch_reference(source: Optional[str]) -> list[Path]:
+    """Fill the sha-keyed cache directory. Built or copied into a sibling ``.part`` directory and
+    renamed into place only after the manifest check, so an interrupted run leaves no half set."""
     from ftf.features.faces import reference
 
     dest = _reference_dir()
     sha = reference.manifest_sha()
-    if not (dest / "rows.json").exists():
-        dest.mkdir(parents=True, exist_ok=True)
+    if _complete(dest):
+        return [dest]
+    part = dest.with_name(dest.name + ".part")
+    shutil.rmtree(part, ignore_errors=True)
+    part.mkdir(parents=True)
+    try:
         if source is None:
-            reference.build(dest, reference.MANIFEST_PATH, keep_images=False)
+            reference.build(part, reference.MANIFEST_PATH, keep_images=False)
         elif source.startswith("gs://"):
             prefix = source.rstrip("/") + "/"
-            subprocess.run(["gcloud", "storage", "rsync", "-r", prefix, str(dest)], check=True)
+            subprocess.run(["gcloud", "storage", "rsync", "-r", prefix, str(part)], check=True)
         else:
-            shutil.copytree(source, dest, dirs_exist_ok=True)
-    manifest = json.loads((dest / "rows.json").read_text(encoding="utf-8")).get("manifest_sha")
-    if manifest != sha:
-        raise RuntimeError(f"reference set in {dest} was built from manifest {manifest}, not {sha}")
+            shutil.copytree(source, part, dirs_exist_ok=True)
+        manifest = None
+        if (part / "rows.json").exists():
+            manifest = json.loads((part / "rows.json").read_text(encoding="utf-8")).get("manifest_sha")
+        if manifest != sha or not (part / "embeddings.npy").exists():
+            raise RuntimeError(f"reference set from {_source_name(source)} does not match manifest {sha}")
+    except Exception:
+        shutil.rmtree(part, ignore_errors=True)
+        raise
+    shutil.rmtree(dest, ignore_errors=True)
+    os.replace(part, dest)
     return [dest]
 
 
+def _source_name(source: Optional[str]) -> str:
+    return "Wikimedia" if source is None else source
+
+
 def _reference_part(source: Optional[str]) -> Part:
-    where = "Wikimedia" if source is None else source
     return Part(
-        name=f"faces: reference set from {where}",
+        name=f"faces: reference set from {_source_name(source)}",
         family="faces",
         fetch=lambda: _fetch_reference(source),
         present=_reference_present,
@@ -159,12 +179,13 @@ def _speech_part() -> Part:
 
         return [Path(download_model(SPEECH_MODEL, cache_dir=str(root())))]
 
-    def present() -> bool:
+    def check() -> None:
         from faster_whisper.utils import download_model
 
-        return _present(
-            lambda: download_model(SPEECH_MODEL, cache_dir=str(root()), local_files_only=True)
-        )
+        download_model(SPEECH_MODEL, cache_dir=str(root()), local_files_only=True)
+
+    def present() -> bool:
+        return _present(check)
 
     return Part(name=f"video: speech {SPEECH_MODEL}", family="video", fetch=fetch, present=present)
 

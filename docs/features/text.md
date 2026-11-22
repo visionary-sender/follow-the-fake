@@ -81,11 +81,11 @@ sets, with a standard error of about 0.044.
   mean pooling, L2-normalised. Model files download on first use into `FTF_MODEL_DIR/hf` at a
   pinned Hub revision. If the model cannot load (missing extra, or no network on first use), the
   family logs one warning and skips embeddings; the other indicators are still written.
+  - `FTF_TEXT_MODEL=e5-base` switches to `intfloat/multilingual-e5-base` (768-d, MIT, 1.11 GB).
+  - The default is e5-small: it is 2.4× smaller and fast enough on a jury laptop.
 - **Offline.** `ftf features prefetch` downloads the ONNX graph and tokenizer into the same cache.
   With `FTF_OFFLINE=1` the loader passes `local_files_only`, so it only reads that cache, and
   `ftf features` stops before it starts if a file is missing, naming it.
-  - `FTF_TEXT_MODEL=e5-base` switches to `intfloat/multilingual-e5-base` (768-d, MIT, 1.11 GB).
-  - The default is e5-small: it is 2.4× smaller and fast enough on a jury laptop.
 - **Threads.** `FTF_THREADS` (default `min(4, cpu_count)`) caps onnxruntime and Tesseract.
 
 ## Models and packages
