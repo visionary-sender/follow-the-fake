@@ -59,3 +59,41 @@ of the target campaigns, and its platform software name conflicts with theirs. I
 The HAR that would carry its campaign-level ids is in another folder, so the engine cannot see
 the evidence that it belongs with BACKUP:p1, p7 and p15. Under the campaign relation, a no-HAR
 item arguably belongs in review rather than new. That change is outside this record.
+
+## Missing inputs that could reach the bar: review, not new (HACK-67)
+
+**The rule.** A `new` call becomes `review` when the best candidate's score plus the capacity of
+the item's missing modalities reaches the assign bar. The missing input could have produced the
+assignment, so a low score is no evidence of a new campaign. The note names the missing inputs and
+the bits they could add. Both the linear scan and the indexed path apply the rule, with identical
+results (tested).
+
+**Capacity per kind.** Before this change capacity was counted per layer. In the challenge data,
+every layer a HAR feeds is also fed by HTML somewhere, so a missing HAR never added anything:
+do_udostepnienia:3 (HTML, screenshot and assets; HAR, video and ad library missing) had a capacity
+of 32.4 bits, the same as a complete item, and its note said no missing input could add evidence.
+Capacity now counts, per layer, only the kinds the item's modalities can carry
+(`weights.KIND_MODALITIES`), and a private id without recorded traffic counts minus the copy
+discount, as the ledger scores it. For :3 that gives 30.9 bits, and a missing HAR adds at most
+1.5 bits (offer and tracker instance layers).
+
+**Effect on the evaluations.** Item :3 stays `new`: 2.2 + 1.5 bits is far below the 9.3-bit bar.
+Its campaign is out of reach for another reason: against BACKUP:p1, p7 and p15 it scores −4.0 bits,
+because the platform software name differs, and a HAR cannot remove that conflict.
+
+| Run | Before | After |
+| -- | -- | -- |
+| E7 time split, platform ids hidden | 0 correct, 6 review, 7 new (6 correct), 0 false accepts | same |
+| E7 time split, platform ids visible | 2 correct, 4 review, 7 new (6 correct), 0 false accepts | same |
+| E1 hidden platform layer | 0 wrong merges, 0 must-not-link violations | same |
+| E3 degrade, false accepts | 0 of 108 items | 0 of 108 items |
+| E3 degrade, HTML-only median capacity | 48.4 bits | 44.9 bits |
+
+**What the bound does not see.** Per kind, HTML can carry almost everything a HAR can, so the bound
+credits a missing HAR with little more than the live-id discount. In the degrade run, items with a
+HAR are assigned (leave-one-item-out: 7 of 8 with all inputs, 5 of 8 with the HAR only) while the
+same items with HTML only are not (5 new, 3 review), because their saved HTML lacks the ids the
+recorded traffic shows. A bound that starts from the indicators the item actually carries (a layer
+it shows nothing in gets the missing modality's full cap) would send those items and :3 to review.
+That changes what capacity means for the capacity-below-τ rule too, so it is left for a separate
+decision.
