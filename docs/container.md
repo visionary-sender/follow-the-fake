@@ -63,7 +63,19 @@ docker run --rm <same flags> -v "/path/to/organiser-folder:/data/raw:ro" -v ftf-
 `ftf build-base --raw DIR --out DIR [--offline] [--force]` exits 1 and writes no `dataset.json` if no
 linkable indicator is left after ingest and features (an empty base never reaches the app), and 2
 on bad arguments or an existing base without `--force`. With no arguments the container builds
-(if needed) and serves; with arguments it runs `ftf <arguments>`, e.g. `ftf --help`.
+(if needed) and serves; with arguments it runs `ftf <arguments>`, e.g. `ftf --help`. Arguments
+also get `FTF_BASE=/base/dataset.json` when that file is mounted, so `ftf analyze` uses the base
+without `--base`.
+
+To analyse one item in the container (no network, base and raw folder read-only, results in `/out`,
+which must be writable by uid 10001):
+
+```bash
+docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=512m --cap-drop=ALL \
+  --security-opt no-new-privileges --security-opt seccomp=docker/seccomp-chromium.json \
+  -v "/path/to/organiser-folder:/data/raw:ro" -v "/path/to/base-bundle:/base:ro" \
+  -v "/path/to/out:/out" ftf analyze /data/raw/<case-folder> --out /out/result.json
+```
 
 ## Base bundle layout
 
