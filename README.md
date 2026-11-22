@@ -118,7 +118,7 @@ the repository root, because the run command reads the Chromium seccomp profile 
 `docker/seccomp-chromium.json`.
 
 **1. Build** (needs internet for pip and Playwright's Chromium; about 5 minutes, image about
-1.2 GB):
+1.6 GB):
 
 ```bash
 docker build -t ftf .
@@ -203,7 +203,7 @@ On our workbench VM the same image runs with `--network none` or `-e FTF_OFFLINE
 contacts scam infrastructure.
 
 **Resources.** 2 CPUs and 4 GB memory are enough (the app idles at about 150 MB; building the base
-for the challenge set takes about 2 minutes). Disk: the image (about 1.2 GB) plus a few MB of
+for the challenge set takes about 2 minutes). Disk: the image (about 1.6 GB) plus a few MB of
 base.
 
 ## Safe URL fetcher (`ftf fetch`)
