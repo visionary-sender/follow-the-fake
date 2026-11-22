@@ -576,7 +576,7 @@ def test_labels_flags_exclude_and_egress(corpus, tmp_path):
     assert rows["certpl:dead.example"]["scam_label"] == "listed"
     assert rows["adlib:meta-1"]["scam_label"] == "legit_suspected"  # its landing domain is on the legit list
     assert rows["adlib:g-3"]["scam_label"] == "unknown"  # cloaked, but the keyword is not a person
-    assert rows["fetch:e-g"]["corpus_kind"] == "fetched_landing" and rows["fetch:e-g"]["profiles"] == ["egress"]
+    assert rows["fetch:e-g"]["corpus_kind"] == "fetched_landing" and rows["fetch:e-g"]["profiles"] == ["default@egress"]
     assert rows["fetch:cap-wb"]["corpus_flags"] == ["wayback_infra"] and rows["fetch:cap-wb"]["scam_label"] == "not_scam"
     assert rows["fetch:orphan"]["corpus_kind"] == "exclude" and s["excluded"] == 1
     eff = s["effective_sample"]
@@ -592,3 +592,11 @@ def test_scam_label_suspected():
     assert scam_label([row], set(), set(), {"person name"}) == "suspected"
     assert scam_label([row], set(), set(), set()) == "unknown"
     assert scam_label([row], {"lp.example"}, set(), set()) == "listed"
+
+
+def test_attempt_label():
+    from ftf.corpus.build import _attempt_label
+
+    assert _attempt_label({"profile": {"name": "victim-pl-mobile"}, "egress": {"name": "ftf-egress-1"}}) == "victim-pl-mobile@ftf-egress-1"
+    assert _attempt_label({"profile": {"name": "victim-pl-mobile"}, "egress": {"proxy": "gate.example:1"}}) == "victim-pl-mobile@proxy"
+    assert _attempt_label({}) == "default@egress"

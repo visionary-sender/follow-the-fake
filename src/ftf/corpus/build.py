@@ -191,6 +191,17 @@ def _rehome_scanner(inc: m.Incident, scanner: str) -> m.Incident:
     return inc.model_copy(update={"captures": caps})
 
 
+def _attempt_label(man: dict) -> str:
+    """`<profile>@<egress>` for a fetch attempt, e.g. `victim-pl-mobile@ftf-egress-1` or `...@proxy`.
+
+    The fetcher writes `profile` and `egress` as objects (name, user agent, region, ...)."""
+    prof = man.get("profile")
+    prof = (prof.get("name") if isinstance(prof, dict) else prof) or "default"
+    eg = man.get("egress") if isinstance(man.get("egress"), dict) else {}
+    where = "proxy" if eg.get("proxy") else (eg.get("name") or "egress")
+    return f"{prof}@{where}"
+
+
 def _is_creative(a: m.Artefact) -> bool:
     name = (a.path or "").rsplit("/", 1)[-1]
     return a.type is m.ArtefactType.ad_screenshot or (a.type is m.ArtefactType.asset and name.startswith("creative-"))
@@ -386,7 +397,7 @@ def build_corpus(
                     "victim_flipped_to_live": bool(vc and vc.is_page and not (fc and fc.is_page)),
                     "egress": [
                         {"dir": e.rel_dir.split("/", 1)[0], "capture_id": e.manifest.get("capture_id"),
-                         "profile": e.manifest.get("profile") or "egress", "outcome": e.outcome,
+                         "profile": _attempt_label(e.manifest), "outcome": e.outcome,
                          "category": e.category, "final_url": e.manifest.get("final_url")}
                         for e in (egress.get(url, []) if url else [])
                     ],
