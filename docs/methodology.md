@@ -366,7 +366,10 @@ at scale. The design targets 10^5 incidents; that target is a plan, not a result
   is recorded as `unknown` and carries no bits; a stale cache entry is labelled as stale.
 - **Campaigns rotate.** Operators change pages and pixels inside a campaign. The campaign relation
   is strict for that reason, and screenshot-only variants go to review rather than to a campaign.
-- **The evaluation is a regression check, not a benchmark.** HACK-29's raw counts are in the README
-  ("Evaluation results"). They show 0 of 11 true campaign pairs recovered when platform ids are
-  hidden, and real outlet, platform-only, celebrity-only and one synthetic kit-copy page still link to
-  a campaign, operator, template or tracking account (HACK-66, open). No accuracy figure is claimed here.
+- **The evaluation is a regression check, not a benchmark.** The final report's raw counts are in the
+  README ("Evaluation results"). Its protocols are time split (E7), hidden-layer recovery (E1),
+  leave-one-out (E2), degraded inputs (E3), distractors (E4) and a ±2-bit sensitivity sweep (E6). With
+  platform ids hidden the engine recovers 0 of 11 true campaign pairs and links none, so recall there is
+  0 of 11 while precision is safe. On the distractors it passes all natural must-not-link pairs, brand
+  negatives, platform-only and celebrity-only pages, but one of three synthetic kit copies still fails.
+  No accuracy figure is claimed here.
