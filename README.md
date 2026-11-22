@@ -65,7 +65,7 @@ The numbers are the method's output from hand-set weights, not a measured accura
 
 ## Methodology
 
-The full description is in [docs/methodology.md](docs/methodology.md). Its weights and thresholds are read from the code (`src/ftf/linking/`). In short:
+The full description is in [docs/methodology.md](docs/methodology.md); cases where the engine deliberately answers "review" are explained in [docs/linking-decisions.md](docs/linking-decisions.md). Its weights and thresholds are read from the code (`src/ftf/linking/`). In short:
 
 1. **Captures.** A visit or a saved item (ad, pre-lander, lander, decoy) is one capture, with the modalities it has and the ones it lacks. Exact duplicates collapse onto one capture first.
 2. **Indicators per layer.** Identifiers and features come from saved files and recorded traffic: tracking accounts, operator and tenant configuration, page-kit fingerprints, landing ids, infrastructure facts and ad text. Each indicator sits in one layer and is marked live (seen in traffic) or static (seen in saved files).
