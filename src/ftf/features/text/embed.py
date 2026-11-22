@@ -14,7 +14,7 @@ from functools import lru_cache
 
 import numpy as np
 
-from ftf.features.common import model_dir
+from ftf.features.offline import hub_file
 
 
 @dataclass(frozen=True)
@@ -51,18 +51,16 @@ def spec() -> ModelSpec:
 class Embedder:
     def __init__(self, s: ModelSpec, threads: int):
         import onnxruntime as ort
-        from huggingface_hub import hf_hub_download
         from tokenizers import Tokenizer
 
-        cache = model_dir() / "hf"
-        get = lambda f: hf_hub_download(s.repo, f, revision=s.revision, cache_dir=cache)  # noqa: E731
         self.spec = s
-        self.tok = Tokenizer.from_file(get("onnx/tokenizer.json"))
+        self.tok = Tokenizer.from_file(str(hub_file(s.repo, s.revision, "onnx/tokenizer.json")))
         self.tok.enable_truncation(s.max_tokens)
         opts = ort.SessionOptions()
         opts.intra_op_num_threads = threads
         opts.inter_op_num_threads = 1
-        self.sess = ort.InferenceSession(get(s.onnx_file), opts, providers=["CPUExecutionProvider"])
+        onnx = hub_file(s.repo, s.revision, s.onnx_file)
+        self.sess = ort.InferenceSession(str(onnx), opts, providers=["CPUExecutionProvider"])
         self.inputs = {i.name for i in self.sess.get_inputs()}
 
     def embed(self, text: str) -> np.ndarray:

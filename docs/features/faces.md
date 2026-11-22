@@ -53,6 +53,10 @@ Build it ahead of time with `python -m ftf.features.faces.reference build` (e.g.
 build step). Wikimedia throttles bulk thumbnail downloads; the builder paces itself and honours
 `Retry-After`.
 
+`ftf features prefetch` fills the YuNet and SFace weights into `model_dir()/opencv_zoo`; they are
+checked against their pinned SHA-256 digests on download and by size on later runs. The reference
+set is not part of prefetch (it moves to its own bucket, HACK-83).
+
 **Brands.** A gazetteer in `brands.py` of about 50 Polish news portals, TV and radio, banks,
 large companies and public institutions that scam pages impersonate (general public knowledge;
 names only). Long names match case-insensitively on word boundaries; short or ambiguous ones

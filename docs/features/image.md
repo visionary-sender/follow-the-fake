@@ -63,6 +63,10 @@ the first screen, with the hero image and the headline. Weights download on firs
 fails, the family still emits all hashes and logs a warning. `FTF_IMAGE_EMBED=0` turns
 embeddings off and `FTF_THREADS` caps torch threads (default 4).
 
+Offline: `ftf features prefetch` puts the processor config and the weights of the pinned revision
+into `model_dir()/hf`. With `FTF_OFFLINE=1` the loader passes `local_files_only` and reads only
+that cache; a missing file stops `ftf features` with its name instead of dropping embeddings.
+
 ## Models and packages
 
 | what | id / version | licence | download |

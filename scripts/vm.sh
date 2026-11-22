@@ -9,7 +9,8 @@
 # anything gitignored) to /work/<slug>/src on the VM, replacing the previous copy so files
 # deleted locally disappear there too. The venv /work/<slug>/venv is pinned to /opt/venv-base
 # versions and reinstalled only when pyproject.toml changes. <slug> is the worktree directory
-# name (override with FTF_VM_SLUG), so several worktrees can use the VM at once.
+# name (override with FTF_VM_SLUG), so several worktrees can use the VM at once. The venv installs
+# the pip extras in FTF_VM_EXTRAS (default app,dev,fetch; the visual families need features too).
 # Nothing is computed locally: the laptop only lists files, packs them and drives ssh.
 set -euo pipefail
 
@@ -53,7 +54,8 @@ tar --warning=no-unknown-keyword -xzf - -C "$w/src.new"
 rm -rf "$w/src"
 mv "$w/src.new" "$w/src"
 # Rebuild the venv when the package metadata or the base venv's pins change.
-hash=$( { cat "$w/src/pyproject.toml" "$w/src/src/ftf/__init__.py"; /opt/venv-base/bin/pip freeze; } \
+extras=${FTF_VM_EXTRAS:-app,dev,fetch}
+hash=$( { cat "$w/src/pyproject.toml" "$w/src/src/ftf/__init__.py"; echo "$extras"; /opt/venv-base/bin/pip freeze; } \
   | sha256sum | cut -d' ' -f1)
 if [ ! -x "$w/venv/bin/python" ] || [ "$(cat "$w/venv/.pyproject-hash" 2>/dev/null)" != "$hash" ]; then
   echo "vm.sh: (re)installing venv $w/venv" >&2
@@ -61,7 +63,7 @@ if [ ! -x "$w/venv/bin/python" ] || [ "$(cat "$w/venv/.pyproject-hash" 2>/dev/nu
   python3 -m venv "$w/venv"
   /opt/venv-base/bin/pip freeze --exclude-editable > "$w/base-constraints.txt"
   "$w/venv/bin/pip" install -q --disable-pip-version-check \
-    -c "$w/base-constraints.txt" -e "$w/src[app,dev,fetch]" >&2
+    -c "$w/base-constraints.txt" -e "$w/src[$extras]" >&2
   echo "$hash" > "$w/venv/.pyproject-hash"
 fi
 cd "$w/src"
@@ -86,7 +88,7 @@ ssh_vm() {
     --ssh-flag=-T --command "$1"
 }
 
-remote_cmd="bash -c $(printf '%q' "$remote") ftf-vm $(printf '%q ' "$slug" "$mode" "$@")"
+remote_cmd="FTF_VM_EXTRAS=$(printf '%q' "${FTF_VM_EXTRAS:-app,dev,fetch}") bash -c $(printf '%q' "$remote") ftf-vm $(printf '%q ' "$slug" "$mode" "$@")"
 echo "vm.sh: $VM:/work/$slug ($mode)" >&2
 
 if [ "$mode" = licences ]; then
