@@ -22,7 +22,7 @@ observed `live`; images from files are observed `static`. If an embedding was co
 top crop of a tall screenshot, its `locator` has `crop=top:<px>px`.
 
 `features_for_image(path)` and `features_for_bytes(data)` return the same features for one
-still image, so the video family (HACK-16) can run them on keyframes.
+still image, so the video family can run them on keyframes.
 
 ## Method
 
@@ -81,7 +81,7 @@ that cache; a missing file stops `ftf features` with its name instead of droppin
 
 These are in the `features` extra, not in `LICENSES-THIRD-PARTY.md`.
 
-## CPU time (ftf-visual, e2-standard-8 shared with other workers, 4 threads)
+## CPU time (cloud VM, e2-standard-8 shared with other workers, 4 threads)
 
 | step | per image |
 |---|---|
@@ -92,13 +92,13 @@ These are in the `features` extra, not in `LICENSES-THIRD-PARTY.md`.
 **Coverage** over the ingested organiser dataset (34 captures): 420 images in 29 captures get
 all three hashes and an embedding (`image_phash`, `image_dhash`, `image_pdq`: 420 each;
 `image_embedding`: 420 vectors, 768-d). The five captures without images hold no image
-artefacts. Output: `gs://follow-the-fake-data/outputs/visual/hack-14/organiser-v2/`.
+artefacts. Output: `gs://<DATA_BUCKET>/outputs/visual/<run>/organiser-v2/`.
 
 ## Evaluation (acceptance)
 
 Script: `scripts/image_eval.py`. The labelled pair list names organiser files, so it lives in
-the bucket (`outputs/visual/hack-14/labels/pairs.json`). The full report is at
-`outputs/visual/hack-14/eval/report.json`.
+the bucket (`outputs/visual/<run>/labels/pairs.json`). The full report is at
+`outputs/visual/<run>/eval/report.json`.
 
 **Positives** are the near-duplicate groups from the signal report §7. Each group lists two
 sides, and every image on side A is paired with its closest image on side B by PDQ (the report
@@ -122,7 +122,7 @@ both the positives and the negatives.
 pairs of ad screenshots (cases differ, bytes differ, seed 14).
 
 Distances on 14 positives vs 2,500 negatives (full report:
-`gs://follow-the-fake-data/outputs/visual/hack-14/eval/report.json`):
+`gs://<DATA_BUCKET>/outputs/visual/<run>/eval/report.json`):
 
 | Signal | Positives median / max | Negatives min / p1 / median | AUC |
 |---|---|---|---|

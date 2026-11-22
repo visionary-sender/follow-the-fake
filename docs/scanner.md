@@ -9,15 +9,15 @@ sandboxed URL fetcher.
 |---|---|---|
 | `meta` | Meta Ad Library search page in headless Chromium, **no login**; ads are read from the page's own GraphQL responses and the JSON embedded in the first page | Library id, page id and name, ad text, title, display domain, landing URL as declared to Meta, creative image links, creative group (`collation_id`), platforms, start and end date, taken-down flag |
 | `google_atc` | Google Ads Transparency Center RPC endpoints, plain HTTPS, no key; keywords match advertiser names and domains (the Center has no ad-copy search), region Poland | Creative id, advertiser id and name, advertiser domain, creative image or preview link, format, first and last shown |
-| `google_bq` | Google's public BigQuery dataset `bigquery-public-data.google_ads_transparency_center.removed_creative_stats`: creatives Google **removed** in Poland since `--since` for scam-like reasons (misrepresentation, account suspension, dishonest behaviour, financial products, abusing the ad network). Google's sanctioned bulk route: no scraping, no rate limit. Needs a GCP project to bill (`--bq-project` or `FTF_BQ_PROJECT`) and a token (`FTF_BQ_TOKEN` or `gcloud auth print-access-token`); otherwise it reports `unavailable`. One run scans about 3.4 GB (about 0.02 USD on demand, inside the free monthly terabyte); `maximumBytesBilled` caps it at 10 GB | Creative id, advertiser id when the page URL names it, first and last shown in Poland, removal reason. No ad text, image or landing URL in the dataset. It shares the id `adlib:<CR…>` and the deduplication key with `google_atc` |
+| `google_bq` | Google's public BigQuery dataset `bigquery-public-data.google_ads_transparency_center.removed_creative_stats`: creatives Google **removed** in Poland since `--since` for scam-like reasons (misrepresentation, account suspension, dishonest behaviour, financial products, abusing the ad network). Google's sanctioned bulk route: no scraping, no rate limit. Needs a GCP project to bill (`--bq-project` or `FTF_BQ_PROJECT`) and a token (`FTF_BQ_TOKEN` or `gcloud auth print-access-token`); otherwise it reports `unavailable`. One run scans about 3.4 GB (inside the free monthly terabyte); `maximumBytesBilled` caps it at 10 GB | Creative id, advertiser id when the page URL names it, first and last shown in Poland, removal reason. No ad text, image or landing URL in the dataset. It shares the id `adlib:<CR…>` and the deduplication key with `google_atc` |
 | `certpl` | CERT Polska warning list (`hole.cert.pl/domains/v2/domains.json`), public and keyless | Register id, newly listed domain, listing date |
 
 ```bash
 ftf scan --keywords-file config/scanner-keywords.txt  # all sources, last 7 days
-ftf scan --source meta --keywords "term one,term two" --since 2026-11-14
+ftf scan --source meta --keywords "term one,term two" --since <YYYY-MM-DD>
 ftf scan --source certpl --cert-filter invest,inwest  # only CERT domains containing a filter word
 ftf scan --source google_atc --keywords-file config/scanner-keywords.txt --max-ads 50 --delay 3 --out scan
-ftf scan --source google_bq --bq-project my-gcp-project --since 2026-10-22   # run on the workbench
+ftf scan --source google_bq --bq-project my-gcp-project --since <YYYY-MM-DD>   # run on the cloud VM
 ```
 
 - **Search terms.** `meta` and `google_atc` need terms: `--keywords` gives one comma-separated
@@ -30,8 +30,8 @@ ftf scan --source google_bq --bq-project my-gcp-project --since 2026-10-22   # r
   `--keywords-file config/scanner-keywords.txt`. There is no default path, so `meta` and
   `google_atc` need that flag or `--keywords`. `config/scanner-keywords.example.txt` shows the
   format with invented terms.
-  The list in use may be longer. It lives in `gs://follow-the-fake-data/config/scanner-keywords.txt`
-  and the sandbox reads a copy at `/opt/hack-20/config/scanner-keywords.txt`. Organiser values
+  The list in use may be longer. It lives in `gs://<DATA_BUCKET>/config/scanner-keywords.txt`
+  and the sandbox reads a copy at `/opt/<SCANNER_DIR>/config/scanner-keywords.txt`. Organiser values
   (domains, URLs, ids, advertiser or page names, private people) never go into git, a PR, a
   tracker or a doc.
 
@@ -88,7 +88,7 @@ with identity confirmation; the `meta` source should be replaced by an API clien
 other two sources do not depend on it: Google's Transparency Center and the CERT Polska list
 are public and keyless.
 
-**In the jury's container** there is no scheduler; run the scanner by hand and mount a
+**In the container** there is no scheduler; run the scanner by hand and mount a
 directory for its output:
 
 ```bash
@@ -100,25 +100,25 @@ The `meta` source needs the optional `playwright` package and Chromium. The imag
 them it reports `unavailable` and the other sources still run; to install them:
 `pip install '.[fetch]' && playwright install --with-deps chromium`.
 
-**Scheduled runs (team setup).** The scanner runs only on the sandbox VM `ftf-sandbox`, never
-on the laptop or the workbench. `scripts/scanner-sandbox.sh install` copies the code to
-`/opt/hack-20` there (tracked files only), builds a venv with Chromium and installs a systemd
-timer (`deploy/scanner/`) that runs `ftf scan --download-creatives --keywords-file /opt/hack-20/config/scanner-keywords.txt` as the unprivileged user
-`hack20` 2 minutes after it starts and then every 6 hours while the VM is up. Each source is
+**Scheduled runs.** The scanner runs only on the sandbox VM, never
+on the laptop or the cloud VM. `scripts/scanner-sandbox.sh install` copies the code to
+`/opt/<SCANNER_DIR>` there (tracked files only), builds a venv with Chromium and installs a systemd
+timer (`deploy/scanner/`) that runs `ftf scan --download-creatives --keywords-file /opt/<SCANNER_DIR>/config/scanner-keywords.txt` as the unprivileged user
+`<SCANNER_USER>` 2 minutes after it starts and then every 6 hours while the VM is up. Each source is
 saved as soon as it finishes, so a run stopped half-way keeps what it found.
 `scripts/scanner-sandbox.sh status` shows the timer, the runs and the queue.
 `scripts/scanner-sandbox.sh keywords` copies the keyword file from the bucket to the sandbox: it
-runs on the workbench, which streams `gs://follow-the-fake-data/config/scanner-keywords.txt` to
+runs on the cloud VM, which streams `gs://<DATA_BUCKET>/config/scanner-keywords.txt` to
 the sandbox over the internal network with a key that can only write that file, so the laptop
 just issues the command. Until the file exists the timer skips its runs (`ConditionPathExists`),
 and `status` says whether it is there.
 `scripts/scanner-sandbox.sh authorize-workbench` (once) and `scripts/scanner-sandbox.sh pull`
 (a read-only mirror: queue statuses are changed with `ftf.scanner.mark` on the sandbox copy,
-which a pull overwrites on the workbench) copy the output from the sandbox to the workbench (`/data/derived/scanner/`) over the internal
+which a pull overwrites on the cloud VM) copy the output from the sandbox to the cloud VM (`/data/derived/scanner/`) over the internal
 network, with a key restricted to one read-only command, and sync it to
-`gs://follow-the-fake-data/outputs/scanner/`. Nothing passes through the laptop.
+`gs://<DATA_BUCKET>/outputs/scanner/`. Nothing passes through the laptop.
 
-**Meta from a cloud IP (observed 2026-11-21).** From the sandbox VM (Google Cloud,
+**Meta from a cloud IP (observed).** From the sandbox VM (Google Cloud,
 europe-central2) the Ad Library page loads without login after a JavaScript challenge (the
 first response is HTTP 403, then the browser passes). The first page of results, about 30 ads
 per keyword, comes with the page. The GraphQL calls behind scrolling return
@@ -126,12 +126,12 @@ per keyword, comes with the page. The GraphQL calls behind scrolling return
 run from Meta. It reports that query as `throttled`, keeps the first page and stops
 scrolling at once. More keywords per run, or the official API, are the way to more ads.
 
-**Google from a cloud IP (observed 2026-11-21).** The first run from the sandbox got 59
+**Google from a cloud IP (observed).** The first run from the sandbox got 59
 creatives, then the Transparency Center answered HTTP 429 (too many requests); runs in the
 following half hour got 429 on the first request. The scanner records the query as `blocked`
 with the error, skips the remaining Google queries of that run and tries again only at the next
 scheduled run. CERT Polska and Meta still delivered in those runs.
 The `google_bq` source is the way around this: it reads Google's own published dataset instead
-of the website. It runs on the workbench (the sandbox has no cloud credentials), so it is
-not part of the sandbox timer; a manual run on 2026-11-21 queued 115 removed creatives
-(`/data/derived/scanner-bq/`, `gs://follow-the-fake-data/outputs/scanner-bq/`).
+of the website. It runs on the cloud VM (the sandbox has no cloud credentials), so it is
+not part of the sandbox timer; a manual run queued 115 removed creatives
+(`/data/derived/scanner-bq/`, `gs://<DATA_BUCKET>/outputs/scanner-bq/`).

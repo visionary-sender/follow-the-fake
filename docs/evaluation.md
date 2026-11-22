@@ -7,13 +7,13 @@ with raw counts ("P 9 of 11 pairs"), never as one accuracy number. With about 25
 regression suite, not a benchmark.
 
 Organiser data and everything derived from it (datasets, labels, results, the private spec) stay
-out of git. They live on the workbench under `/data/derived/evaluation/` and in
-`gs://follow-the-fake-data/outputs/evaluation/`. This document describes structure only; no
+out of git. They live on a cloud VM under `/data/derived/evaluation/` and in
+`gs://<DATA_BUCKET>/outputs/evaluation/`. This document describes structure only; no
 organiser values appear in the repository.
 
 ## Units (E0)
 
-The unit is a **capture**, not a case folder. Ids follow Ingestion's scheme (`ftf.ingest.ids`):
+The unit is a **capture**, not a case folder. Ids follow the ingestion module's scheme (`ftf.ingest.ids`):
 
 - an incident is `<source>:<case folder>`;
 - a capture is `<incident>:<key>`, where the key is the capture's anchor in the folder, or `c1`
@@ -25,21 +25,21 @@ metrics use canonical captures only. `ftf.evaluate.units` holds the helpers: `ca
 
 ## Dataset under evaluation
 
-`--dataset FILE` takes any contract `Dataset`. The default is the promoted Ingestion build,
+`--dataset FILE` takes any contract `Dataset`. The default is the promoted ingestion build,
 `/data/derived/ingest/organiser/dataset-indicators.json` (override with `$FTF_EVAL_DATASET`). Every
 command refuses a dataset that has none of the ground-truth platform kinds (exit 2), so a
 captures-only file cannot produce numbers by accident.
 
 Every output records `dataset_build`: the build commit read at run time from the `BUILD.txt` beside
 the dataset (`build: <branch> <sha>`). It is `null`, with a warning, when that file is absent or has no `build:` line. Each
-number can therefore be traced to the exact Ingestion build it was computed on.
+number can therefore be traced to the exact ingestion build it was computed on.
 
 ## Private spec: `ground-truth-spec/spec.json`
 
 The analyst verdicts and the expected E1 groups name organiser captures, so they are data, not
 code. The spec is read at run time from `--spec FILE`, else `$FTF_EVAL_SPEC`, else
 `/data/derived/evaluation/ground-truth-spec/spec.json`. Sync it from
-`gs://follow-the-fake-data/outputs/evaluation/ground-truth-spec/`.
+`gs://<DATA_BUCKET>/outputs/evaluation/ground-truth-spec/`.
 
 Schema `ftf-eval-spec@0.2` (`ftf.evaluate.units.GroundTruthSpec`). Unknown top-level fields are an
 error; `note` is allowed as free text.
@@ -124,7 +124,7 @@ canonical capture is counted once, in its own cluster.
 
 ## Engines (`ftf.evaluate.engine`)
 
-Engines are called only through this shape, which is Linking's API (`ftf.linking`):
+Engines are called only through this shape, which is the linking module's API (`ftf.linking`):
 
 ```python
 engine.link_dataset(ds) -> Dataset                       # links + campaigns for every relation
@@ -152,7 +152,7 @@ Defaults: `--out-dir /data/derived/evaluation` (override with `$FTF_EVAL_DIR`), 
 
 `--no-hide` runs the engine on the visible dataset, which measures how much the platform ids help.
 
-## Leave-one-out, degraded inputs and distractors (HACK-28)
+## Leave-one-out, degraded inputs and distractors
 
 The three commands below share one protocol (`ftf.evaluate.openset`, `ftf.evaluate.perturb`,
 glue in `ftf.evaluate.robustness`). Ground-truth groups are the label groups of the `campaign`
@@ -198,7 +198,7 @@ relations (for example the template link of a kit copy) are reported, not requir
 A new subcommand is one `register(subparsers)` function appended to `SUBCOMMANDS` in
 `ftf/evaluate/commands.py`. It uses `add_common` and `load_dataset` for the shared options.
 
-Run on the workbench (never on the laptop):
+Run on the cloud VM (never on the laptop):
 
 ```bash
 scripts/vm.sh run -- ftf eval labels
@@ -211,7 +211,7 @@ scripts/vm.sh run -- ftf eval distractors --engine linking
 ```
 
 Sync the results to the bucket from the VM:
-`gcloud storage rsync -r /data/derived/evaluation/ gs://follow-the-fake-data/outputs/evaluation/`.
+`gcloud storage rsync -r /data/derived/evaluation/ gs://<DATA_BUCKET>/outputs/evaluation/`.
 
 ## README anchors
 
@@ -232,4 +232,4 @@ replacing the block contents. The names map to the report's `report.md` sections
 | `run-status` | Run status |
 | `limitations` | Limitations paragraph |
 
-Read `report.md` from `gs://follow-the-fake-data/outputs/evaluation/report/`, never from `logs/`.
+Read `report.md` from `gs://<DATA_BUCKET>/outputs/evaluation/report/`, never from `logs/`.

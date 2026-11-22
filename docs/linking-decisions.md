@@ -4,7 +4,7 @@ Short records of why the Linking engine decides the way it does on cases where a
 expect another answer. Each record gives counts and folder labels only, never the indicator values.
 The terms are the ones in [methodology.md](methodology.md).
 
-## Hidden platform layer: review for two later items, one miss (HACK-58)
+## Hidden platform layer: review for two later items, one miss
 
 **The case.** In the E7 time split (`ftf eval timesplit --engine linking`), the reference is the
 15 BACKUP incidents, which the engine groups into K = 15 reference campaigns. The 13 later items
@@ -60,7 +60,7 @@ The HAR that would carry its campaign-level ids is in another folder, so the eng
 the evidence that it belongs with BACKUP:p1, p7 and p15. Under the campaign relation, a no-HAR
 item arguably belongs in review rather than new. That change is outside this record.
 
-## Missing inputs that could reach the bar: review, not new (HACK-67)
+## Missing inputs that could reach the bar: review, not new
 
 **The rule.** A `new` call becomes `review` when the best candidate's score plus the capacity of
 the item's missing modalities reaches the assign bar. The missing input could have produced the
@@ -98,7 +98,7 @@ it shows nothing in gets the missing modality's full cap) would send those items
 That changes what capacity means for the capacity-below-τ rule too, so it is left for a separate
 decision.
 
-## Brand skin, platform constants and a creative alone never link into a campaign (HACK-66)
+## Brand skin, platform constants and a creative alone never link into a campaign
 
 **The case.** E4 (`ftf eval distractors --engine linking`) adds pages that must stay outside every
 campaign. On the organiser dataset, the engine linked 34 of 58 real outlet pages (e), 3 of 3
@@ -108,7 +108,7 @@ positive bits, and E4 counts any campaign link as a violation.
 
 **What carried the links.** For (e) it was one shared third-party domain: the outlet's own CDN or
 analytics host, which a scam clone also loads. For (c) it was the platform SDK asset, sometimes with a
-third-party host. For (f) it was the ad id of the copied creative. Ingestion files third-party hosts
+third-party host. For (f) it was the ad id of the copied creative. The ingestion step files third-party hosts
 and domains at platform level.
 
 **The rules.**
@@ -117,7 +117,7 @@ and domains at platform level.
   level. Without one, the pair counts at most one positive layer and no live private id, so it never
   links or assigns. `link_incident` then explains the pair under the ecosystem relation.
 - *Brand skin.* `ftf brand-stoplist` hashes every value on the corpus's real outlet pages. The default
-  path loads it (`$FTF_BRAND_STOPLIST`, else a default path on the workbench). A stop-listed value is
+  path loads it (`$FTF_BRAND_STOPLIST`, else a default path on the cloud VM). A stop-listed value is
   `hub_subsumed` with 0 bits under every relation except ecosystem. The `brand_asset` kind counts under
   ecosystem only. Without the file the engine warns and scores as before.
 
