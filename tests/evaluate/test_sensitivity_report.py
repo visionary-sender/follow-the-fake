@@ -1,15 +1,26 @@
 """E6 sensitivity and the evaluation report on small synthetic data (invented values only)."""
 
+import argparse
+
 from ftf.contract import Capture, Dataset, Incident, Indicator, Layer, Level, Observed, Provenance
 from ftf.evaluate.report import (
     REQUIRED_STEPS,
     _eval_parser,
+    _run_step,
     build_report,
+    failure_report,
     limitations,
     registered_eval_commands,
     render_markdown,
 )
-from ftf.evaluate.sensitivity import compare, incident_pairs, move, run_sensitivity, weight_keys
+from ftf.evaluate.sensitivity import (
+    compare,
+    effective_delta,
+    incident_pairs,
+    move,
+    run_sensitivity,
+    weight_keys,
+)
 from ftf.linking.weights import HAND_TABLE
 
 CANARY = "canary-key-7"
@@ -137,8 +148,10 @@ def _results() -> dict:
     sensitivity = {
         "weights_in_table": 100, "weights_tested": 1,
         "baseline": {"pair_links": {"campaign": 1}, "e7": {"assign": 1, "new": 0, "review": 0}, "later_items": 1},
+        # the −2 move is clamped by the 0-bit floor: 3 bits moved by −2 really moved by −1
         "ranking": [{"weight": "kind:meta_pixel", "bits": 3.0, "flips_total": 2, "pair_flips_by_relation": {"campaign": 2},
-                     "by_move": {m: {"total": 1 if m == "-2" else 0} for m in ("-2", "-1", "+1", "+2")}}],
+                     "by_move": {m: {"total": 1 if m == "-2" else 0, "effective": -1.0 if m == "-2" else float(m)}
+                                 for m in ("-2", "-1", "+1", "+2")}}],
         "fragile": {"delta_bits": 2.0, "links": 1, "fragile": 1, "worst_case_only": 0,
                     "by_relation": {"campaign": {"links": 1, "fragile": 1, "worst_case": 0}},
                     "records": [{"relation": "campaign", "a": f"SETA:1:{CANARY}", "b": "SETB:3:c1", "state": "link",
@@ -224,9 +237,81 @@ def test_distractor_names_and_capture_keys_never_reach_the_markdown():
 
 def test_open_set_section_has_both_engines_and_per_item_counts():
     md = render_markdown(build_report(_results(), _steps(), build=None))
-    assert "## E2 leave-one-out open-set assignment" in md
-    assert "| linking | loo_item | full | 1 | 1 | 0 | 0 | 0 | 1 | 0 |" in md
-    assert "| baseline | loco | full | 2 | 0 | 0 | 2 | 0 | 0 | 0 |" in md
+    assert "## E2 leave-one-out open-set assignment (all evidence)" in md
+    assert "| linking | loo_item | full | 1 | 1 | 0 | 0 | 0 | 1 | 2.50 |" in md
+    assert "| baseline | loco | full | 2 | 0 | 0 | 2 | 0 | 0 | 2.50 |" in md
+
+
+def test_e2_counts_wrong_campaigns_and_false_accepts_appear_only_in_e7():
+    md = render_markdown(build_report(_results(), _steps(), build=None))
+    e2 = md[md.index("## E2"):md.index("## E4")]
+    assert "| engine | protocol | mode | items | correct | wrong campaign |" in e2
+    assert "| false accepts |" not in e2  # no false-accept column in E2
+    assert "false accepts (an assignment of an item that should be new) are counted in E7 only" in e2
+
+
+def test_each_table_title_states_its_evidence_setting():
+    md = render_markdown(build_report(_results(), _steps(), build=None))
+    assert "## E1 hidden-layer recovery (platform ids hidden)" in md
+    assert "## E6 sensitivity (linking table, moves of −2, −1, +1, +2 bits; platform ids hidden)" in md
+    assert "## E7 time split (reference = 8 October captures; platform ids hidden)" in md
+    assert "## E4 distractors (all evidence)" in md
+
+
+def test_clamped_move_cell_shows_the_effective_change():
+    md = render_markdown(build_report(_results(), _steps(), build=None))
+    assert "| kind:meta_pixel | 3 | 1 (eff. -1) | 0 | 0 | 0 | 2 |" in md
+    assert "A cell `n (eff. x)` is a move that the 0-bit floor clamped" in md
+
+
+def test_effective_delta_is_the_change_the_floor_really_allows():
+    bits = HAND_TABLE.kinds["meta_pixel"].bits
+    assert effective_delta(HAND_TABLE, "kind:meta_pixel", 1.0) == 1.0
+    assert effective_delta(HAND_TABLE, "kind:meta_pixel", -100.0) == -bits
+    result = run_sensitivity(_tiny_dataset())
+    for r in result["ranking"]:
+        for m, d in (("-2", -2.0), ("-1", -1.0), ("+1", 1.0), ("+2", 2.0)):
+            assert r["by_move"][m]["effective"] == effective_delta(HAND_TABLE, r["weight"], d)
+
+
+def test_largest_group_counts_campaign_groups_only():
+    results = _results()
+    results["labels"]["groups"].append({"id": "tenant:0", "level": "tenant", "relation": "tenant",
+                                        "members": ["a", "b", "c", "d"]})
+    assert build_report(results, _steps(), build=None)["dataset"]["largest_group"] == 2
+
+
+def test_platform_layer_sentence_states_recall_without_it_and_safe_precision():
+    results = _results()
+    results["hidden linking"] = _hidden(0, 0, 0)  # the campaign gate links no pairs with platform ids hidden
+    sentences = limitations(build_report(results, _steps(), build=None))
+    text = " ".join(sentences)
+    assert "recall without the platform layer is 0 of 1" in text
+    assert "links 0 campaign pairs" in text and "0 of 1 must-not-link pairs violated" in text
+
+
+def test_a_crashing_step_is_marked_failed_and_its_traceback_is_logged(tmp_path):
+    top = argparse.ArgumentParser(prog="ftf")
+    eval_parser = top.add_subparsers(dest="command").add_parser("eval")
+    boom = eval_parser.add_subparsers(dest="sub").add_parser("boom")
+    for flag in ("--out-dir", "--dataset", "--spec"):
+        boom.add_argument(flag)
+
+    def crash(_ns):
+        raise RuntimeError("synthetic crash")
+
+    boom.set_defaults(func=crash)
+    step = _run_step(top, "boom step", "boom", [], argparse.Namespace(dataset="d", spec="s"), tmp_path, tmp_path)
+    assert step["status"] == "failed" and step["exit"] == 1
+    assert "RuntimeError: synthetic crash" in (tmp_path / "boom-step.log").read_text(encoding="utf-8")
+
+
+def test_failed_build_still_renders_the_step_status_table():
+    steps = _steps()
+    steps["labels"] = {"status": "failed", "exit": 1, "log": None}
+    md = render_markdown(failure_report(steps, "labels.json is missing"))
+    assert "labels.json is missing" in md
+    assert "| labels | failed |" in md and "| sensitivity | ok |" in md
 
 
 def test_registered_commands_include_every_required_step_and_the_report():
