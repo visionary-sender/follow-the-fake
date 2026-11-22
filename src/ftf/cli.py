@@ -19,6 +19,7 @@ from ftf.linking.commands import register_link
 from ftf.linking.commands import register_score
 from ftf.linking.learn_commands import register_learn_weights
 from ftf.pipeline.commands import register_analyze
+from ftf.pipeline.commands import register_export
 from ftf.pipeline.commands import register_serve
 from ftf.scanner.run import register as register_scan
 
@@ -26,6 +27,7 @@ COMMANDS: list[Callable[[argparse._SubParsersAction], None]] = [
     register_analyze,
     register_assign,
     register_enrich_domain,
+    register_export,
     register_features,
     register_fetch,
     register_ingest,
