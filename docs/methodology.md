@@ -240,7 +240,10 @@ captures are its non-decoy captures (decoys only if nothing else exists). For ea
 the best pairwise score between a probe and a campaign member. With K campaigns of the relation:
 
 - **assign** to the best campaign when its score is at least τ + log2 K (the bar), the best pair
-  qualifies as an edge, and no cannot-link conflict exists with a member of that campaign;
+  qualifies as an edge, no cannot-link conflict exists with a member of that campaign, and it leads
+  every other campaign that could be assigned the same way by at least 1 bit (a likelihood ratio
+  of 2). A smaller lead is a tie at the top: the item goes to review with both campaigns named.
+  The margin is the same for every relation;
 - **new** when the best score is at most τ − 3 **and** the item's evidence capacity is at least τ;
 - **review** otherwise, including every case where the item could still earn enough evidence to
   reach τ. An item with a conflict on a campaign member goes to review, not assign.
