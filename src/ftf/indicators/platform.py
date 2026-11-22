@@ -125,7 +125,7 @@ class _Sink:
 
 _BEACON_HOSTS = re.compile(
     r"(^|\.)(facebook\.com|facebook\.net|google-analytics\.com|googletagmanager\.com|doubleclick\.net|google\.com|"
-    r"tiktok\.com|yandex\.(ru|com)|snapchat\.com|sc-static\.net|twitter\.com|x\.com)$"
+    r"tiktok\.com|clarity\.ms|yandex\.(ru|com)|bing\.com|snapchat\.com|sc-static\.net|taboola\.com|quora\.com|twitter\.com|x\.com)$"
 )
 
 

@@ -216,6 +216,7 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("google_analytics_id", re.compile(r"\b(UA-\d{4,10}-\d{1,3})\b")),
     ("gtm_container", re.compile(r"\b(GTM-(?=[A-Z0-9]*\d)[A-Z0-9]{5,9})\b")),
     ("tiktok_pixel", re.compile(r"""ttq\.load\(\s*['"]([A-Z0-9]{18,22})['"]""")),
+    ("clarity_id", re.compile(r"clarity\.ms/tag/([a-z0-9]{8,12})\b")),
     ("clarity_id", re.compile(r"""['"]clarity['"]\s*,\s*['"]script['"]\s*,\s*['"]([a-z0-9]{8,12})['"]""")),
     ("yandex_metrica_id", re.compile(r"""\bym\(\s*(\d{6,10})\s*,\s*['"]init""")),
     ("yandex_metrica_id", re.compile(r"mc\.yandex\.ru/watch/(\d{6,10})")),
