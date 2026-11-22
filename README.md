@@ -443,7 +443,7 @@ Next steps, ranked by expected gain:
 |---|---|---|---|
 | 1 | Get more labelled pairs from CERT (confirmed campaign and must-not-link pairs) | high: removes most of the in-sample problem in E1 | medium, depends on CERT |
 | 2 | Calibrate the content views on those pairs, so text can support a decision | high: text is our cleanest campaign signal | medium |
-| 3 | Use nameserver and registrar in the campaign gate | medium to high: they split operator pairs well | low to medium |
+| 3 | Use nameserver and registrar in the campaign gate | medium to high: they split operator pairs well; a rare shared nameserver or registrar separates operators (5 vs 0 and 6 vs 1 pairs), but a copied kit keeps the original's infrastructure, so it needs a kit-copy guard first | low to medium |
 | 4 | Grow the reference base in E7, so later items can join one another | medium: tests the realistic case | low |
 | 5 | Test shared certificates once a certificate source answers reliably | medium: untested today | medium, depends on the source |
 | 6 | Get a licence answer for reading Ad Library pages and for the face reference set | high for a real deployment, no effect on the score | low; depends on a licence answer |
@@ -471,6 +471,8 @@ docker run --rm --network none -v "$PWD/ftf-offline-package:/data/package:ro" -e
 The package holds the campaign base, the enrichment cache, the models, the face reference set and the brand stop-list. `FTF_PACKAGE` support is planned; the command above is the intended form.
 
 Docker cannot publish the app's port from a container started with `--network none`, so the app runs with `FTF_OFFLINE=1` instead, which makes no network calls. The CLI line shows the strict form, with no network device at all. Enrichment answers come from the cache in the package, and a lookup that is not cached is recorded as `unknown`.
+
+**Your own cases, offline.** Offline, a run reads only the files you give it, the campaign base and the enrichment cache. These work without a network: OCR text, image hashes, faces, the page skeleton, trackers and identifiers in the page or HAR, the redirect chain from a HAR, and linking against the base. A bare URL cannot be fetched offline, so submit the saved page (HAR or HTML) or the screenshot instead. Registry, DNS and certificate data for a domain outside the dataset comes out as `unknown`, because the cache covers only the dataset's domains. Measured with `--network none` on 4 cores: about 11 s for a screenshot, about 13 s for a HAR of one landing page, and about 2 s for a bare URL, including the network probe (about 0.02 s when there is no network).
 
 ### Online, with the base bundle
 
