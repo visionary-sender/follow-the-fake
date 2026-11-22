@@ -10,8 +10,8 @@ Stages run in this fixed order, each through the owning project's published call
 
 Features run before linking because `extract` refuses datasets that already carry links. A
 stage whose package is not installed yet is skipped with a note. If no linkable indicator
-(`ftf.contract.linkable`) is left after ingest and features, the command exits 1 and writes
-nothing, so a silently empty base never reaches the demo. The base bundle is one directory:
+(`ftf.contract.linkable`) is left after ingest and features, the command exits 1 and writes no
+`dataset.json`, so a silently empty base never reaches the demo. The base bundle is one directory:
 
     <out>/dataset.json             contract Dataset (FTF_BASE points here)
     <out>/vectors/                 embeddings referenced by VectorRef.store (written by features)
@@ -135,7 +135,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         description=(
             "Run ingest, features and linking on a dataset folder and write OUT/dataset.json "
             "(use it as FTF_BASE) plus OUT/vectors/. Stages whose package is not installed are "
-            "skipped with a note. Exit 1, writing nothing, if no linkable indicator is left after "
+            "skipped with a note. Exit 1, writing no dataset.json, if no linkable indicator is left after "
             "ingest and features. The folder is read only, never executed."
         ),
     )

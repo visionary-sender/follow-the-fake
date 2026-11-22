@@ -12,7 +12,7 @@ Rules:
 * paths: `.git`, capture formats (.har, .mhtml, ...), campaign-base files (dataset.json,
   cache.json, build-report.json, vectors/), credential file names, anything under /data or
   /base, images or videos outside library trees (/usr, /etc, /opt/ms-playwright);
-* contents (non-ELF files up to 32 MB): private keys, service-account JSON and well-known token formats.
+* contents (non-ELF files; large ones in overlapping chunks): private keys, service-account JSON and well-known token formats.
 
 Standard library only. Hits print paths and the rule, never file contents.
 """
@@ -46,6 +46,8 @@ MAX_CONTENT = 32 * 1024 * 1024
 # Copies are matched by hash only from this size up: empty and tiny files (`__init__.py`,
 # `py.typed`, `/etc/hostname`) collide with trivial organiser files and say nothing.
 MIN_HASH_SIZE = 512
+CHUNK = 8 * 1024 * 1024
+OVERLAP = 4096
 SECRET_PATTERNS = [
     # A header alone is a string constant in TLS libraries (gnutls, gio); a key has a body.
     ("private key", re.compile(rb"-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----\r?\n[A-Za-z0-9+/=]{40}")),
@@ -137,10 +139,20 @@ def scan_tar(stream: IO[bytes], raw: RawIndex | None = None) -> tuple[int, list[
             if m.size <= MAX_CONTENT:
                 data = fh.read()
                 hits += [(name, h) for h in content_hits(data)]
-                if raw is not None and m.size in raw.hashes:
-                    if hashlib.sha256(data).hexdigest() in raw.hashes[m.size]:
-                        hits.append((name, "byte-identical to an organiser file"))
-            elif raw is not None and m.size in raw.hashes and _sha256(fh) in raw.hashes[m.size]:
+                digest = hashlib.sha256(data).hexdigest()
+            else:  # large file: overlapping chunks, so no pattern straddles a boundary unseen
+                h, found, tail, elf = hashlib.sha256(), set(), b"", None
+                for chunk in iter(lambda: fh.read(CHUNK), b""):
+                    h.update(chunk)
+                    if elf is None:
+                        elf = chunk[:4] == b"\x7fELF"
+                    window = tail + chunk
+                    if not elf:
+                        found.update(content_hits(window))
+                    tail = window[-OVERLAP:]
+                hits += [(name, f) for f in sorted(found)]
+                digest = h.hexdigest()
+            if raw is not None and m.size in raw.hashes and digest in raw.hashes[m.size]:
                 hits.append((name, "byte-identical to an organiser file"))
     return n, hits
 

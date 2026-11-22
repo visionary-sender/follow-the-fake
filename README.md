@@ -164,7 +164,7 @@ docker run --rm <same flags> -v "/path/to/organiser-folder:/data/raw:ro" -v ftf-
   ftf build-base --raw /data/raw --out /base --force
 ```
 
-`ftf build-base --raw DIR --out DIR [--offline] [--force]` exits 1 and writes nothing if no
+`ftf build-base --raw DIR --out DIR [--offline] [--force]` exits 1 and writes no `dataset.json` if no
 linkable indicator is left after ingest and features (an empty base never reaches the app), and 2
 on bad arguments or an existing base without `--force`. With no arguments the container builds
 (if needed) and serves; with arguments it runs `ftf <arguments>`, e.g. `ftf --help`.
@@ -189,13 +189,14 @@ travels only inside a privately handed-over base bundle.
 | `FTF_BASE_DIR` | `/base` | where the entry point looks for and builds the base |
 | `FTF_RAW_ROOT` | `/data/raw` | organiser folder; artefact paths in the base are relative to it |
 | `FTF_OFFLINE` | unset | `1` forces every network lookup off (enrichment, build-base) |
-| `FTF_FETCH` | unset | `1` lets the app fetch a submitted URL live with the safe fetcher |
+| `FTF_FETCH` | unset | `1` lets the app fetch a submitted URL live with the safe fetcher, only while "Online enrichment" is ticked and `FTF_OFFLINE` is not set |
 | `FTF_ENRICH_CACHE` | `/base/enrichment/cache.json` if present | enrichment cache file |
 | `FTF_PORT` | `8501` | app port inside the container |
 
 **Offline and online.** The jury's machine has internet access. In the app, "Online enrichment"
 (off by default) allows registry and DNS lookups for submitted domains; live page fetching is
-additionally off unless the container gets `-e FTF_FETCH=1`, and then it only runs under the
+additionally off unless the container gets `-e FTF_FETCH=1` and "Online enrichment" is ticked
+(`FTF_OFFLINE=1` overrides both), and then it only runs under the
 hardened flags above (the fetcher refuses to run as root and keeps Chromium's sandbox on). A dead
 or cloaked page is a normal result, not an error. Building the base makes no network requests.
 On our workbench VM the same image runs with `--network none` or `-e FTF_OFFLINE=1`: nothing there

@@ -87,3 +87,11 @@ def test_raw_index_matches_copies_and_case_names(tmp_path):
     assert _rules({"usr/share/case-alpha/readme": b"y"}, idx) == ["organiser case folder name"]
     assert _rules({"usr/share/other/readme": b"organiser bytes!"}, idx) == []
     assert _rules({"usr/lib/py.typed": b""}, idx) == []  # tiny files are not hash-matched
+
+
+def test_large_file_is_scanned_in_chunks(monkeypatch):
+    monkeypatch.setattr(leak, "MAX_CONTENT", 100)
+    monkeypatch.setattr(leak, "CHUNK", 64)
+    big = b"x" * 1000 + FAKE_KEY + b"y" * 1000  # the key straddles chunk boundaries
+    assert _rules({"usr/share/doc/big.txt": big}) == ["private key"]
+    assert _rules({"usr/lib/big.so": b"\x7fELF" + big}) == []
