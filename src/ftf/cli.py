@@ -16,8 +16,10 @@ from ftf.features.commands import register as register_features
 from ftf.fetch.cli import register as register_fetch
 from ftf.ingest.commands import register as register_ingest
 from ftf.linking.commands import register_assign
+from ftf.linking.commands import register_index
 from ftf.linking.commands import register_link
 from ftf.linking.commands import register_score
+from ftf.linking.commands import register_sensitivity
 from ftf.linking.learn_commands import register_learn_weights
 from ftf.pipeline.commands import register_analyze
 from ftf.pipeline.commands import register_export
@@ -32,11 +34,13 @@ COMMANDS: list[Callable[[argparse._SubParsersAction], None]] = [
     register_export,
     register_features,
     register_fetch,
+    register_index,
     register_ingest,
     register_link,
     register_score,
     register_learn_weights,
     register_scan,
+    register_sensitivity,
     register_serve,
 ]
 
