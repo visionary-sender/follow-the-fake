@@ -9,7 +9,9 @@ set -eu
 
 package=${FTF_PACKAGE:-}
 package_cache=
-if [ -n "$package" ] && [ -d "$package" ]; then
+if [ -n "$package" ] && [ ! -d "$package" ]; then
+    echo "ftf: FTF_PACKAGE=$package is not a directory; the offline package is not used" >&2
+elif [ -n "$package" ]; then
     if [ -z "${FTF_BASE:-}" ] && [ -f "$package/base/dataset.json" ]; then
         FTF_BASE=$package/base/dataset.json
     fi
@@ -26,6 +28,19 @@ if [ -n "$package" ] && [ -d "$package" ]; then
         package_cache=$package/enrichment/cache.json
     fi
     export FTF_BASE FTF_MODEL_DIR FTF_FACE_REFERENCE FTF_BRAND_STOPLIST
+fi
+
+# Online lookups update the enrichment cache, and /base and the package may be read-only, so the
+# app and the CLI work on a copy in a fresh directory under /tmp.
+copy_cache() {
+    cache_dir=$(mktemp -d /tmp/ftf-enrichment.XXXXXX)
+    cp "$1" "$cache_dir/cache.json"
+    FTF_ENRICH_CACHE=$cache_dir/cache.json
+    export FTF_ENRICH_CACHE
+}
+
+if [ -z "${FTF_ENRICH_CACHE:-}" ] && [ -n "$package_cache" ]; then
+    copy_cache "$package_cache"
 fi
 
 if [ "$#" -gt 0 ]; then
@@ -60,16 +75,8 @@ fi
 
 if [ -n "${FTF_BASE:-}" ]; then
     export FTF_BASE
-    if [ -z "${FTF_ENRICH_CACHE:-}" ]; then
-        cache_src=${package_cache:-$base_dir/enrichment/cache.json}
-        if [ -f "$cache_src" ]; then
-            # Work on a copy: /base and the package may be mounted read-only, and online lookups
-            # update the cache.
-            mkdir -p /tmp/ftf-enrichment
-            cp "$cache_src" /tmp/ftf-enrichment/cache.json
-            FTF_ENRICH_CACHE=/tmp/ftf-enrichment/cache.json
-            export FTF_ENRICH_CACHE
-        fi
+    if [ -z "${FTF_ENRICH_CACHE:-}" ] && [ -f "$base_dir/enrichment/cache.json" ]; then
+        copy_cache "$base_dir/enrichment/cache.json"
     fi
 else
     echo "ftf: no campaign base ($base_dir/dataset.json) and no dataset folder at $raw_dir; the app shows the built-in fixture if one is installed" >&2

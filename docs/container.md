@@ -148,15 +148,19 @@ unset and the file or folder exists, so an explicit `-e` value always wins:
 | Variable | Set to |
 |---|---|
 | `FTF_BASE` | `base/dataset.json` |
-| `FTF_ENRICH_CACHE` | `enrichment/cache.json`, copied to `/tmp` for the app (online lookups update it) |
+| `FTF_ENRICH_CACHE` | `enrichment/cache.json`, copied to a fresh `/tmp/ftf-enrichment.*` directory in both modes (online lookups update the copy) |
 | `FTF_MODEL_DIR` | `models/` |
 | `FTF_FACE_REFERENCE` | `face-reference/` |
 | `FTF_BRAND_STOPLIST` | `brand-stoplist/brand-stoplist.json` |
 
 The image sets `FTF_MODEL_DIR`, `FTF_FACE_REFERENCE` and `FTF_BRAND_STOPLIST` itself (Dockerfile `ENV`),
-so in the jury image the package supplies the base and the enrichment cache; the models, face
-reference and stop-list are the copies baked into the image from the same sources. With a package
+so in the jury image the package's `models/`, `face-reference/` and `brand-stoplist/` are not read: the
+image uses its own copies. The package supplies the base and the enrichment cache there. With a package
 base present, the app does not rebuild the base, even if `/data/raw` is mounted.
+
+The settings are independent. An explicit `-e FTF_BASE` with the package cache mixes two sources, so
+set both or neither. In serve mode an explicit `-e FTF_BASE` is honoured: the build is skipped and
+`/base` is not used. A set `FTF_PACKAGE` that is not a directory prints a warning and is ignored.
 
 ## Offline and online
 
