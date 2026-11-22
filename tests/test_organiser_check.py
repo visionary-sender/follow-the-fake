@@ -81,11 +81,49 @@ def test_empty_candidate_set_is_an_error(check, tmp_path):
     assert check.check(empty, root, None) == 2
 
 
-def test_public_hosts_match_exactly_only(check):
+def test_public_hosts_match_name_and_subdomains_only(check):
     assert check._public("www.google.com")
     assert check._public("cert.pl")
+    assert check._public("maps.google.com")
     assert not check._public("cert.pl.attacker.example")
     assert not check._public("sub.facebook.com.invented")
+    assert not check._public("notgoogle.example")
+
+
+def _write_dataset(tmp_path: Path, indicators: list) -> Path:
+    path = tmp_path / "dataset.json"
+    path.write_text(json.dumps({"incidents": [{"id": "demo-1", "indicators": indicators}]}), encoding="utf-8")
+    return path
+
+
+@pytest.fixture
+def public_host(check, monkeypatch):
+    monkeypatch.setattr(check, "PUBLIC_HOSTS", frozenset({"public.example"}))
+    return "public.example"
+
+
+@pytest.mark.parametrize("url", [
+    f"https://public.example/a/{VALUE}",
+    f"https://public.example/view?acct={VALUE}",
+    f"https://public.example/pixel/{VALUE}.gif",
+])
+def test_value_in_path_or_query_of_public_url_is_a_hit(check, public_host, tmp_path, capsys, url):
+    path = _write_dataset(tmp_path, [{"kind": "script_url", "layer": "landing", "value": url}])
+    root = _tree(tmp_path, {"src/a.py": f"x = '{VALUE}'\n"})
+    assert check.check(path, root, None) == 1
+    out = capsys.readouterr().out
+    assert "src/a.py:1: organiser id" in out
+    assert VALUE not in out
+
+
+@pytest.mark.parametrize("host", ["maps.public.example", "tiles.public.example"])
+def test_subdomain_of_public_host_is_not_a_hit(check, public_host, tmp_path, host):
+    path = _write_dataset(tmp_path, [
+        {"kind": "script_url", "layer": "landing", "value": f"https://{host}/tag.js"},
+        {"kind": "aio_landing", "layer": "landing", "value": VALUE},
+    ])
+    root = _tree(tmp_path, {"src/a.py": f"HOST = '{host}'\n"})
+    assert check.check(path, root, None) == 0
 
 
 @pytest.mark.parametrize("domain", ["ads-twitter.com", "bing.com", "clarity.ms", "quora.com", "taboola.com"])
