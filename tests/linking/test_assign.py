@@ -354,3 +354,57 @@ def test_tie_rule_is_relation_agnostic_template():
     win = simple("n", (L.landing, "LA"), (L.kit, "KA"), (L.offer, "OA"), (L.landing, "LB"), (L.kit, "KB"))
     w = assign(col, win, relation=Relation.template, backend=stub_backend)
     assert w.decision is Decision.assign
+
+
+def _har_layers_collection() -> Dataset:
+    # Like `_collection`, but campaign A also carries an infrastructure value (a HAR-only layer),
+    # so a missing HAR could add tracking account + infrastructure = 5 bits.
+    a = [simple(f"a{i}", (L.platform, "P1"), (L.tenant, "T1"), (L.landing, "LA"), (L.kit, "K1"), (L.tracking_account, "PXA", True), (L.infrastructure, "IA")) for i in range(3)]
+    b = [simple(f"b{i}", (L.platform, "P1"), (L.tenant, "T2"), (L.landing, "LB"), (L.kit, "K2")) for i in range(2)]
+    c = [simple(f"c{i}", (L.platform, "P2"), (L.offer, "OC"), (L.creative, "CRC")) for i in range(2)]
+    ds = dataset(*a, *b, *c)
+    return link_dataset(ds, backend=stub_backend(ds))
+
+
+NO_HAR = dict(arts=("html", "ad_screenshot"), missing=[("har", "not captured")])
+# Shares only the kit with A: 3 bits, at the new cut (tau - 3).
+WEAK_MATCH = ((L.kit, "K1"), (L.landing, "L9"), (L.offer, "O9"))
+NO_MATCH = ((L.kit, "K9"), (L.landing, "L9"), (L.offer, "O9"))
+
+
+def test_missing_inputs_that_could_reach_the_bar_give_review_not_new():
+    col = _har_layers_collection()
+    bar = TAU + math.log2(_k(col))
+    full = assign(col, simple("n", *WEAK_MATCH), backend=stub_backend)
+    assert full.decision is Decision.new
+    no_har = assign(col, simple("n", *WEAK_MATCH, **NO_HAR), backend=stub_backend)
+    assert no_har.candidates[0].score_bits == full.candidates[0].score_bits == TAU - 3
+    assert no_har.candidates[0].score_bits + 5.0 >= bar
+    assert no_har.decision is Decision.review
+    assert "missing inputs could reach the assign bar" in no_har.note
+    assert "har (not captured)" in no_har.note
+
+
+def test_missing_inputs_that_cannot_reach_the_bar_keep_new():
+    col = _har_layers_collection()
+    a = assign(col, simple("n", *NO_MATCH, **NO_HAR), backend=stub_backend)
+    assert a.decision is Decision.new
+    assert "missing inputs could reach the assign bar" not in a.note
+    assert "har missing (not captured): up to +5.0" in a.note
+
+
+def test_missing_input_rule_is_the_same_on_the_indexed_path():
+    from ftf.linking.index import CandidateIndex
+
+    col = _har_layers_collection()
+    idx = CandidateIndex.build(col, cache=False)
+    decisions = set()
+    for vals in (WEAK_MATCH, NO_MATCH):
+        for extra in ({}, NO_HAR):
+            inc = simple("n", *vals, **extra)
+            lin = link_incident(col, inc, backend=stub_backend)
+            fast = link_incident(col, inc, backend=stub_backend, index=idx)
+            assert fast.assignment.model_dump() == lin.assignment.model_dump(), (vals, extra)
+            assert [l.model_dump() for l in fast.links] == [l.model_dump() for l in lin.links]
+            decisions.add(lin.assignment.decision)
+    assert decisions == {Decision.new, Decision.review}

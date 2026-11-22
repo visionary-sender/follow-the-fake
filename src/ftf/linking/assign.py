@@ -276,7 +276,8 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
         dup_camps = [camp for camp in campaigns if camp.id in dup_ids]
     scored.sort(key=_order)
 
-    capacity, gains = evidence_capacity(None, incident, probe or dup_of, be.layer_caps(relation), lm=setup.modalities)
+    caps = be.layer_caps(relation)
+    capacity, gains = evidence_capacity(None, incident, probe or dup_of, caps, lm=setup.modalities)
 
     dup_camp = dup_camps[0] if len(dup_camps) == 1 else None
     candidates = [
@@ -318,6 +319,8 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
     target_bits = next((ps.bits for camp, ps, _ in scored if target is not None and camp.id == target.id), 0.0)
     tie = rival is not None and target_bits - rival[1].bits < TIE_MARGIN - 1e-9
 
+    missing_reach = _missing_could_reach_bar(best, bar, gains, caps)
+
     if setup.campaigns_of is not None:
         holding = setup.campaigns_of
     else:
@@ -349,7 +352,7 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
         if all(c.campaign_id != target.id for c in candidates):
             ps = next(p for camp, p, _ in scored if camp.id == target.id)
             candidates.append(Candidate(campaign_id=target.id, score_bits=round(ps.bits, 3), note=_candidate_note(ps)))
-    elif best <= tau - NEW_MARGIN and capacity >= tau:
+    elif best <= tau - NEW_MARGIN and capacity >= tau and missing_reach is None:
         decision, campaign_id = Decision.new, None
     else:
         decision, campaign_id = Decision.review, None
@@ -367,6 +370,8 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
         candidates.append(Candidate(campaign_id=cid, score_bits=round(ps.bits, 3) if ps is not None else 0.0, note="a lander of the incident points here"))
 
     note = _note(relation, best, tau, bar, k, capacity, gains, best_ps, min_layers)
+    if missing_reach is not None and decision is Decision.review and best <= tau - NEW_MARGIN and capacity >= tau:
+        note = missing_reach + "; " + note
     if dup_of:
         where = f"campaign {dup_camp.id}" if dup_camp is not None else f"{len(dup_camps)} campaigns"
         note = f"exact duplicate of {', '.join(dup_of)} ({where}); " + note
@@ -589,6 +594,27 @@ def evidence_capacity(
             gains.append((mod, reasons.get(mod), extra, opened))
     gains.sort(key=lambda g: (-g[2], g[0].value))
     return capacity, gains
+
+
+def _missing_could_reach_bar(
+    best: float,
+    bar: float,
+    gains: list[tuple[ArtefactType, Optional[str], float, list[Layer]]],
+    caps: dict[Layer, float],
+) -> Optional[str]:
+    """A note naming the missing inputs if they could lift the best score to the assign bar, else None.
+
+    The missing modalities' capacity is the most bits of the layers only they would open (each
+    layer counted once, even when several missing modalities open it). When the best candidate's
+    score plus that capacity reaches the bar, the absence of a match is not evidence of a new
+    campaign, so the item goes to review instead of new (HACK-67).
+    """
+    layers = {layer for _, _, _, opened in gains for layer in opened}
+    extra = sum(max(caps.get(layer, 0.0), 0.0) for layer in layers)
+    if not gains or best + extra < bar:
+        return None
+    named = ", ".join(f"{mod.value} ({reason})" if reason else mod.value for mod, reason, _, _ in gains)
+    return f"missing inputs could reach the assign bar ({best:.1f} + up to {extra:.1f} bits >= {bar:.1f}): {named}"
 
 
 def _strong_layers(ps: PairScore, n: int = 3) -> str:
