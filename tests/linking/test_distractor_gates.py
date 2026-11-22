@@ -180,3 +180,12 @@ def test_brand_stoplist_command(tmp_path):
     assert digest(L.tracking_account, "google_analytics_id", "outlet-analytics-1") in got
     assert digest(L.platform, "aio_sdk_asset", "sdk-const-1") not in got
     assert "outlet-analytics-1" not in out.read_text()
+
+
+@pytest.mark.parametrize("kind", ["brand", "person_face", "brand_asset"])
+def test_visual_brand_and_face_kinds_are_ecosystem_only(kind):
+    from ftf.linking.weights import HAND_TABLE
+
+    for rel in (Relation.campaign, Relation.operator, Relation.template, Relation.tracking_account):
+        assert HAND_TABLE.scale(kind, HAND_TABLE.kinds[kind].layer, rel) == 0, rel
+    assert HAND_TABLE.scale(kind, HAND_TABLE.kinds[kind].layer, Relation.ecosystem) > 0
