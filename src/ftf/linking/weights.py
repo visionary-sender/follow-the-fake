@@ -180,13 +180,20 @@ HAND_TABLE = WeightTable(
         # URL parameter shapes (values dropped): structure of the kit or tracker, template-ish, weak
         "page_url_shape": _K(L.landing, 2.0, relations=_row(1.0, 0.0, 0.25, 0.5, 1.0)),
         "form_action_shape": _K(L.landing, 2.0, relations=_row(1.0, 0.0, 0.25, 0.5, 1.0)),
-        "brand_asset": _K(L.kit, 0.3),  # impersonated brand's logo/fonts: a stop-list hub
+        # impersonated outlet's logo / fonts / favicon: brand skin, ecosystem only (HACK-66), never campaign,
+        # operator or template evidence; the stop-list makes it a hub besides
+        "brand_asset": _K(L.kit, 0.3, relations=_row(0.0, 0.0, 0.0, 0.0, 1.0)),
         # creative
         "ad_caption": _K(L.creative, 2.0),
         "page_title": _K(L.creative, 2.0),
         "image_phash": _K(L.creative, 3.0),  # creative pack (07 §2.5 b: s 0.3, u 0.05)
         "meta_ad_id": _K(L.creative, 4.0),  # one ad; rarely shared, but a shared one is the same ad
         "meta_ad_name": _K(L.creative, 2.0),  # free text like a caption
+        # Visual (HACK-15), ecosystem only (HACK-66): an impersonated brand found in the creative or page is
+        # brand-level, a recognised public figure says only "same celebrity"; never campaign, operator or
+        # template evidence (face_embedding is a calibrated content view with its own face cap, `similarity`)
+        "brand": _K(L.creative, 0.3, relations=_row(0.0, 0.0, 0.0, 0.0, 1.0)),
+        "person_face": _K(L.creative, 1.0, relations=_row(0.0, 0.0, 0.0, 0.0, 1.0)),
         # distribution account (pages rotate inside campaigns; 07 §(e) item 10)
         "advertiser_page_name": _K(L.distribution_account, 2.0),
         "meta_campaign_id": _K(L.distribution_account, 4.0),  # ad-manager campaign of one account

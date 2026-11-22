@@ -69,7 +69,7 @@ from ftf.contract.models import (
     Relation,
     linkable,
 )
-from ftf.linking.background import BackgroundCounts
+from ftf.linking.background import BackgroundCounts, default_brand, digest
 from ftf.linking.hierarchy import ANCHOR_KINDS, ChainRow, Hierarchy, apply_chain_rule
 from ftf.linking.similarity import OPERATOR_FACTOR, ContentViews, view_evidence
 from ftf.linking.types import METHOD, PairScore, decision_bits
@@ -135,11 +135,12 @@ class ScoringContext:
     kind_level: dict[Key, Level] = field(default_factory=dict)  # (layer, kind) → its usual Indicator.level
     content: ContentViews | None = None  # calibrated content views (HACK-24); None: off
     content_inds: dict[str, dict[str, list]] = field(default_factory=dict)  # canonical capture → view kind → indicators
+    brand: frozenset[str] = frozenset()  # brand stop-list digests (HACK-66): values seen on real outlet pages
 
     @classmethod
     def from_dataset(
         cls, ds: Dataset, weights: WeightTable = HAND_TABLE, background: BackgroundCounts | None = None,
-        chain_rule: bool = True, content: ContentViews | None = None,
+        chain_rule: bool = True, content: ContentViews | None = None, brand: frozenset[str] | None = None,
     ) -> "ScoringContext":
         """Index `ds` for scoring. `background` switches the rarity term to corpus operator counts;
         `chain_rule` discovers the id hierarchy of `ds` and applies one term per level; `content`
@@ -194,6 +195,9 @@ class ScoringContext:
             n_incidents=len({incident_of[c] for c in canon_ids}),
             background=background,
             kind_level={key: usual_level(c) for key, c in levels.items()},
+            # None: the default stop-list (`background.default_brand`); a learned background adds its own
+            brand=frozenset(brand if brand is not None else default_brand()) | frozenset(
+                background.brand if background is not None else ()),
         )
         if chain_rule:
             ctx.hierarchy = ctx.build_hierarchy()
@@ -206,12 +210,14 @@ class ScoringContext:
         }
         return Hierarchy.from_captures(caps, anchors)
 
-    def rarity(self, key: tuple[Layer, str, str], k: int) -> float:
+    def rarity(self, key: tuple[Layer, str, str], k: int, relation: Relation | None = None) -> float:
         """Bits taken off a shared value for being common: log2(k) over the sample's pre-groups, or with
         background counts log2[(c + α)/(1 + α)], c = max(corpus operators, sample pre-groups) (0 for one
-        operator). The max, not the sum: a corpus that contains the scored sample must not count it twice."""
-        if self.background is not None and self.background.is_brand(*key):
-            return math.inf  # brand skin: also on a real outlet page, a hub
+        operator). The max, not the sum: a corpus that contains the scored sample must not count it twice.
+        Under a brand-skin relation a stop-listed value is infinitely common (HACK-66)."""
+        brand = getattr(self, "brand", None)
+        if brand and relation in BRAND_SKIN_RELATIONS and digest(*key) in brand:
+            return math.inf
         if self.background is None or not self.background.knows(key[0], key[1]):
             return math.log2(max(k, 1))
         a = self.background.alpha
@@ -345,7 +351,8 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
                 prior = entry.bits * scale
                 if entry.private and not live:
                     prior = max(prior - w.static_discount, 0.0)
-                rar = ctx.rarity((layer, kind, norm), k)
+                # brand skin (HACK-66): a value also on a real outlet page counts under ecosystem only
+                rar = ctx.rarity((layer, kind, norm), k, relation)
                 bits = max(prior - rar, 0.0)
                 if bits > best_bits:
                     best_norm, best_bits, best_k, best_live, best_rar = norm, bits, k, live, rar
@@ -418,6 +425,12 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
         other_rows += subsumed
         shared_cands, explained = _explain_away(shared_cands, conflict_rows, ctx.hierarchy)
         other_rows += explained
+    # platform / creative gate (HACK-66): a link of a gated relation needs one positive identifier row outside
+    # the platform and creative layers whose value sits below platform level. Platform constants (and
+    # platform-level values filed in other layers: third-party hosts, page and form shapes) are shared by every
+    # tenant; a creative alone (an ad, a celebrity's face or photo) can be reused by anyone. Bits stay honest.
+    substantive = relation not in SKIN_GATED_RELATIONS or any(
+        c.bits > 0 and _substantive(ctx, c.key) for c in shared_cands)
     for c in shared_cands:
         shared_rows[c.key[0]].append(_Candidate(c.row, c.bits))
     if ctx.content is not None:
@@ -475,8 +488,9 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
             else:
                 chain_positive = True
     layers_positive += chain_positive
-    if not campaign_evidence:
-        # operator-level evidence alone (accounts, kit, hosting) never makes a campaign link: review at most
+    if not campaign_evidence or not substantive:
+        # operator-level evidence alone (accounts, kit, hosting) never makes a campaign link, and platform-level
+        # or creative evidence alone never makes any gated link: review at most
         layers_positive = min(layers_positive, 1)
         live_private = False
     rows += other_rows
@@ -484,7 +498,7 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
     rows.sort(key=lambda r: (order.index(r.layer), r.kind))
     return PairScore(
         a=ca, b=cb, relation=relation, bits=round(total, 3), rows=rows,
-        layers_positive=layers_positive, live_private=live_private,
+        layers_positive=layers_positive, live_private=live_private, substantive=substantive,
         id_bits=round(id_total, 3) if any(is_content_row(r) and r.bits > 0 for r in rows) else None,
     )
 
@@ -621,6 +635,24 @@ def _platform_cap(w: WeightTable, relation: Relation) -> float:
 # rule and per-level slots apply to these relations only. Template and tracking-account evidence (a kit or a
 # pixel shared across tenants) is exactly what those relations look for.
 CHAIN_RELATIONS = frozenset({Relation.operator, Relation.campaign, Relation.ecosystem})
+# Relations under which a brand stop-list value is skin (0 bits): all but ecosystem (HACK-66).
+BRAND_SKIN_RELATIONS = frozenset(Relation) - {Relation.ecosystem}
+# Relations whose links need a substantive row (`_substantive`, HACK-66). Template is left out: a shared lander
+# template or page shape is exactly what a template link is about.
+SKIN_GATED_RELATIONS = frozenset({Relation.campaign, Relation.operator, Relation.tracking_account})
+_SKIN_LAYERS = frozenset({Layer.platform, Layer.creative})
+_SKIN_LEVELS = frozenset({Level.platform, Level.ecosystem})
+
+
+def _substantive(ctx: ScoringContext, key: tuple[Layer, str, str]) -> bool:
+    """A shared value that can carry a gated link: outside the platform and creative layers, and below platform
+    level (its discovered hierarchy level, else its kind's usual Indicator.level)."""
+    if key[0] in _SKIN_LAYERS:
+        return False
+    level = ctx.hierarchy.level(key) if ctx.hierarchy is not None else None
+    if level is None:
+        level = ctx.kind_level.get(key[:2])
+    return level not in _SKIN_LEVELS
 # Layers in which a kind without a weight entry may count as campaign evidence by its own Indicator.level
 # (HACK-53 campaign gate); elsewhere an unknown kind never opens the gate.
 _CAMPAIGN_FALLBACK_LAYERS = frozenset({Layer.creative, Layer.distribution_account, Layer.landing})

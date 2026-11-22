@@ -22,9 +22,13 @@ bucket artefact like the data it was counted from.
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 import re
+import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from ftf.contract.models import Dataset, Layer, linkable
 
@@ -98,14 +102,14 @@ class BackgroundCounts:
             and (corpus_kinds is None or corpus_kinds.get(i.id) in RARITY_KINDS)
             and any(linkable(x) and x.value is not None for x in i.indicators)
         ]
-        ctx = ScoringContext.from_dataset(corpus.model_copy(update={"incidents": _detach(kept)}), chain_rule=False)
+        ctx = ScoringContext.from_dataset(
+            corpus.model_copy(update={"incidents": _detach(kept)}), chain_rule=False, brand=frozenset())
         brand: set[str] = set()
         if must_not_link is not None:
             if must_not_link_kinds is not None:
                 must_not_link = must_not_link.model_copy(update={"incidents": _detach([
                     i for i in must_not_link.incidents if must_not_link_kinds.get(i.id) in MUST_NOT_LINK_KINDS])})
-            real = ScoringContext.from_dataset(must_not_link, chain_rule=False)
-            brand = {digest(*k) for k in real.index if k[0] is not Layer.collector}
+            brand = set(brand_digests(must_not_link))
         counts: dict[str, int] = {}
         kind_groups: dict[tuple[str, str], set[str]] = defaultdict(set)
         kind_values: dict[tuple[str, str], int] = Counter()
@@ -208,3 +212,77 @@ def _detach(incidents: list) -> list:
                 for c in inc.captures]
         out.append(inc.model_copy(update={"captures": caps}))
     return out
+
+
+# Brand stop-list (HACK-66): hashed values seen on real outlet pages (corpus batch 1, tagged
+# must_not_link). Such a value is the impersonated outlet's skin (logo, fonts, favicon, the outlet's
+# own analytics or CDN), so the ledger counts it under the ecosystem relation only. The file holds
+# digests only and lives in the private bucket; the default scoring path loads it from
+# $FTF_BRAND_STOPLIST, else DEFAULT_BRAND_STOPLIST. Missing file: a warning and no stop-list (the
+# engine scores as before); FTF_BRAND_STOPLIST=off switches it off without a warning.
+BRAND_FORMAT = "ftf-brand-stoplist"
+BRAND_STOPLIST_ENV = "FTF_BRAND_STOPLIST"
+DEFAULT_BRAND_STOPLIST = "/data/derived/linking/brand-stoplist/brand-stoplist.json"
+_OFF = {"", "off", "none", "0"}
+
+
+def brand_digests(must_not_link: Dataset) -> frozenset[str]:
+    """Digests of every linkable (layer, kind, normalised value) on the real pages, collector layer excluded."""
+    from ftf.linking.ledger import ScoringContext  # local: ledger imports this module
+
+    real = ScoringContext.from_dataset(must_not_link, chain_rule=False, brand=frozenset())
+    return frozenset(digest(*k) for k in real.index if k[0] is not Layer.collector)
+
+
+def real_pages(corpus: Dataset, corpus_kinds: dict[str, str] | None) -> Dataset:
+    """The corpus incidents tagged as real outlet pages (`MUST_NOT_LINK_KINDS`)."""
+    kinds = corpus_kinds or {}
+    return corpus.model_copy(update={"incidents": _detach([
+        i for i in corpus.incidents if kinds.get(i.id) in MUST_NOT_LINK_KINDS])})
+
+
+def brand_stoplist_doc(brand: frozenset[str] | set[str], n_pages: int) -> dict:
+    return {"format": BRAND_FORMAT, "version": VERSION, "n_pages": n_pages, "brand": sorted(brand)}
+
+
+def read_brand_stoplist(path: str | os.PathLike) -> frozenset[str]:
+    """Digests from a brand stop-list file, or from the `brand` field of a background counts file."""
+    doc = json.loads(Path(path).read_text(encoding="utf-8"))
+    if doc.get("format") not in (BRAND_FORMAT, FORMAT):
+        raise ValueError(f"{path}: not an {BRAND_FORMAT} or {FORMAT} document")
+    return frozenset(str(x) for x in doc.get("brand", []))
+
+
+def stoplist_path() -> str | None:
+    """The configured stop-list path, None when switched off."""
+    raw = os.environ.get(BRAND_STOPLIST_ENV)
+    if raw is None:
+        return DEFAULT_BRAND_STOPLIST
+    return None if raw.strip().lower() in _OFF else raw
+
+
+_LOADED: dict[tuple[str, float], frozenset[str]] = {}
+_WARNED: set[str] = set()
+
+
+def _load(path: str) -> frozenset[str]:
+    """Read once per (path, mtime); a failed read is not cached, so a file written later is picked up."""
+    try:
+        key = (path, os.stat(path).st_mtime)
+        if key not in _LOADED:
+            _LOADED.clear()
+            _LOADED[key] = read_brand_stoplist(path)
+        return _LOADED[key]
+    except (OSError, ValueError) as exc:
+        if path in _WARNED:
+            return frozenset()
+        _WARNED.add(path)
+        print(f"ftf: warning: brand stop-list not loaded ({exc}); brand-skin values are scored like any other "
+              f"(set {BRAND_STOPLIST_ENV} to the file, or to 'off')", file=sys.stderr)
+        return frozenset()
+
+
+def default_brand() -> frozenset[str]:
+    """The brand stop-list of the default scoring path (empty when off or missing, see module notes above)."""
+    path = stoplist_path()
+    return _load(path) if path else frozenset()

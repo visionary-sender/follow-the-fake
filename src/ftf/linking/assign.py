@@ -233,7 +233,7 @@ def _indexed_setup(
         def informative(key) -> bool:
             # The most bits this value can earn in base + incident (live prior, combined rarity).
             prior = ctx.weights.weight(key[1], key[0]).bits * ctx.weights.scale(key[1], key[0], relation)
-            return prior - ctx.rarity(key, ctx.groups(key)) >= hub
+            return prior - ctx.rarity(key, ctx.groups(key), relation) >= hub
 
     keys = index.probe_keys(incident)
     modalities = {layer: set(mods) for layer, mods in index.modalities.items()}
@@ -453,7 +453,13 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
         for m, mps in sorted(per_member.items()):
             if mps.bits <= 0:
                 continue
-            lid = link_id(relation, mps.a, mps.b, prefix=f"link:{incident.id}")
+            if not mps.substantive and relation is not Relation.ecosystem:
+                # platform-level or creative evidence only (HACK-66): explained at ecosystem level, never as
+                # a link of `relation`
+                mps = setup.be.score(mps.a, mps.b, Relation.ecosystem)
+                if mps.bits <= 0:
+                    continue
+            lid = link_id(mps.relation, mps.a, mps.b, prefix=f"link:{incident.id}")
             if lid in seen:
                 continue
             link = be.link(mps, lid)

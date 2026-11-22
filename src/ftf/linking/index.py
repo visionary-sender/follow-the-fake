@@ -46,7 +46,7 @@ from ftf.contract.models import (
     Stage,
     linkable,
 )
-from ftf.linking.background import BackgroundCounts
+from ftf.linking.background import BackgroundCounts, default_brand
 from ftf.linking.ledger import ScoringContext, _pre_groups, _Values, is_owner_id, normalise, usual_level
 from ftf.linking.weights import HAND_TABLE, IGNORED_VALUES, WeightTable
 
@@ -485,7 +485,7 @@ class CandidateIndex:
         prior = _prior_cap(self.weights, key[1], key[0], relation)
         groups = self._count(key)[1]
         if self._ctx is not None:
-            return prior - self._ctx.rarity(key, groups)
+            return prior - self._ctx.rarity(key, groups, relation)
         # loaded without a base: the same rarity term, which reads only the background counts
         return prior - ScoringContext.rarity(SimpleNamespace(background=self.background), key, groups)  # type: ignore[arg-type]
 
@@ -686,6 +686,10 @@ def cached_index(base: Dataset) -> Optional[CandidateIndex]:
         return None
     if hit[1]._shape != _shape(base):  # edited in place since indexing
         del _CACHE[id(base)]
+        return None
+    ctx = hit[1]._ctx
+    if ctx is not None and hit[1].default_options and ctx.brand != default_brand():
+        del _CACHE[id(base)]  # the default brand stop-list changed since indexing (HACK-66)
         return None
     return hit[1]
 
