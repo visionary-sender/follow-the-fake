@@ -263,9 +263,9 @@ With platform ids hidden, the engine finds 11 of 11 campaign pairs, every pair i
 <!-- eval:e1-hidden end -->
 
 <!-- eval:e1-final start -->
-E1 across the build history:
+E1 as each method component is added (platform ids hidden):
 
-| build | campaign pairs found | what changed |
+| method | campaign pairs found | what changed |
 |---|---|---|
 | identifier layers only | 0 of 11 | tracking, kit and infrastructure layers |
 | + content features (faces, images, text) | 4 of 11 | face, image and text layers counted |
@@ -460,7 +460,7 @@ The offline package is an AES-256 encrypted 7z file. The link does not expire, a
 1.69 GB; sha256 `20ecf2e245b61645d7d5e15baefbdbf10f109f66b659e737b50a2a7229dd5dde` (check with `sha256sum`). `7z x <file>` asks for the password and unpacks to `ftf-offline-package/`.
 
 ```bash
-curl -LO <PACKAGE_LINK>
+curl -LO https://storage.googleapis.com/ftf-pkg-9d5a7a89ee6a4981/ftf-offline-6de92251feecb7ff82f64098.7z
 7z x ftf-offline-*.7z   # asks for the password: <PASSWORD>
 # the app, offline: open http://127.0.0.1:8501
 docker run --rm -e FTF_OFFLINE=1 -v "$PWD/ftf-offline-package:/data/package:ro" -e FTF_PACKAGE=/data/package -p 127.0.0.1:8501:8501 <image>
@@ -576,7 +576,7 @@ The challenge data (the case folders, the BACKUP archive and the link list) belo
 | `src/ftf/contract/` | the data contract (pydantic models); see [docs/contract.md](docs/contract.md) |
 | `docs/` | methodology, linking decisions, container run, evaluation, and the details of each service |
 | `tests/` | pytest suite, run on the cloud VM |
-| `scripts/` | `vm.sh` (the cloud dev loop), `check_no_private_data.py`, `licences.py`, `spend.py`, the sandbox and scanner scripts |
+| `scripts/` | `vm.sh` (the cloud dev loop), `check_no_private_data.py`, `licences.py`, the sandbox and scanner scripts |
 | `Dockerfile`, `.dockerignore` | the container image that runs the `ftf` command |
 
 ### Tests and checks on the VM
@@ -614,4 +614,3 @@ gcloud compute ssh <VM> --project <GCP_PROJECT> --zone <ZONE> \
   --tunnel-through-iap -- -N -L 8501:127.0.0.1:8501     # then open http://localhost:8501
 ```
 
-**Cloud spend.** `python3 -I scripts/spend.py` is a read-only report of what GCP records for the projects in its configuration, with estimated cost against their caps. It never creates, changes or deletes anything.
