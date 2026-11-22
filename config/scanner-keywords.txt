@@ -1,4 +1,4 @@
-# Public figures, TV/news brands and generic Polish scam phrases only: no domains, URLs, ids, advertiser or page names, no private people (HACK-87). Read by `ftf scan --keywords-file`.
+# Public figures, brands and TV/news outlets that scam ads impersonate, plus generic Polish scam phrases; no private people (HACK-87). Read by `ftf scan --keywords-file`.
 
 [meta]
 # Public figures whose names the scam ads use
@@ -16,6 +16,14 @@ TVN24
 Polsat News
 Interia
 Bankier
+# Companies and institutions the scam ads impersonate
+Orlen
+PGE
+Baltic Pipe
+PKO BP
+Pekao
+InPost
+NBP
 # Scam phrases (multi-word, so they do not match ordinary ads)
 platforma inwestycyjna
 pasywny dochód
