@@ -1,7 +1,7 @@
 # Scaling and sensitivity of the linking engine
 
 How the engine behaves as the collection grows, and how much its decisions depend on the
-hand-set weights. All numbers were measured on the shared workbench VM (`ftf-workbench`, Python 3.11) with `scripts/bench_linking.py`. Synthetic corpora contain only
+hand-set weights. All numbers were measured on a shared cloud VM (Python 3.11) with `scripts/bench_linking.py`. Synthetic corpora contain only
 invented values.
 
 ## What happens to a new capture
@@ -34,7 +34,7 @@ Complexity, with N captures, K campaigns, a incident captures and v values per c
 
 ## Measured timings
 
-Re-measured after HACK-23 (chain rule on, the default) on the organiser dataset rebuilt from main
+Re-measured after a later change (chain rule on, the default) on the organiser dataset rebuilt from main
 7a6cd07 (25 incidents, 31 captures, 3,917 indicators). The shared VM was busy (load average about
 10 on 4 cores): the full scan took 2.6× longer than in the first measurement of the same corpus
 (65.5 s against 25.5 s at 10k), so compare the columns within a row, not across runs.
@@ -56,7 +56,7 @@ The indexed cost still grows with N, for three reasons:
 - The chain rule's id hierarchy (`hierarchy.py`) is a property of the whole collection: a value's
   level depends on all its carriers, and the level graph on every anchor id. The extended context
   rediscovers it over base plus incident, one pass over every capture's values. This is most of the
-  indexed time at 10k (before HACK-23 the same assignment took 284 ms on a quiet VM). The result
+  indexed time at 10k (before that change the same assignment took 284 ms on a quiet VM). The result
   is memoised per incident, so `ftf assign --sensitivity` pays it once per incident, not per re-run.
   An incremental update (only the values and anchor ids the incident touches) is the next step
   if this matters.
@@ -87,7 +87,7 @@ The fix is to let the ledger's weights and rarity decide which values may propos
 changes grouping slightly: a hub-only pair with a platform conflict is no longer scored. It is
 left as a follow-up. On the organiser sample, linking takes under a second.
 
-## Sensitivity of the weights (07 §4, E6)
+## Sensitivity of the weights (E6)
 
 `ftf sensitivity LINKED.json -o report.json [--annotate OUT.json]` recomputes every link. It
 moves one layer's weights at a time by −2 and +2 bits (every kind in the layer and the layer
