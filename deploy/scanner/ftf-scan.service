@@ -4,6 +4,9 @@
 Description=Follow the Fake ad-library scan
 Wants=network-online.target
 After=network-online.target
+# Search terms are private: the file is copied to the sandbox from the workbench (scripts/scanner-sandbox.sh
+# keywords). Until it exists the run is skipped, not failed.
+ConditionPathExists=/opt/hack-20/config/scanner-keywords.txt
 
 [Service]
 Type=oneshot
@@ -14,7 +17,7 @@ WorkingDirectory=/opt/hack-20/home
 Environment=HOME=/opt/hack-20/home XDG_CACHE_HOME=/opt/hack-20/home/.cache XDG_CONFIG_HOME=/opt/hack-20/home/.config
 Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/hack-20/ms-playwright LANG=C.UTF-8
 EnvironmentFile=-/opt/hack-20/scan.env
-ExecStart=/opt/hack-20/venv/bin/ftf scan --out /opt/hack-20/data --download-creatives $FTF_SCAN_ARGS
+ExecStart=/opt/hack-20/venv/bin/ftf scan --out /opt/hack-20/data --download-creatives --keywords-file /opt/hack-20/config/scanner-keywords.txt $FTF_SCAN_ARGS
 StandardOutput=append:/opt/hack-20/log/scan.log
 StandardError=append:/opt/hack-20/log/scan.log
 # 75 = another scan still holds the lock: skipped, not failed.

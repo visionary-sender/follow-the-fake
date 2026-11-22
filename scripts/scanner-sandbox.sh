@@ -4,17 +4,21 @@
 #   scripts/scanner-sandbox.sh install    copy tracked code to /opt/hack-20, build venv + Chromium, install the timer
 #   scripts/scanner-sandbox.sh run        start one scan now (the same unit the timer starts)
 #   scripts/scanner-sandbox.sh status     timer, runs from the journal, log tail, queue length
-#   scripts/scanner-sandbox.sh authorize-workbench  let ftf-workbench read /opt/hack-20/data (once)
+#   scripts/scanner-sandbox.sh authorize-workbench  let ftf-workbench read /opt/hack-20/data and
+#                                         write the keyword file (once; re-run to add the keyword key)
+#   scripts/scanner-sandbox.sh keywords   copy gs://follow-the-fake-data/config/scanner-keywords.txt
+#                                         to /opt/hack-20/config, streamed by the workbench
 #   scripts/scanner-sandbox.sh pull       copy /opt/hack-20/data to the workbench /data/derived/scanner/,
 #                                         then rsync it to gs://follow-the-fake-data/outputs/scanner/
 #   scripts/scanner-sandbox.sh uninstall  stop and remove the timer and service (data stays)
 #
 # Everything lives under /opt/hack-20 on the sandbox (venv, browsers, data, log, the scan user's
-# home); outside it only the two systemd units and the users hack20 (runs the scan) and
-# hack20xfer (read-only transfer). The sandbox VM itself belongs to HACK-17 (scripts/sandbox.sh);
+# home, the keyword file); outside it only the two systemd units and the users hack20 (runs the
+# scan) and hack20xfer (transfer). The sandbox VM itself belongs to HACK-17 (scripts/sandbox.sh);
 # this script never creates, starts or stops it. Output moves sandbox -> workbench directly over
 # the VPC's internal network with a key that lives only on the workbench and is restricted on the
-# sandbox to one fixed command (tar of /opt/hack-20/data); nothing passes through the laptop.
+# sandbox to one fixed command (tar of /opt/hack-20/data); the keyword file moves workbench ->
+# sandbox with a second key restricted to one fixed write. Nothing passes through the laptop.
 set -euo pipefail
 
 SANDBOX=${FTF_SANDBOX:-ftf-sandbox}
@@ -23,9 +27,11 @@ ZONE=${FTF_VM_ZONE:-europe-central2-a}
 PROJECT=${FTF_VM_PROJECT:-follow-the-fake}
 BUCKET_DEST=gs://follow-the-fake-data/outputs/scanner/
 WB_DEST=/data/derived/scanner
+KW_FILE=/opt/hack-20/config/scanner-keywords.txt
+KEYWORDS_SRC=gs://follow-the-fake-data/config/scanner-keywords.txt
 export CLOUDSDK_ACTIVE_CONFIG_NAME=${CLOUDSDK_ACTIVE_CONFIG_NAME:-follow-the-fake}
 
-usage() { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 [ $# -eq 1 ] || usage
 mode=$1
 
@@ -38,6 +44,10 @@ ssh_to() {  # ssh_to <vm> <command>
 internal_ip() {
   gcloud compute instances describe "$SANDBOX" --project "$PROJECT" --zone "$ZONE" \
     --format='value(networkInterfaces[0].networkIP)'
+}
+workbench_pub() {  # workbench_pub <key path on the workbench, literal $HOME ok> <comment>: create once, print public key
+  ssh_to "$WORKBENCH" "set -e; mkdir -p ~/.ssh; chmod 700 ~/.ssh;
+    [ -f $1 ] || ssh-keygen -q -t ed25519 -N '' -C $2 -f $1; cat $1.pub"
 }
 
 # Tracked files only (as in the working tree): untracked local files never reach the sandbox.
@@ -58,6 +68,8 @@ id hack20xfer >/dev/null 2>&1 || useradd --create-home --shell /bin/sh hack20xfe
 usermod -a -G hack20 hack20xfer
 install -d -o root -g root -m 755 $h
 install -d -o hack20 -g hack20 -m 2750 $h/data $h/log $h/home
+# Setgid on the group hack20: the keyword file written by hack20xfer is readable by the scan user.
+install -d -o hack20xfer -g hack20 -m 2750 $h/config
 rm -rf $h/src.new && mkdir $h/src.new
 tar --warning=no-unknown-keyword --no-same-owner -xzf - -C $h/src.new
 rm -rf $h/src && mv $h/src.new $h/src
@@ -84,10 +96,12 @@ sudo journalctl -u ftf-scan.service --no-pager -o short-iso | grep -E 'Starting|
 echo "--- scan.log (tail)"
 sudo tail -n 12 $h/log/scan.log 2>/dev/null
 echo "--- queue: $(sudo cat $h/data/queue.jsonl 2>/dev/null | wc -l) items; runs: $(sudo ls $h/data/runs 2>/dev/null | wc -l)"
+if sudo test -f $h/config/scanner-keywords.txt; then echo "--- keyword file: present ($(sudo wc -l < $h/config/scanner-keywords.txt) lines)"; else echo "--- keyword file: missing (the timer skips its runs)"; fi
 EOF
 
 WB_KEY='$HOME/.ssh/hack20_sandbox'
 WB_KNOWN='$HOME/.ssh/hack20_sandbox_known_hosts'
+CFG_KEY='$HOME/.ssh/hack20_config'
 
 case "$mode" in
   install)
@@ -103,14 +117,21 @@ case "$mode" in
   authorize-workbench)
     ip=$(internal_ip)
     hostkey=$(ssh_to "$SANDBOX" 'cat /etc/ssh/ssh_host_ed25519_key.pub' | awk '{print $1" "$2}')
-    pub=$(ssh_to "$WORKBENCH" "set -e; mkdir -p ~/.ssh; chmod 700 ~/.ssh;
-      [ -f $WB_KEY ] || ssh-keygen -q -t ed25519 -N '' -C hack20-workbench-to-sandbox -f $WB_KEY;
-      echo '$ip $hostkey' > $WB_KNOWN; cat $WB_KEY.pub")
-    line="restrict,command=\"tar -C /opt/hack-20/data --exclude=./.lock -czf - .\" $pub"
+    ssh_to "$WORKBENCH" "set -e; mkdir -p ~/.ssh; chmod 700 ~/.ssh; echo '$ip $hostkey' > $WB_KNOWN"
+    pub=$(workbench_pub "$WB_KEY" hack20-workbench-to-sandbox)
+    cfg=$(workbench_pub "$CFG_KEY" hack20-workbench-config-to-sandbox)
+    line1="restrict,command=\"tar -C /opt/hack-20/data --exclude=./.lock -czf - .\" $pub"
+    line2="restrict,command=\"umask 027 && cat > $KW_FILE.new && mv -f $KW_FILE.new $KW_FILE\" $cfg"
     ssh_to "$SANDBOX" "sudo install -d -o hack20xfer -g hack20xfer -m 700 /home/hack20xfer/.ssh &&
-      echo $(printf '%q' "$line") | sudo tee /home/hack20xfer/.ssh/authorized_keys >/dev/null &&
+      printf '%s\n' $(printf '%q' "$line1") $(printf '%q' "$line2") | sudo tee /home/hack20xfer/.ssh/authorized_keys >/dev/null &&
       sudo chown hack20xfer: /home/hack20xfer/.ssh/authorized_keys && sudo chmod 600 /home/hack20xfer/.ssh/authorized_keys"
-    echo "scanner-sandbox.sh: $WORKBENCH may now read /opt/hack-20/data on $SANDBOX ($ip)" >&2
+    echo "scanner-sandbox.sh: $WORKBENCH may now read /opt/hack-20/data and write $KW_FILE on $SANDBOX ($ip)" >&2
+    ;;
+  keywords)
+    ip=$(internal_ip)
+    ssh_to "$WORKBENCH" "set -euo pipefail;
+      gcloud storage cat $KEYWORDS_SRC | ssh -i $CFG_KEY -o IdentitiesOnly=yes -o UserKnownHostsFile=$WB_KNOWN -o StrictHostKeyChecking=yes -o BatchMode=yes hack20xfer@$ip;
+      echo 'pushed the keyword file to $SANDBOX (check with status)'"
     ;;
   pull)
     ip=$(internal_ip)
