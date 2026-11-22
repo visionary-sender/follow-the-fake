@@ -79,6 +79,8 @@ ENV HF_HUB_OFFLINE=1 \
     TRANSFORMERS_OFFLINE=1 \
     FTF_FACE_REFERENCE=/opt/ftf-models/face-reference \
     FTF_FACES_REFERENCE=/opt/ftf-models/face-reference
+# Live fetching is opt-in and on in the jury image only (HACK-91); enrichment is online by default.
+ENV FTF_FETCH=1
 
 COPY docker/entrypoint.sh /usr/local/bin/ftf-entrypoint
 RUN chmod 0755 /usr/local/bin/ftf-entrypoint
