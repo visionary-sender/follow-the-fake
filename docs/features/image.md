@@ -37,7 +37,7 @@ emitted once.
 **Skip rules.** These are input rules, not similarity thresholds.
 - SVG and any other non-raster format: never decoded or rasterised, since SVG is active markup.
 - Icons and tracking pixels: shorter side below 40 px (the earlier prototype used the same rule).
-- Decompression bombs: more than 120 Mpx, checked from the header before decoding.
+- Decompression bombs: more than 25 Mpx, checked from the header before decoding.
 - Flat images (standard deviation of a 64×64 luma thumbnail below 2): a blank frame hashes
   to a constant that would match every other blank frame.
 - Animated GIF and WebP: first frame only. Transparency is composited on white.

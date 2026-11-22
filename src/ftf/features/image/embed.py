@@ -19,7 +19,8 @@ log = logging.getLogger(__name__)
 
 MODEL = "google/siglip2-base-patch16-224"
 # Pinned snapshot so every run embeds with the same weights.
-REVISION = os.environ.get("FTF_SIGLIP_REVISION") or None
+# Pinned snapshot, so stored vectors stay comparable; FTF_SIGLIP_REVISION overrides it.
+REVISION = os.environ.get("FTF_SIGLIP_REVISION") or "75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2" or None
 # Tall page screenshots are cut to their top (at most MAX_ASPECT x width) before the model
 # squashes them to 224x224: the first screen carries the hero image and headline.
 MAX_ASPECT = 2.0

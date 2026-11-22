@@ -22,7 +22,7 @@ FORMATS = ("PNG", "JPEG", "GIF", "WEBP", "BMP")
 # shorter side, decompression bombs above MAX_PIXELS, and flat images (a blank frame hashes to
 # a constant that would match every other blank frame).
 MIN_SIDE = 40
-MAX_PIXELS = 120_000_000
+MAX_PIXELS = 25_000_000
 MIN_LUMA_STD = 2.0
 
 # Luma weights of the CSS/SVG hue-rotate matrix (Filter Effects 1, feColorMatrix hueRotate).
@@ -53,6 +53,8 @@ def load(src: Union[str, Path, bytes]) -> Loaded:
     try:
         try:
             img = Image.open(fp, formats=FORMATS)
+        except Image.DecompressionBombError as e:
+            raise SkipImage("too_large") from e
         except (Image.UnidentifiedImageError, OSError, ValueError, SyntaxError) as e:
             raise SkipImage("not_raster") from e
         w, h = img.size

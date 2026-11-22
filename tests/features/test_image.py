@@ -248,3 +248,30 @@ def test_embedding_end_to_end(tmp_path, monkeypatch):
     ref = next(i.vector_ref for i in ds.incidents[0].indicators if i.vector_ref)
     keys, rows = load_vectors(tmp_path / "out", ref.store)
     assert keys == [ref.key] and rows.shape == (1, 768)
+
+
+def test_decompression_bomb_header_is_skipped():
+    import struct
+    import zlib
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+    # a PNG header claiming 20000 x 20000 px (400 Mpx) with almost no data
+    png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 20000, 20000, 8, 2, 0, 0, 0))
+    png += chunk(b"IDAT", zlib.compress(b"\x00")) + chunk(b"IEND", b"")
+    with pytest.raises(hashing.SkipImage) as e:
+        hashing.load(png)
+    assert str(e.value) == "too_large"
+
+
+def test_har_too_deep_or_too_large_is_skipped(tmp_path, monkeypatch):
+    from ftf.features.image import har
+
+    deep = tmp_path / "deep.har"
+    deep.write_text("[" * 100_000 + "]" * 100_000)
+    assert list(har.iter_images(deep)) == []
+    monkeypatch.setattr(har, "MAX_HAR", 10)
+    big = tmp_path / "big.har"
+    big.write_text('{"log": {"entries": []}}')
+    assert list(har.iter_images(big)) == []

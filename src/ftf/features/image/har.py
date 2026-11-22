@@ -8,15 +8,18 @@ import json
 from collections.abc import Iterator
 from pathlib import Path
 
-MAX_BODY = 25_000_000  # bytes of a decoded body
+MAX_BODY = 25_000_000
+MAX_HAR = 200_000_000  # bytes; a larger HAR is skipped rather than loaded whole  # bytes of a decoded body
 
 
 def iter_images(path: Path) -> Iterator[tuple[int, str, bytes]]:
     """``(entry index, request URL, body bytes)`` for base64 image responses other than SVG."""
     try:
+        if Path(path).stat().st_size > MAX_HAR:
+            return
         doc = json.loads(Path(path).read_bytes())
         entries = doc["log"]["entries"]
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError, RecursionError):
         return
     if not isinstance(entries, list):
         return

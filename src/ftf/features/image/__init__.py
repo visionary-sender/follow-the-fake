@@ -3,7 +3,7 @@
 Indicators (layer ``creative``, level ``campaign``):
 
 * ``image_phash``, ``image_dhash``: 64-bit hex, on a hue-invariant luminance channel;
-* ``image_pdq``: 256-bit hex PDQ (BT.601 luma, as in the reference);
+* ``image_pdq``: 256-bit hex PDQ (BT.601 luma, as in the reference, so not hue-invariant);
 * ``image_embedding``: SigLIP 2 vector (when torch/transformers are installed).
 
 Inputs: ``ad_screenshot``, ``screenshot`` and ``asset`` artefacts (any file that decodes as PNG,
@@ -32,6 +32,8 @@ FILE_TYPES = (ArtefactType.ad_screenshot, ArtefactType.screenshot, ArtefactType.
 # Assets are embedded too; set FTF_IMAGE_EMBED=0 to skip all embeddings.
 log = logging.getLogger(__name__)
 
+
+MAX_FILE_BYTES = 50_000_000  # an image file larger than this is skipped unread
 
 def _features(src: Union[Path, bytes], with_embedding: bool = True) -> list[Feature]:
     img = load(src)
@@ -87,7 +89,11 @@ def apply(ds: Dataset, raw_root: Path, out_dir: Path) -> Dataset:
 
     for inc, cap, art in iter_artefacts(ds, FILE_TYPES):
         try:
-            data = resolve(raw_root, art).read_bytes()
+            path = resolve(raw_root, art)
+            if path.stat().st_size > MAX_FILE_BYTES:
+                stats["too_large"] += 1
+                continue
+            data = path.read_bytes()
         except (OSError, ValueError):
             stats["unreadable"] += 1
             continue
