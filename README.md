@@ -455,11 +455,13 @@ The image runs the `ftf` command. With no arguments it builds the campaign base 
 
 ### Offline, without internet, from the base bundle
 
-The offline package is an AES-256 encrypted 7z file. The link does not expire, and the password is never in the repository:
+The offline package is an AES-256 encrypted 7z file. The link does not expire, and the password is never in the repository.
+
+1.69 GB; sha256 `20ecf2e245b61645d7d5e15baefbdbf10f109f66b659e737b50a2a7229dd5dde` (check with `sha256sum`). `7z x <file>` asks for the password and unpacks to `ftf-offline-package/`.
 
 ```bash
-curl -LO <PACKAGE_LINK>
-7z x ftf-offline-*.7z   # asks for the password: <PASSWORD>
+curl -LO https://storage.googleapis.com/ftf-pkg-9d5a7a89ee6a4981/ftf-offline-6de92251feecb7ff82f64098.7z
+7z x ftf-offline-6de92251feecb7ff82f64098.7z   # asks for the password: <PASSWORD>
 # the app, offline: open http://127.0.0.1:8501
 docker run --rm -e FTF_OFFLINE=1 -v "$PWD/ftf-offline-package:/data/package:ro" -e FTF_PACKAGE=/data/package -p 127.0.0.1:8501:8501 <image>
 # the CLI with no network at all
