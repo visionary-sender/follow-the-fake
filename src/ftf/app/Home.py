@@ -66,8 +66,9 @@ with st.sidebar:
     st.subheader("Campaign base")
     st.text(f"{'FTF_BASE' if source else 'fixture'}: {base.name}")
     st.text(f"{len(base.incidents)} incidents, {len(base.links)} links, {len(base.campaigns)} campaigns")
-    online = st.checkbox("Online enrichment", value=False, key="online",
+    online = st.checkbox("Online enrichment", value=True, key="online",
                          help="Registry and DNS lookups (RDAP, DNS over HTTPS, crt.sh, CERT Polska list). "
+                              "If the network is down, answers come from the offline cache. "
                               "The page itself is never opened from here; live pages are fetched only from the sandbox.")
 
 
@@ -138,6 +139,7 @@ threshold = ledger.review_threshold_bits(base)
 # -- 2. stages -----------------------------------------------------------------------------------
 st.header("2. Pipeline stages")
 _table(ledger.stage_rows(result.stages))
+st.text(f"enrichment: {result.enrichment or 'not run'}")
 
 # -- 3. features ---------------------------------------------------------------------------------
 st.header("3. Extracted features")
