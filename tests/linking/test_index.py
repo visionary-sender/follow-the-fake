@@ -513,3 +513,52 @@ def test_candidate_note_names_the_conflicting_kind():
     row = EvidenceRow(layer=L.owner, kind="aio_campaign", status=EvidenceStatus.conflict, value="a vs b", bits=-4.0)
     ps = PairScore(a="x", b="y", relation=Relation.campaign, bits=-4.0, rows=[row])
     assert "conflict: owner aio_campaign" in _candidate_note(ps)
+
+
+def _multi_lander_cases():
+    from linking_support import cap, incident
+
+    x = [(L.platform, "P1"), (L.landing, "LA"), (L.kit, "K1"), (L.tracking_account, "PXA", True)]
+    cases = {
+        "disagree": [(L.platform, "P1"), (L.landing, "LB"), (L.kit, "K2")],
+        "agree": [(L.platform, "P1"), (L.landing, "LA"), (L.kit, "K1")],
+        "nowhere": [(L.offer, "O-unrelated")],
+    }
+    out = [
+        incident(f"n-{k}", [cap(f"n-{k}-ad", "ad"), cap(f"n-{k}-x"), cap(f"n-{k}-y")], {f"n-{k}-ad": [(L.creative, "CR-n")], f"n-{k}-x": x, f"n-{k}-y": y})
+        for k, y in cases.items()
+    ]
+    # an ad matching another campaign than the landers point to
+    out.append(
+        incident(
+            "n-off",
+            [cap("n-off-ad", "ad"), cap("n-off-x"), cap("n-off-y")],
+            {"n-off-ad": [(L.platform, "P1"), (L.tenant, "T2"), (L.landing, "LB"), (L.kit, "K2")], "n-off-x": x, "n-off-y": [(L.offer, "O-unrelated")]},
+        )
+    )
+    # one lander duplicates a member of campaign B, the other matches campaign A
+    out.append(incident("n-dup", [cap("n-dup-x"), cap("n-dup-y", duplicate_of="b0-c1")], {"n-dup-x": x, "n-dup-y": [(L.landing, "LB")]}))
+    return out
+
+
+@pytest.mark.parametrize("stub", [True, False])
+def test_index_equals_linear_scan_for_incidents_with_several_landers(stub):
+    a = [simple(f"a{i}", (L.platform, "P1"), (L.tenant, "T1"), (L.landing, "LA"), (L.kit, "K1"), (L.tracking_account, "PXA", True)) for i in range(3)]
+    b = [simple(f"b{i}", (L.platform, "P1"), (L.tenant, "T2"), (L.landing, "LB"), (L.kit, "K2")) for i in range(2)]
+    c = [simple(f"c{i}", (L.platform, "P2"), (L.offer, "OC"), (L.creative, "CRC")) for i in range(9)]
+    ds = Dataset(name="s", incidents=a + b + c)
+    col = link_dataset(ds, backend=stub_backend(ds)) if stub else link_dataset(ds)
+    idx = CandidateIndex.build(col, cache=False)
+    backend = stub_backend if stub else None
+    notes = {}
+    for new in _multi_lander_cases():
+        lin = link_incident(col, new, backend=backend)  # no cached index for `col`: the linear scan
+        fast = link_incident(col, new, backend=backend, index=idx)
+        assert fast.assignment.model_dump() == lin.assignment.model_dump(), new.id
+        assert [l.model_dump() for l in fast.links] == [l.model_dump() for l in lin.links], new.id
+        notes[new.id] = (lin.assignment.decision, lin.assignment.note)
+    if stub:
+        assert notes["n-disagree"][0] is Decision.review and "landers disagree" in notes["n-disagree"][1]
+        assert notes["n-agree"][0] is Decision.assign
+        assert notes["n-off"][0] is Decision.review
+        assert notes["n-dup"][0] is Decision.review and "landers disagree" in notes["n-dup"][1]

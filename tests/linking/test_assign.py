@@ -7,7 +7,7 @@ from ftf.contract.models import Dataset, Decision, Layer, Relation
 from ftf.linking import assign, link_dataset, link_incident
 from ftf.linking.assign import combine
 
-from linking_support import TAU, WEIGHTS, dataset, simple, stub_backend
+from linking_support import TAU, WEIGHTS, cap, dataset, incident, simple, stub_backend
 
 L = Layer
 
@@ -227,3 +227,50 @@ def test_cli_assign_handles_new_incidents_duplicating_each_other(tmp_path, monke
     out = Dataset.from_json((tmp_path / "out.json").read_bytes())
     decisions = {a.incident_id: a.decision for a in out.assignments}
     assert decisions == {"n1": Decision.new, "n2": Decision.review}  # a duplicate of a capture in no campaign
+
+
+# --- incidents with several landers (HACK-57) -------------------------------------------------
+
+
+def _two_landers(y_vals):
+    vals = {
+        "n-x": [(L.platform, "P1"), (L.landing, "LA"), (L.kit, "K1"), (L.tracking_account, "PXA", True)],
+        "n-y": y_vals,
+    }
+    return incident("n", [cap("n-ad", "ad"), cap("n-x"), cap("n-y")], {"n-ad": [(L.creative, "CR-n")], **vals})
+
+
+def test_landers_pointing_to_different_campaigns_go_to_review():
+    col = _collection()
+    new = _two_landers([(L.platform, "P1"), (L.landing, "LB"), (L.kit, "K2")])
+    a = assign(col, new, backend=stub_backend)
+    assert a.decision is Decision.review
+    assert a.campaign_id is None
+    camp_a = next(c.id for c in col.campaigns if c.relation is Relation.campaign and "a0-c1" in c.capture_ids)
+    camp_b = next(c.id for c in col.campaigns if c.relation is Relation.campaign and "b0-c1" in c.capture_ids)
+    assert "landers disagree" in a.note
+    assert f"n-x -> {camp_a}" in a.note and f"n-y -> {camp_b}" in a.note
+
+
+def test_landers_agreeing_or_one_pointing_nowhere_still_assign():
+    col = _collection()
+    camp_a = next(c.id for c in col.campaigns if c.relation is Relation.campaign and "a0-c1" in c.capture_ids)
+    for y_vals in ([(L.platform, "P1"), (L.landing, "LA"), (L.kit, "K1")], [(L.offer, "O-unrelated")]):
+        a = assign(col, _two_landers(y_vals), backend=stub_backend)
+        assert a.decision is Decision.assign, y_vals
+        assert a.campaign_id == camp_a
+        assert "landers disagree" not in a.note
+
+
+def test_ad_match_elsewhere_than_the_landers_point_goes_to_review():
+    col = _collection()
+    camp_a = next(c.id for c in col.campaigns if c.relation is Relation.campaign and "a0-c1" in c.capture_ids)
+    vals = {
+        "n-ad": [(L.platform, "P1"), (L.tenant, "T2"), (L.landing, "LB"), (L.kit, "K2")],  # 13.5 bits against B
+        "n-x": [(L.platform, "P1"), (L.landing, "LA"), (L.kit, "K1"), (L.tracking_account, "PXA", True)],  # 12.5 against A
+        "n-y": [(L.offer, "O-unrelated")],
+    }
+    new = incident("n", [cap("n-ad", "ad"), cap("n-x"), cap("n-y")], vals)
+    a = assign(col, new, backend=stub_backend)
+    assert a.decision is Decision.review
+    assert f"n-x -> {camp_a}" in a.note

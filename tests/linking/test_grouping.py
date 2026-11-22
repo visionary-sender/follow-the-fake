@@ -210,7 +210,101 @@ def test_candidate_pairs_use_normalised_values_and_skip_unknown():
 
 def test_incident_with_a_duplicate_capture_stays_whole():
     x = incident("x", [cap("x-c1")], {"x-c1": [(L.kit, "K1")]})
-    y = incident("y", [cap("y-c1", duplicate_of="x-c1"), cap("y-c2")], {"y-c1": [(L.kit, "K1")], "y-c2": [(L.offer, "O9")]})
+    y = incident("y", [cap("y-c1", duplicate_of="x-c1"), cap("y-c2", "ad")], {"y-c1": [(L.kit, "K1")], "y-c2": [(L.offer, "O9")]})
     ds = dataset(x, y)
     part = _partition(group(stub_backend(ds), Relation.campaign)[0])
     assert part == {frozenset({"x-c1", "y-c1", "y-c2"})}
+
+
+def test_duplicate_lander_and_another_lander_are_not_must_linked():
+    # y's first lander is a copy of x's capture; its second lander is another site with no shared evidence.
+    x = incident("x", [cap("x-c1")], {"x-c1": [(L.kit, "K1")]})
+    y = incident("y", [cap("y-c1", duplicate_of="x-c1"), cap("y-c2")], {"y-c1": [(L.kit, "K1")], "y-c2": [(L.offer, "O9")]})
+    ds = dataset(x, y)
+    part = _partition(group(stub_backend(ds), Relation.campaign)[0])
+    assert part == {frozenset({"x-c1", "y-c1"}), frozenset({"y-c2"})}
+
+
+# --- incident chains (HACK-57) --------------------------------------------------------------
+
+
+def test_incident_with_two_unrelated_landers_is_not_joined():
+    # One case folder holding two unrelated sites, each matching its own campaign. No conflict
+    # between them, so only the must-link could join them (and, through them, A and B).
+    m = incident("m", [cap("m-x"), cap("m-y")], {"m-x": [(L.kit, "K1"), (L.landing, "LA")], "m-y": [(L.kit, "K2"), (L.landing, "LB")]})
+    a = [simple(f"a{i}", (L.kit, "K1"), (L.landing, "LA")) for i in range(2)]
+    b = [simple(f"b{i}", (L.kit, "K2"), (L.landing, "LB")) for i in range(2)]
+    ds = dataset(m, *a, *b)
+    be = stub_backend(ds)
+    for relation in (Relation.campaign, Relation.operator, Relation.template):
+        part = _partition(group(be, relation)[0])
+        assert frozenset({"m-x", "a0-c1", "a1-c1"}) in part, relation
+        assert frozenset({"m-y", "b0-c1", "b1-c1"}) in part, relation
+    alone = dataset(m)
+    assert _partition(group(stub_backend(alone), Relation.campaign)[0]) == {frozenset({"m-x"}), frozenset({"m-y"})}
+
+
+def test_incident_with_ad_and_one_lander_is_joined():
+    m = incident("m", [cap("m-ad", "ad"), cap("m-pre", "pre_lander"), cap("m-l")], {"m-ad": [(L.creative, "CR9")], "m-l": [(L.kit, "K1")]})
+    ds = dataset(m)
+    for relation in (Relation.campaign, Relation.template):
+        assert _partition(group(stub_backend(ds), relation)[0]) == {frozenset({"m-ad", "m-pre", "m-l"})}
+
+
+def test_incident_with_ad_and_two_landers_sharing_a_tenant_is_joined_through_evidence():
+    # Ad, two landers on one tenant/owner and a decoy (the case-61 shape).
+    caps = [cap("m-ad", "ad"), cap("m-l1"), cap("m-l2"), cap("m-d", "decoy")]
+    vals = {
+        "m-ad": [(L.creative, "CR1")],
+        "m-l1": [(L.creative, "CR1"), (L.tenant, "T1", True), (L.owner, "W1", True), (L.landing, "LA1")],
+        "m-l2": [(L.tenant, "T1", True), (L.owner, "W1", True), (L.landing, "LA2")],
+        "m-d": [(L.kit, "KD")],
+    }
+    ds = dataset(incident("m", caps, vals))
+    be = stub_backend(ds)
+    for relation in (Relation.campaign, Relation.operator):
+        assert _partition(group(be, relation)[0]) == {frozenset({"m-ad", "m-l1", "m-l2"})}, relation
+    # Without shared evidence the ad stays its own unit, and the landers still join.
+    vals["m-ad"] = [(L.creative, "CR-other")]
+    ds = dataset(incident("m", caps, vals))
+    part = _partition(group(stub_backend(ds), Relation.campaign)[0])
+    assert part == {frozenset({"m-l1", "m-l2"}), frozenset({"m-ad"})}
+
+
+def test_ad_attaches_to_the_lander_it_shares_most_evidence_with():
+    caps = [cap("m-ad", "ad"), cap("m-l1"), cap("m-l2")]
+    vals = {"m-ad": [(L.creative, "CR1"), (L.offer, "O1")], "m-l1": [(L.creative, "CR1")], "m-l2": [(L.creative, "CR1"), (L.offer, "O1")]}
+    ds = dataset(incident("m", caps, vals))
+    from ftf.linking.grouping import _pair, must_link_groups
+
+    be = stub_backend(ds)
+    by_pair = {_pair(a, b): be.score(a, b, Relation.campaign) for a, b in (("m-ad", "m-l1"), ("m-ad", "m-l2"), ("m-l1", "m-l2"))}
+    assert must_link_groups(ds, by_pair) == [["m-l2", "m-ad"]]
+
+
+def test_unknown_stage_captures_stay_must_linked():
+    # Two fetches of one URL (default and victim profile) share nothing but are one chain.
+    m = incident("m", [cap("m-c1", "unknown"), cap("m-c2", "unknown")], {"m-c1": [(L.kit, "K1")], "m-c2": [(L.offer, "O9")]})
+    assert _partition(group(stub_backend(dataset(m)), Relation.campaign)[0]) == {frozenset({"m-c1", "m-c2"})}
+
+
+def test_ad_skips_a_lander_it_conflicts_with():
+    caps = [cap("m-ad", "ad"), cap("m-l1"), cap("m-l2")]
+    vals = {
+        "m-ad": [(L.tenant, "T1"), (L.creative, "CR1"), (L.landing, "LX")],
+        "m-l1": [(L.tenant, "T2"), (L.creative, "CR1"), (L.landing, "LX")],  # 3 + 4 - 4 = 3 bits, conflict
+        "m-l2": [(L.creative, "CR1")],  # 3 bits, clean
+    }
+    ds = dataset(incident("m", caps, vals))
+    from ftf.linking.grouping import _pair, must_link_groups
+
+    be = stub_backend(ds)
+    by_pair = {_pair(a, b): be.score(a, b, Relation.campaign) for a, b in (("m-ad", "m-l1"), ("m-ad", "m-l2"))}
+    assert must_link_groups(ds, by_pair) == [["m-l2", "m-ad"]]
+
+
+def test_lander_duplicating_an_unknown_stage_capture_still_counts_as_a_lander():
+    f = incident("f", [cap("f-c1", "unknown")], {"f-c1": [(L.kit, "K1")]})
+    m = incident("m", [cap("m-x", duplicate_of="f-c1"), cap("m-y")], {"m-x": [(L.kit, "K1")], "m-y": [(L.offer, "O9")]})
+    part = _partition(group(stub_backend(dataset(f, m)), Relation.campaign)[0])
+    assert part == {frozenset({"f-c1", "m-x"}), frozenset({"m-y"})}
