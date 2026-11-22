@@ -7,14 +7,20 @@ offline export. With no network and no cache entry, the indicators come out as `
 
 ```bash
 ftf enrich-domain example.com --cache data/enrichment/cache.json --out enrichment.json
+ftf enrich-domain --from-dataset dataset.json --offline --cache cache.json --summary summary.json
 ftf enrich-domain --from-raw /data/raw --offline --cache cache.json --summary summary.json
 ```
 
-`--from-raw DIR` takes the domains the organiser's data names: the page URL of each HAR capture
-(the `pages` titles, or the first request if there are none) and the URLs in
-`scam_links*.txt`. Files are read as inert data. Hosts that appear inside a captured page
-(CDNs, trackers, platforms) are not looked up. Registrable domains come from tldextract with its
-bundled Public Suffix List snapshot, so nothing is downloaded to normalise a name.
+`--from-dataset PATH` takes the registered domains the dataset's pages live on: the landing,
+each redirect hop, the ad landing and a CERT Polska listing, from `registered_domains(dataset,
+include_shared=False)`. Shared platforms, CDNs and SDK hosts (the stop-list) are left out, and the
+summary counts them by stop-list group only. Ad display domains are left out too, since an ad may
+show a brand it does not control. `--from-raw DIR` is a thin wrapper: it ingests the folder
+(organiser data, saved pages, HARs, read as inert data; all extractors run, so it is slower) and
+then does the same. An input that cannot be read is skipped with a warning, and the summary lists
+it. The organiser's `scam_links*.txt` lists are not read by this path: the ingested dataset has no
+incident for them, so their domains are not enriched. Registrable domains come from tldextract
+with its bundled Public Suffix List snapshot, so nothing is downloaded to normalise a name.
 
 Kinds: `registrar`, `registrar_iana_id`, `created_date`, `domain_age_days_at_capture`,
 `a_record_ip`, `nameserver`, `ns_provider`, `mx`, `cert_issuer`, `cert_first_seen`,
