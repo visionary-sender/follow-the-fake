@@ -67,11 +67,11 @@ EXCEPTIONS = {
         "licence": ("Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause "
                     "AND BSL-1.0 AND ISC AND MIT AND Zlib"),
         "shown_as": "Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause "
-                    "AND BSL-1.0 AND ISC AND MIT AND Zlib",
+                    "AND BSL-1.0 AND ISC AND MIT AND Zlib (named exception: BSL-1.0 part of bundled code)",
     },
     "regex": {
         "licence": "Apache-2.0 AND CNRI-Python",
-        "shown_as": "Apache-2.0 AND CNRI-Python",
+        "shown_as": "Apache-2.0 AND CNRI-Python (named exception: CNRI-Python)",
     },
 }
 

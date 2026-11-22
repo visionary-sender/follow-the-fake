@@ -15,7 +15,7 @@ fi
 host=$(hostname 2>/dev/null || echo unknown)
 case "$host" in
   "${FTF_VM:-workbench}"|"${FTF_VM:-workbench}"-*) ;;
-  *) echo "fetch_face_reference: runs only on workbench VMs (this host is $host)" >&2; exit 2 ;;
+  *) echo "fetch_face_reference: runs only on workbench VMs (this host is $host; set FTF_VM)" >&2; exit 2 ;;
 esac
 uri=${FTF_FACES_REFERENCE_URI:-gs://${FTF_BUCKET:?set FTF_BUCKET}/outputs/visual/face-reference}
 dest=${1:-docker/build-context/faces-reference}

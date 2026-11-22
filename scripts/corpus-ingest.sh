@@ -22,10 +22,10 @@ ftf ingest "${inputs[@]}" --root . --out ingested/dataset.json --timing ingested
 L=/data/derived/corpus/lists
 mkdir -p "$L"
 for f in legit-domains.txt person-keywords.txt certpl-hosts.txt; do
-  gcloud storage cp "gs://$FTF_BUCKET/outputs/corpus/lists/$f" "$L/$f" >/dev/null \
+  gcloud storage cp "gs://${FTF_BUCKET:-FTF_BUCKET-not-set}/outputs/corpus/lists/$f" "$L/$f" >/dev/null \
     || { echo "label list $f missing from the bucket (outputs/corpus/lists/)" >&2; exit 1; }
 done
 lists=(--legit-list $L/legit-domains.txt --person-keywords $L/person-keywords.txt --listed-domains $L/certpl-hosts.txt)
 ftf corpus tag-ingested --dataset ingested/dataset.json --manifest manifest.jsonl --out ingested/corpus_kind.jsonl "${lists[@]}" \
   | tee ingested/summary.json
-gcloud storage rsync -r --delete-unmatched-destination-objects "$D/ingested/" "gs://$FTF_BUCKET/outputs/corpus/$batch/ingested/" 2>&1 | tail -1
+gcloud storage rsync -r --delete-unmatched-destination-objects "$D/ingested/" "gs://${FTF_BUCKET:-FTF_BUCKET-not-set}/outputs/corpus/$batch/ingested/" 2>&1 | tail -1

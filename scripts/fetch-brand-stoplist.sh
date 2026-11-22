@@ -10,7 +10,7 @@ if [ "$(uname -s)" != Linux ]; then
     echo "fetch-brand-stoplist: run this on the workbench VM, not on this machine" >&2
     exit 2
 fi
-src=${FTF_STOPLIST_GCS_URI:-gs://$FTF_BUCKET/outputs/linking/brand-stoplist/brand-stoplist.json}
+src=${FTF_STOPLIST_GCS_URI:-gs://${FTF_BUCKET:-FTF_BUCKET-not-set}/outputs/linking/brand-stoplist/brand-stoplist.json}
 dest=$(dirname "$0")/../docker/brand-stoplist
 mkdir -p "$dest"
 tmp=$dest/.brand-stoplist.json.part

@@ -63,7 +63,7 @@ Covers the runtime dependencies and the `app`, `dev` and `fetch` extras of `ftf`
 | pywavelets | MIT AND BSD-3-Clause |
 | pyyaml | MIT License |
 | referencing | MIT |
-| regex | Apache-2.0 AND CNRI-Python |
+| regex | Apache-2.0 AND CNRI-Python (named exception: CNRI-Python) |
 | requests | Apache Software License |
 | requests-file | Apache Software License |
 | rich | MIT License |
@@ -78,7 +78,7 @@ Covers the runtime dependencies and the `app`, `dev` and `fetch` extras of `ftf`
 | sympy | BSD License |
 | tldextract | BSD-3-Clause |
 | tokenizers | Apache Software License |
-| torch | Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND ISC AND MIT AND Zlib |
+| torch | Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND ISC AND MIT AND Zlib (named exception: BSL-1.0 part of bundled code) |
 | tqdm | MPL-2.0 AND MIT (named exception, unmodified) |
 | transformers | Apache 2.0 License |
 | typer | MIT |

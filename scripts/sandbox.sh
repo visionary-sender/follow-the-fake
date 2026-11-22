@@ -26,7 +26,7 @@ VM=${FTF_SANDBOX_VM:-sandbox}
 ZONE=europe-central2-a
 PROJECT=${FTF_GCP_PROJECT:?set FTF_GCP_PROJECT}
 WORKBENCH=${FTF_VM:-workbench}
-BUCKET_DEST=gs://$FTF_BUCKET/outputs/fetcher/
+BUCKET_DEST=gs://${FTF_BUCKET:-FTF_BUCKET-not-set}/outputs/fetcher/
 WB_DEST=/data/derived/fetcher
 
 create_vm() {

@@ -21,14 +21,14 @@
 # sandbox with a second key restricted to one fixed write. Nothing passes through the laptop.
 set -euo pipefail
 
-SANDBOX=${FTF_SANDBOX_VM:-sandbox}
+SANDBOX=${FTF_SANDBOX_VM:-${FTF_SANDBOX:-sandbox}}
 WORKBENCH=${FTF_VM:-workbench}
 ZONE=${FTF_VM_ZONE:-europe-central2-a}
 PROJECT=${FTF_VM_PROJECT:-${FTF_GCP_PROJECT:?set FTF_GCP_PROJECT or FTF_VM_PROJECT}}
-BUCKET_DEST=gs://$FTF_BUCKET/outputs/scanner/
+BUCKET_DEST=gs://${FTF_BUCKET:-FTF_BUCKET-not-set}/outputs/scanner/
 WB_DEST=/data/derived/scanner
 KW_FILE=/opt/ftf-scanner/config/scanner-keywords.txt
-KEYWORDS_SRC=gs://$FTF_BUCKET/config/scanner-keywords.txt
+KEYWORDS_SRC=gs://${FTF_BUCKET:-FTF_BUCKET-not-set}/config/scanner-keywords.txt
 
 usage() { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 [ $# -eq 1 ] || usage

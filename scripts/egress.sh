@@ -38,7 +38,7 @@ read -r -a ZONES <<< "${EGRESS_ZONES:-europe-central2-a europe-central2-b europe
 WORKBENCH=${FTF_VM:-workbench}
 WORKBENCH_ZONE=europe-central2-a
 WB_DEST=/data/derived/egress
-BUCKET_DEST=gs://$FTF_BUCKET/outputs/egress/
+BUCKET_DEST=gs://${FTF_BUCKET:-FTF_BUCKET-not-set}/outputs/egress/
 MAX_WORKERS=12
 
 usage() { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
