@@ -108,6 +108,12 @@ build-report.json        which build stages ran or were skipped
 The enrichment cache is derived from organiser domains, so it is never baked into the image; it
 travels only inside a privately handed-over base bundle.
 
+The final base bundle is `<BASE_BUNDLE_DIR>`, handed over privately; its export tables are in `<EXPORT_DIR>`.
+
+An input that is already in the base shows its stored analysis: `ftf analyze` returns the base's
+incident for it, so an extractor or feature change shows for that input only after the base is
+rebuilt. Rebuild the base (`ftf build-base … --force`) after any extractor or feature change.
+
 ## Environment variables
 
 | Variable | Default in the image | Meaning |
@@ -179,7 +185,9 @@ offline run.
 ## Resources
 
 2 CPUs and 4 GB memory are enough: the app idles at about 150 MB, and building the base for the
-challenge set takes about 2 minutes. Disk: the image (5.57 GB) plus a few MB of base.
+challenge set takes about 2 minutes. Disk: the image (5.57 GB) plus a few MB of base. With the visual
+families on 2 CPUs the slowest organiser input took about 263 s, so expect a few minutes for one input;
+the OCR and video timeouts above bound a single slow call.
 
 ## Verified checks
 
