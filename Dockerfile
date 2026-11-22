@@ -57,12 +57,19 @@ RUN if [ "$FTF_WITH_MODELS" != 0 ]; then \
         && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-pol tesseract-ocr-eng \
            $([ "$FTF_WITH_FFMPEG" != 0 ] && echo ffmpeg) \
         && rm -rf /var/lib/apt/lists/* \
-        && FTF_MODEL_DIR=/opt/ftf-models ftf features prefetch \
+        && ftf features prefetch --model-dir /opt/ftf-models \
         && chmod -R a+rX /opt/ftf-models; \
     fi
-# Offline at run time: the baked weights are read from $FTF_MODEL_DIR, nothing is fetched from the hub.
+# Face reference set (HACK-83): filled on the workbench by scripts/fetch_face_reference.sh into the
+# gitignored build context. The folder may be empty (the build still works; faces are then embedded
+# but not named).
+COPY docker/build-context/faces-reference/ /opt/ftf-models/face-reference/
+# Offline at run time: the weights are read from $FTF_MODEL_DIR and the reference set from
+# $FTF_FACES_REFERENCE; nothing is fetched from the hub. Global FTF_OFFLINE is not set (it would also
+# switch off the jury's live enrichment); the model loaders honour it on their own paths.
 ENV HF_HUB_OFFLINE=1 \
-    TRANSFORMERS_OFFLINE=1
+    TRANSFORMERS_OFFLINE=1 \
+    FTF_FACES_REFERENCE=/opt/ftf-models/face-reference
 
 COPY docker/entrypoint.sh /usr/local/bin/ftf-entrypoint
 RUN chmod 0755 /usr/local/bin/ftf-entrypoint

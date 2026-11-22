@@ -61,3 +61,4 @@ testpaths = ["tests"]
 [tool.setuptools.package-data]
 
 "ftf.indicators" = ["stoplist.json"]
+"ftf.features.faces" = ["reference_manifest.json"]

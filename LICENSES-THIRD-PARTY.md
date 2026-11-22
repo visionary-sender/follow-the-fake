@@ -79,7 +79,7 @@ Covers the runtime dependencies and the `app`, `dev` and `fetch` extras of `ftf`
 | tldextract | BSD-3-Clause |
 | tokenizers | Apache Software License |
 | torch | Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND ISC AND MIT AND Zlib |
-| tqdm | MPL-2.0 AND MIT |
+| tqdm | MPL-2.0 AND MIT (named exception, unmodified, pending owner review, HACK-74) |
 | transformers | Apache 2.0 License |
 | typer | MIT |
 | typing-extensions | PSF-2.0 |

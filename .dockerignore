@@ -15,3 +15,7 @@ docker/brand-stoplist/*
 **/*.pyc
 **/*.egg-info
 **/.DS_Store
+
+# Baked face reference set (filled on the workbench VM; the folder itself is kept, see the Dockerfile).
+!docker/build-context/faces-reference/
+!docker/build-context/faces-reference/**

@@ -54,8 +54,16 @@ EXCEPTIONS = {
         "licence": "Mozilla Public License 2.0 (MPL 2.0)",
         "shown_as": "MPL-2.0 (named exception, unmodified CA bundle; see README Licence section)",
     },
+    # HACK-80 (owner decision, 2026-11-22): tqdm, pulled in by transformers and huggingface_hub, used
+    # unmodified; pending owner review (HACK-74). Only this exact licence string is accepted.
+    "tqdm": {
+        "licence": "MPL-2.0 AND MIT",
+        "shown_as": "MPL-2.0 AND MIT (named exception, unmodified, pending owner review, HACK-74)",
+    },
 }
 
+
+ALLOWED_LICENCE_IDS = {"BSL-1.0", "CNRI-Python"}
 
 # HACK-68 named exception (owner decision, 2026-11-22): the Debian system libraries that Chromium
 # needs, installed in the image by `playwright install --with-deps` (Dockerfile). They are used
@@ -118,6 +126,10 @@ def is_permissive(licence: str) -> bool:
 
 
 def _part_permissive(part: str) -> bool:
+    # Exact licence IDs accepted for every package (owner decision, HACK-80, 2026-11-22). A package
+    # is not passed as a whole. BSL-1.0: a part of torch's bundled code; CNRI-Python: the regex package.
+    if part.strip().upper() in {i.upper() for i in ALLOWED_LICENCE_IDS}:
+        return True
     words = re.split(r"[\s,\-]+", part.upper())
     if any(w in DENIED_WORDS or (w.startswith(DENIED_PREFIXES) and w not in PUBLIC_DOMAIN_WORDS) for w in words):
         return False

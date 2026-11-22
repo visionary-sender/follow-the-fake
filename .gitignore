@@ -65,3 +65,7 @@ plans/
 notes/
 *.plan.md
 *.local.md
+
+# Build-context folders filled on the workbench VM only (never in git; see scripts/fetch_face_reference.sh).
+docker/build-context/faces-reference/*
+!docker/build-context/faces-reference/.gitkeep
