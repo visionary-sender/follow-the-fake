@@ -13,10 +13,8 @@ Run it inside the image: it imports the installed ftf package.
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
-from pathlib import Path
 
 
 def image() -> str:
