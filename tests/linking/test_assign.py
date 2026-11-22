@@ -229,7 +229,7 @@ def test_cli_assign_handles_new_incidents_duplicating_each_other(tmp_path, monke
     assert decisions == {"n1": Decision.new, "n2": Decision.review}  # a duplicate of a capture in no campaign
 
 
-# --- incidents with several landers (HACK-57) -------------------------------------------------
+# --- incidents with several landers -------------------------------------------------
 
 
 def _two_landers(y_vals):
@@ -276,7 +276,7 @@ def test_ad_match_elsewhere_than_the_landers_point_goes_to_review():
     assert f"n-x -> {camp_a}" in a.note
 
 
-# --- tie at the top (HACK-64) ---------------------------------------------------------
+# --- tie at the top ---------------------------------------------------------
 
 
 def _two_campaigns() -> Dataset:

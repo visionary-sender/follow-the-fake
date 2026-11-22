@@ -1,6 +1,6 @@
 """The scorer as grouping and assignment see it: one small object, so tests can plug in a stub.
 
-`Backend.from_dataset` wires the hand-table ledger (HACK-21); tests build a `Backend` directly.
+`Backend.from_dataset` wires the hand-table ledger; tests build a `Backend` directly.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ class Backend:
     layer_caps: Callable[[Relation], dict[Layer, float]]
     to_link: Optional[Callable[[PairScore, str], Link]] = None
     context: Any = None
-    # Per-layer caps for an item showing only the given modalities (per kind, HACK-67); None keeps
+    # Per-layer caps for an item showing only the given modalities (per kind); None keeps
     # `layer_caps` for every item (stub scorers).
     modality_caps: Optional[Callable[[Relation, frozenset[ArtefactType]], dict[Layer, float]]] = None
 
@@ -102,7 +102,7 @@ def layer_caps(weights: Any, relation: Relation, modalities: Optional[frozenset[
 
 
 def link_level(ps: PairScore) -> LinkLevel:
-    """Tiers posted on HACK-21: strict = live private id or >= 3 positive layers, medium = 2, loose otherwise."""
+    """Tiers: strict = live private id or >= 3 positive layers, medium = 2, loose otherwise."""
     if ps.live_private or ps.layers_positive >= 3:
         return LinkLevel.strict
     if ps.layers_positive >= 2:

@@ -1,4 +1,4 @@
-"""Own host, registered-domain and redirect-chain indicators (HACK-48).
+"""Own host, registered-domain and redirect-chain indicators.
 
 Which hosts the page itself lives on: the landing, every main-frame hop before it (tracker,
 cloaker, pre-lander), the landing named by an ad-library record and a CERT Polska listing.
@@ -95,7 +95,7 @@ def _ind(capture: Capture, kind: str, value: str, observed: Observed, art: str, 
 
 
 def is_shared(host_or_domain: str) -> bool:
-    """True if the HACK-12 stop-list names this host (a platform, CDN, SDK, brand or redirector)."""
+    """True if the stop-list names this host (a platform, CDN, SDK, brand or redirector)."""
     host = hostname(host_or_domain)
     if host is None:
         return False

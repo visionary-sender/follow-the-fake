@@ -1,4 +1,4 @@
-"""Kit and page-structure fingerprints (HACK-11).
+"""Kit and page-structure fingerprints.
 
 Fingerprints meant to survive domain rotation and the kits' own randomisation (renamed asset
 files, renamed CSS classes, per-deployment ids). Everything is hashed from content or structure,
@@ -20,7 +20,7 @@ Kinds emitted (layer / level / meaning):
 
 Levels are the coarsest plausible ones: one asset hash can name a landing build (template
 images) or a whole platform (an SDK bundle). Linking re-levels values from cluster-level
-frequency; public libraries and CDNs are removed by the HACK-12 stop-list in `extract_all`.
+frequency; public libraries and CDNs are removed by the stop-list in `extract_all`.
 `observed` is `live` for values read from HAR traffic and `static` for saved files.
 """
 

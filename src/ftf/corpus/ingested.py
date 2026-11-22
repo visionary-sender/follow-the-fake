@@ -1,6 +1,6 @@
 """Tag `ftf ingest` output with corpus metadata.
 
-`ftf ingest` (HACK-9) is the canonical reader: it turns the folders of a corpus batch into contract
+`ftf ingest` is the canonical reader: it turns the folders of a corpus batch into contract
 incidents with the cross-project ids. This module does not build incidents. It writes
 `corpus_kind.jsonl` beside the ingested dataset, one row per ingested incident, by joining the
 incident with the corpus manifest (`manifest.jsonl` from `ftf corpus build`):

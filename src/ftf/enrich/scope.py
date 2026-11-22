@@ -1,7 +1,6 @@
 """Page URLs of a HAR file, read as JSON data.
 
-The domains `ftf enrich-domain` looks up come from `ftf.indicators.domains.registered_domains`
-(HACK-52); this module keeps only the HAR page-URL reader that the pipeline stages use. HAR data
+The domains `ftf enrich-domain` looks up come from `ftf.indicators.domains.registered_domains`; this module keeps only the HAR page-URL reader that the pipeline stages use. HAR data
 is parsed as JSON only: nothing in it is executed, imported, rendered or fetched.
 """
 

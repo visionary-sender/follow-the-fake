@@ -1,6 +1,6 @@
 """One partition of the captures per relation, with cannot-link on conflicting tenant / owner ids.
 
-Method (07 §1.8, D2 "Linking / clustering"):
+Rules:
 
 * Candidate pairs come from an inverted index over linkable indicator values: two captures are
   scored only if they share at least one value (compared in the ledger's normalised form), or
@@ -18,13 +18,13 @@ Method (07 §1.8, D2 "Linking / clustering"):
   mean is non-negative, they are joined by at least one qualifying edge, and no cross pair is
   cannot-linked. Unlike connected components, one false private-id match between two groups
   is outvoted by all the other cross pairs, so it does not chain them.
-* Must-link only where an incident's redirect chain is unambiguous (HACK-57). The chain's
+* Must-link only where an incident's redirect chain is unambiguous. The chain's
   end points are its non-decoy lander-stage captures. With at most one end point,
   all non-decoy captures of the incident (ad, pre-lander, lander) start in one unit, unless two
   of them conflict. With several end points the incident is not one chain: a case folder can
   hold unrelated sites, so its landers join only through their own evidence, like any other
   pair, except that landers on the same own host (a live page and its archived copy) are one
-  site and start in one unit (`SAME_SITE_KINDS`, HACK-84). Its ad / pre-lander captures are then attached to the lander they share the most
+  site and start in one unit (`SAME_SITE_KINDS`). Its ad / pre-lander captures are then attached to the lander they share the most
   evidence with (the highest-bit pair with bits > 0 and, under operator / campaign, no
   tenant/owner conflict; ties by id); without any such evidence they stay their own unit.
   Ingestion marks every saved page of a case folder as a lander, so a folder with two saved
@@ -79,7 +79,7 @@ MIN_LAYERS: dict[Relation, int] = {
     Relation.campaign: 2,
     Relation.ecosystem: 1,
 }
-# Same site (HACK-84): landers of one incident that share the scam's own exact host (not the registered domain;
+# Same site: landers of one incident that share the scam's own exact host (not the registered domain;
 # a hub host never counts) are one site, e.g. a live page and its archived copy in one case folder; they are
 # must-linked (`_same_site`). Assignment (`assign.lander_reach`) does not apply this yet.
 SAME_SITE_KINDS = frozenset({"landing_host"})
@@ -164,7 +164,7 @@ def cluster(
 
     # Unit-to-unit weight: the best capture pair between them (D1: max over members).
     def weight(ps: PairScore) -> float:
-        w = decision_bits(ps) - tau  # content views (HACK-24) never move cluster weights
+        w = decision_bits(ps) - tau  # content views never move cluster weights
         return w if qualifies(ps, tau, min_layers) else min(w, 0.0)
 
     uw: dict[tuple[int, int], float] = {}
@@ -272,7 +272,7 @@ def must_link_groups(ds: Dataset, by_pair: dict[frozenset[str], PairScore]) -> l
 
 
 def _same_site(ends: list[str], by_pair: dict[frozenset[str], PairScore]) -> list[list[str]]:
-    """One incident's landers on the same own host, one group per host value (HACK-84).
+    """One incident's landers on the same own host, one group per host value.
 
     Same host means a `SAME_SITE_KINDS` row with status `shared` in the pair's ledger, whatever its bits after
     the within-layer max (a stronger landing id beside it must not undo the join) and under every relation (the
@@ -343,7 +343,7 @@ def link_id(relation: Relation, a: str, b: str, prefix: str = "link") -> str:
 def group(ctx: Any, relation: Relation = Relation.campaign) -> tuple[list[Campaign], list[Link]]:
     """One partition of the collection under `relation`: campaigns plus the qualifying links inside them.
 
-    `ctx` is a `ScoringContext` (HACK-21) or a `Backend`.
+    `ctx` is a `ScoringContext` or a `Backend`.
     """
     be = _resolve(ctx)
     ds = be.dataset

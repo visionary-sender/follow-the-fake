@@ -20,7 +20,7 @@ def test_licence_table_is_current_and_permissive():
 
 
 def test_bsl_and_cnri_only_for_torch_and_regex():
-    # HACK-80: BSL-1.0 and CNRI-Python are accepted for torch and regex and nothing else.
+    # BSL-1.0 and CNRI-Python are accepted for torch and regex and nothing else.
     assert not licences.is_permissive("BSL-1.0")
     assert not licences.is_permissive("CNRI-Python")
     assert licences.is_allowed("torch", licences.EXCEPTIONS["torch"]["licence"])
@@ -85,7 +85,7 @@ def test_semicolon_joined_licences_all_apply():
 
 
 def test_chromium_exception_is_exact_and_narrow():
-    # HACK-68: only the listed Debian packages, with exactly the recorded licence string.
+    # only the listed Debian packages, with exactly the recorded licence string.
     chromium = {"libfake-lgpl1": "LGPL-2.1+", "libfake-mit1": "MIT"}
     assert licences.is_allowed_system("libfake-lgpl1", "LGPL-2.1+", chromium)
     assert not licences.is_allowed_system("libfake-lgpl1", "GPL-3+", chromium)
@@ -95,7 +95,7 @@ def test_chromium_exception_is_exact_and_narrow():
 
 
 def test_ffmpeg_exception_is_exact_and_narrow():
-    # HACK-80: Debian's ffmpeg with exactly its recorded licence string; GPL is not allowed in general.
+    # Debian's ffmpeg with exactly its recorded licence string; GPL is not allowed in general.
     ffmpeg = licences.SYSTEM_EXCEPTIONS["ffmpeg"]["licence"]
     assert licences.is_allowed_system("ffmpeg", ffmpeg, {})
     assert not licences.is_allowed_system("ffmpeg", "GPL-3+", {})
@@ -107,7 +107,7 @@ def test_image_audit_reports_unlisted_copyleft_and_missing_entries():
     rows = {"libfake-lgpl1": "LGPL-2.1+", "libfake-new": "GPL-2+"}
     errors = licences.audit_image(rows, chromium)
     assert errors == [
-        "not permissive and not the HACK-68 exception: libfake-new (GPL-2+)",
+        "not permissive and not the exception: libfake-new (GPL-2+)",
         "listed in chromium-debian-packages.tsv but absent from the image: libfake-gone",
     ]
     assert licences.audit_image({"libfake-lgpl1": "LGPL-2.1+"}, {"libfake-lgpl1": "LGPL-2.1+"}) == []

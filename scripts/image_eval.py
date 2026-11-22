@@ -1,6 +1,6 @@
-"""HACK-14 evaluation of the image family on the organiser data (run on the VM, never locally).
+"""evaluation of the image family on the organiser data (run on the VM, never locally).
 
-    python -I scripts/image_eval.py --pairs pairs.json --out /data/derived/visual/hack-14/eval
+    python -I scripts/image_eval.py --pairs pairs.json --out /data/derived/visual/eval
 
 1. Labelled pairs: known near-duplicates from the cross-case signal report (positives) against
    random cross-case pairs of page assets and of ad screenshots (negatives). Reports Hamming
@@ -37,7 +37,7 @@ KINDS = ("image_phash", "image_dhash", "image_pdq")
 BT601 = np.array([0.299, 0.587, 0.114], dtype=np.float32)
 
 # The labelled pairs name organiser files, so they live in the bucket, not in git
-# (gs://follow-the-fake-data/outputs/visual/hack-14/labels/pairs.json):
+# (gs://$FTF_BUCKET/outputs/visual/labels/pairs.json):
 #   {"positives": [{"name", "a": [side...], "b": [side...]}],
 #    "by_name": {"name", "a": glob, "b_dir": glob prefix, "siblings": [file names]}}
 # A side is ["file", glob] or ["har", har glob, URL substring, URL suffix]. "by_name" pairs files

@@ -225,7 +225,7 @@ def test_duplicate_lander_and_another_lander_are_not_must_linked():
     assert part == {frozenset({"x-c1", "y-c1"}), frozenset({"y-c2"})}
 
 
-# --- incident chains (HACK-57) --------------------------------------------------------------
+# --- incident chains --------------------------------------------------------------
 
 
 def test_incident_with_two_unrelated_landers_is_not_joined():
@@ -311,7 +311,7 @@ def test_lander_duplicating_an_unknown_stage_capture_still_counts_as_a_lander():
 
 
 def test_landers_on_the_same_own_host_are_one_site():
-    # HACK-84: a live page and its archived copy in one case folder share the scam's own host.
+    # a live page and its archived copy in one case folder share the scam's own host.
     from ftf.linking.grouping import _pair, must_link_groups
 
     ds = dataset(incident("m", [cap(f"m-l{i}") for i in range(1, 6)], {f"m-l{i}": [] for i in range(1, 6)}))

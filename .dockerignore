@@ -1,5 +1,5 @@
 # Default deny: the build context contains only what the image build needs.
-# Data, scam captures, git metadata and agent files never reach the daemon.
+# Data, captures, git metadata and assistant files never reach the daemon.
 *
 !pyproject.toml
 !README.md

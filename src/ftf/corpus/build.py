@@ -9,7 +9,7 @@ Layout of a corpus directory (`root`); all artefact paths in the output are rela
     manifest.jsonl      written here: one flat row per incident, keyed by incident id
     summary.json        written here: counts per corpus_kind and source, sizes, fetch outcomes
 
-Ids follow the cross-project scheme (HACK-9 `ftf.ingest.ids`, HACK-41):
+Ids follow the cross-project scheme (`ftf.ingest.ids`):
 
 - ad-library ads: incident `adlib:<ad archive id>`, captures `adlib:<id>:ad` and, when the
   landing URL was fetched, `adlib:<id>:lander` (the fetcher's capture, re-keyed);
@@ -65,7 +65,7 @@ def wayback_original(url: str) -> tuple[str, str] | None:
 
 
 def sanitise(part: str) -> str:
-    """Id part, exactly as `ftf ingest` builds it (HACK-9 `ftf.ingest.ids.sanitise`)."""
+    """Id part, exactly as `ftf ingest` builds it (`ftf.ingest.ids.sanitise`)."""
     from ftf.ingest.ids import sanitise as ingest_sanitise
 
     return ingest_sanitise(part) or "x"
@@ -341,7 +341,7 @@ def build_corpus(
     if scanner:
         fetched = read_fetch_dirs(root, fetch_dirs)
         victims = read_fetch_dirs(root, victim_dirs or [])
-        # Re-fetches of the same URLs from other egress IPs (HACK-45): extra attempts, recorded in
+        # Re-fetches of the same URLs from other egress IPs: extra attempts, recorded in
         # the manifest (the ingested dataset merges them with the default fetch by URL).
         egress: dict[str, list[FetchedCapture]] = defaultdict(list)
         for sub in egress_dirs or []:
@@ -464,7 +464,7 @@ def build_corpus(
     incidents = _mark_duplicates(incidents, lander_url)
     ds = m.Dataset(
         name=name,
-        description="Background corpus (HACK-18): scanner ads, fetched landing pages, bare domains, must-not-link real pages.",
+        description="Background corpus: scanner ads, fetched landing pages, bare domains, must-not-link real pages.",
         incidents=incidents,
     )
     by_id = {i.id: i for i in ds.incidents}

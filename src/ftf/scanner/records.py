@@ -70,7 +70,7 @@ class AdRecord:
 
     @property
     def incident_id(self) -> str:
-        """Cross-project id (HACK-41): `adlib:<ad archive id>` for ads (Meta archive id, Google
+        """Cross-project id: `adlib:<ad archive id>` for ads (Meta archive id, Google
         creative id `CR…`); CERT Polska entries are bare domains, `certpl:<registrable domain>`.
         Never depends on a timestamp."""
         prefix = "certpl" if self.source == "certpl" else "adlib"

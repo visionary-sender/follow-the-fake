@@ -1,4 +1,4 @@
-"""Evaluate the kit fingerprints (HACK-11) on a contract dataset; runs on the workbench VM.
+"""Evaluate the kit fingerprints on a contract dataset; runs on the workbench VM.
 
     python -I scripts/eval_kit.py DATASET_JSON --root /data/raw --out /data/derived/kit-eval/<name> \
         [--aliases ALIASES_JSON]
@@ -13,7 +13,7 @@ A "node" is a case (`1`, `p15`; all its captures merged) or, for the folders tha
 sites, one capture (`61/s1`, `2/<capture>`). Capture names in those folders can be real
 domains, so the labels used by the known-pair list (`2/acr`, `2/hl`) come from --aliases, a JSON
 object {capture id: node label} kept in the data bucket
-(gs://follow-the-fake-data/outputs/kit-eval/aliases.json), never in git. Values shared by at least --platform-df nodes are counted separately as
+(gs://$FTF_BUCKET/outputs/kit-eval/aliases.json), never in git. Values shared by at least --platform-df nodes are counted separately as
 platform-wide (the report's ">= 8 cases" rule). Writes `summary.json` and `pairs.md` (kinds and
 counts only, no values) and `indicators.json` (the extracted indicators) to --out.
 """

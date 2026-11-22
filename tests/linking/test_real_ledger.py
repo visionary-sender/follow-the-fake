@@ -1,4 +1,4 @@
-"""End to end with the HACK-21 ledger (no stub): the adapter, CLI and contract fit together."""
+"""End to end with the ledger (no stub): the adapter, CLI and contract fit together."""
 
 from __future__ import annotations
 

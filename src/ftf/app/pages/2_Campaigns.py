@@ -1,4 +1,4 @@
-"""Campaigns: how captures connect under each relation, and why two captures are linked (HACK-31).
+"""Campaigns: how captures connect under each relation, and why two captures are linked.
 
 Thin page: logic lives in `ftf.app.relations` and `ftf.app.figures`. Values from captures are
 shown only as defanged plain text (tables, code), never as HTML or markdown links.
