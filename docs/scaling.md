@@ -34,25 +34,47 @@ Complexity, with N captures, K campaigns, a incident captures and v values per c
 
 ## Measured timings
 
+Re-measured after HACK-23 (chain rule on, the default) on the organiser dataset rebuilt from main
+7a6cd07 (25 incidents, 31 captures, 3,917 indicators). The shared VM was busy (load average about
+10 on 4 cores): the full scan took 2.6× longer than in the first measurement of the same corpus
+(65.5 s against 25.5 s at 10k), so compare the columns within a row, not across runs.
+
 | Collection | Captures | Link | Index build | Assign, index (median) | Assign, full scan (median) | Same result |
 |---|---:|---:|---:|---:|---:|---|
-| Organiser sample (25 incidents) | 31 | 0.8 s (all 5 relations) | 0.12 s | 15 ms | 161 ms | 5 / 5 |
-| Synthetic | 1,000 | 2.1 s ¹ | 0.05 s | 31 ms | 380 ms | 10 / 10 |
-| Synthetic | 9,865 | 30 s ¹ | 1.3 s | 284 ms | 25.5 s | 10 / 10 |
+| Organiser dataset (25 incidents) | 31 | 2.0 s (all 5 relations) | 0.21 s | 72 ms | 515 ms | 5 / 5 |
+| Synthetic | 1,000 | 6.6 s ¹ | 0.22 s | 155 ms | 1.3 s | 3 / 3 |
+| Synthetic | 9,865 | 77 s ¹ | 4.0 s | 1.2 s | 65.5 s | 3 / 3 |
 
 ¹ Campaign relation only, linked one synthetic operator block at a time (`--blockwise`): the
 blocks share nothing except a 0-bit platform constant. The index and assign timings do not
 depend on how the partition was made.
 
-At about 10k captures the index makes assignment about 90× faster. A single new capture is
-assigned in under 0.3 s, against 25 s for the full scan.
+At about 10k captures the index makes assignment about 55× faster. A single new capture is
+assigned in about a second on the busy VM, against over a minute for the full scan.
 
-The indexed cost still grows with N, for two reasons:
+The indexed cost still grows with N, for three reasons:
+- The chain rule's id hierarchy (`hierarchy.py`) is a property of the whole collection: a value's
+  level depends on all its carriers, and the level graph on every anchor id. The extended context
+  rediscovers it over base plus incident, one pass over every capture's values. This is most of the
+  indexed time at 10k (before HACK-23 the same assignment took 284 ms on a quiet VM). The result
+  is memoised per incident, so `ftf assign --sensitivity` pays it once per incident, not per re-run.
+  An incremental update (only the values and anchor ids the incident touches) is the next step
+  if this matters.
 - Pre-groups (rarity is counted over operators, not incidents) are recomputed when the new
   incident carries a live private or owner id.
 - When fewer than five campaigns score above 0 bits, the candidate list is filled with
   zero-bit campaigns in id order, exactly as the full scan does. A cheap conflict check makes
   each step of that walk a few dictionary lookups.
+
+### Scoring options
+
+The index is built with the scoring options of `ScoringContext.from_dataset`: the weight table
+(`--weights` from `ftf learn-weights`), its background counts and the chain rule. `ftf index` and
+`ftf assign` take `--weights`; a saved index records a fingerprint of all three and refuses to
+load under other options. The candidate bound uses the ledger's own rarity term (with background
+counts it is below log2 of the pre-groups, so the bound is higher). A table passed to
+`link_incident(weights=...)` that gives bits to a kind the index kept no postings for falls back
+to the full scan.
 
 ### A known limit of `ftf link`: mid-size hubs
 
@@ -76,16 +98,19 @@ the grouping edge rule: `link`, `review` (within 3 bits below τ), or `no link`.
 - `ftf assign --sensitivity` does the same for decisions. The note goes on the assignment and
   its candidate.
 
-On the organiser sample (25 incidents, with the hand table after HACK-42):
+On the organiser dataset (rebuilt from main 7a6cd07, hand table, chain rule on; the base is all but
+the last 5 incidents):
 
 | Relation | Links | Fragile (one layer ±2 bits) | Flip only if every layer moves ±2 bits |
 |---|---:|---:|---:|
-| campaign | 24 | 0 | 2 |
-| operator | 24 | 0 | 2 |
+| campaign | 9 | 0 | 1 |
+| operator | 17 | 0 | 1 |
 | tracking account | 0 | – | – |
-| ecosystem | 26 | 0 | 3 |
-| template | 26 | 3 | 16 |
+| ecosystem | 20 | 2 (tenant −2) | 4 |
+| template | 19 | 2 (kit −2, tenant −2) | 13 |
 
 Campaign and operator links rest on several independent layers, so no single 2-bit change of one
-prior undoes them. Template links rest mostly on the kit layer alone, so they are the ones to
-check by hand.
+prior undoes them. They have fewer links than in the first measurement (9 and 17, against 24 and
+24); both the dataset (rebuilt indicators) and the scorer (chain rule, one term per level of the
+operator's id chain) changed since, so this run does not separate the two causes. None is fragile. Template and ecosystem links rest on one or two layers (kit, tenant), so they are the
+ones to check by hand.
