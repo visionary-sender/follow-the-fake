@@ -112,7 +112,10 @@ if st.button("Analyse", type="primary", key="analyze"):
     else:
         _clear_result()  # one run directory at a time: the previous upload copy is deleted
         with st.spinner("Running the pipeline…"):
-            st.session_state["result"] = analyze(inp, base, offline=not online, base_dir=base_dir(source or None))
+            forced_offline = os.environ.get("FTF_OFFLINE", "").strip().lower() in {"1", "true", "yes", "on"}
+            st.session_state["result"] = analyze(inp, base, offline=not online or forced_offline,
+                                                 base_dir=base_dir(source or None),
+                                                 fetch=os.environ.get("FTF_FETCH") == "1")
     finally:
         if tmp is not None:
             shutil.rmtree(tmp, ignore_errors=True)

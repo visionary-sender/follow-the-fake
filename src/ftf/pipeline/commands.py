@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 from ftf.pipeline.analyze import INPUT_KINDS, AnalysisInput, analyze, guess_kind
+from ftf.pipeline.build_base import register as register_build_base  # noqa: F401  (re-exported for ftf.cli)
 from ftf.pipeline.export import export
 
 ERROR_EXIT = 1

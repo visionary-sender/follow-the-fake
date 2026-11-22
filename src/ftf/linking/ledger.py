@@ -161,8 +161,7 @@ class ScoringContext:
                 # rarity counts the incident of the canonical capture, never the duplicate's
                 index[(ind.layer, ind.kind, norm)].add(incident_of[cap])
                 levels[(ind.layer, ind.kind)][ind.level] += 1
-                if ind.layer is Layer.owner and (ind.level is Level.operator or ANCHOR_KINDS.get(ind.kind) is Level.operator):
-                    # owner ids only: an aio campaign id in the owner layer names a campaign, not an owner
+                if is_owner_id(ind):
                     owners[incident_of[cap]].add(f"{ind.kind}={norm}")
                 if ind.observed is Observed.live and weights.weight(ind.kind, ind.layer).private:
                     live_private[(ind.layer, ind.kind, norm)].add(incident_of[cap])
@@ -181,7 +180,7 @@ class ScoringContext:
             n=len(canon_ids),
             n_incidents=len({incident_of[c] for c in canon_ids}),
             background=background,
-            kind_level={key: max(c, key=lambda lv: (c[lv], lv.value)) for key, c in levels.items()},
+            kind_level={key: usual_level(c) for key, c in levels.items()},
         )
         if chain_rule:
             ctx.hierarchy = ctx.build_hierarchy()
@@ -473,6 +472,17 @@ def _seen(ctx: ScoringContext, key: Key, norm: str) -> str:
     full = (key[0], key[1], norm)
     k, i = ctx.groups(full), len(ctx.index.get(full, ()))
     return f"{k} group{'s' if k != 1 else ''} ({i} incident{'s' if i != 1 else ''}) / {ctx.n_groups}"
+
+
+def is_owner_id(ind) -> bool:
+    """An owner-level id, which feeds the pre-groups: owner layer, operator level. An aio campaign id
+    filed in the owner layer names a campaign, not an owner."""
+    return ind.layer is Layer.owner and (ind.level is Level.operator or ANCHOR_KINDS.get(ind.kind) is Level.operator)
+
+
+def usual_level(counts: Counter) -> Level:
+    """A kind's usual Indicator.level (`ScoringContext.kind_level`): the most frequent, ties by name."""
+    return max(counts, key=lambda lv: (counts[lv], lv.value))
 
 
 def _pre_groups(
