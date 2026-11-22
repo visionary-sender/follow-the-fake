@@ -265,23 +265,21 @@ CAMPAIGN_EVIDENCE_KINDS = frozenset({
 # any modality (HTML yields almost every kind), so an unlisted kind never makes a missing input
 # look useful. Shared by every weight table: it describes the extractors, not the weights.
 _ASSET_FILES = frozenset({ArtefactType.asset, ArtefactType.har, ArtefactType.mhtml})
-_TRAFFIC = frozenset({ArtefactType.har})
+_HOPS = frozenset({ArtefactType.har, ArtefactType.url})  # the fetcher's url.txt records live hops too
 KIND_MODALITIES: dict[str, frozenset[ArtefactType]] = {
-    # whole asset files: saved next to the page, recorded in traffic or packed in an MHTML
+    # hashes of whole asset files: saved next to the page, recorded in traffic or packed in an MHTML
+    # (ids found inside asset text, such as SDK names or pixel gateways, also come from page text)
     "asset_sha256": _ASSET_FILES,
     "asset_norm_sha256": _ASSET_FILES,
-    "aio_action_files": _ASSET_FILES,
-    "aio_sdk_asset": _ASSET_FILES,
-    "capi_gateway": _ASSET_FILES,
-    # requests between pages: only recorded traffic shows postbacks and redirect hops
-    "tracker_postback": _TRAFFIC,
-    "chain_host": _TRAFFIC,
-    "chain_domain": _TRAFFIC,
-    "redirect_chain_shape": _TRAFFIC,
+    # hops between pages: recorded traffic or the fetcher's redirect log
+    "chain_host": _HOPS,
+    "chain_domain": _HOPS,
+    # hop roles of one HAR's main-frame chain
+    "redirect_chain_shape": frozenset({ArtefactType.har}),
 }
 # Modalities whose indicators are observed live. A private id seen only in other modalities loses
 # `static_discount` in the ledger, so its capacity does too.
-LIVE_MODALITIES = frozenset({ArtefactType.har})
+LIVE_MODALITIES = frozenset({ArtefactType.har, ArtefactType.url})
 
 
 def extractable(kind: str, modalities: frozenset[ArtefactType]) -> bool:

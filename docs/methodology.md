@@ -254,9 +254,9 @@ the best pairwise score between a probe and a campaign member. With K campaigns 
 largest weight the table allows to a kind the item's modalities can carry, summed over the layers
 the item's modalities can reach. Which kinds need which modality is a small explicit table next to
 the weights (`weights.KIND_MODALITIES`: asset-file hashes need saved assets, recorded traffic or an
-MHTML; postbacks and redirect hops need recorded traffic; unlisted kinds come from any modality).
-A private id without recorded traffic counts its weight minus the copy discount, as the ledger
-scores it. A
+MHTML; redirect hops need recorded traffic or the fetcher's redirect log; unlisted kinds come from
+any modality). A private id without a live modality (recorded traffic or the fetcher's redirect
+log) counts its weight minus the copy discount, as the ledger scores it. A
 screenshot-only item can show a creative and nothing else, so its capacity is far below τ. It goes to
 review, never to new. The item is not evidence that it is a new campaign; it is evidence that the
 pages that would settle the question are missing. Each assignment lists the modalities whose absence
@@ -264,7 +264,7 @@ limits it.
 
 The **capacity of the missing modalities** is how much the capacity would rise if every absent
 modality were present: new layers they open, and higher caps in layers the item already shows (a
-HAR makes private ids live and adds postbacks and redirect hops), each layer counted once. If the best candidate's score plus that capacity reaches the bar, the missing input
+HAR makes private ids live and adds redirect hops), each layer counted once. If the best candidate's score plus that capacity reaches the bar, the missing input
 could have produced the assignment, so a low score is not evidence of a new campaign: the item goes
 to review and the note names the missing inputs. Both capacities are upper bounds from the weight
 table; they never add bits to a score.

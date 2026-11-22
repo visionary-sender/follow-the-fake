@@ -327,6 +327,7 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
     tie = rival is not None and target_bits - rival[1].bits < TIE_MARGIN - 1e-9
 
     missing_reach = _missing_could_reach_bar(best, bar, gains, missing_bits)
+    held_back = False
 
     if setup.campaigns_of is not None:
         holding = setup.campaigns_of
@@ -363,6 +364,7 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
         decision, campaign_id = Decision.new, None
     else:
         decision, campaign_id = Decision.review, None
+        held_back = best <= tau - NEW_MARGIN and capacity >= tau  # new, but for the missing inputs
 
     if tie and decision is Decision.review:
         for camp in (target, rival[0]):
@@ -377,7 +379,7 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
         candidates.append(Candidate(campaign_id=cid, score_bits=round(ps.bits, 3) if ps is not None else 0.0, note="a lander of the incident points here"))
 
     note = _note(relation, best, tau, bar, k, capacity, gains, best_ps, min_layers)
-    if missing_reach is not None and decision is Decision.review and best <= tau - NEW_MARGIN and capacity >= tau:
+    if held_back and missing_reach is not None:
         note = missing_reach + "; " + note
     if dup_of:
         where = f"campaign {dup_camp.id}" if dup_camp is not None else f"{len(dup_camps)} campaigns"
