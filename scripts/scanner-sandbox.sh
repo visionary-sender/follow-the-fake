@@ -96,7 +96,7 @@ sudo journalctl -u ftf-scan.service --no-pager -o short-iso | grep -E 'Starting|
 echo "--- scan.log (tail)"
 sudo tail -n 12 $h/log/scan.log 2>/dev/null
 echo "--- queue: $(sudo cat $h/data/queue.jsonl 2>/dev/null | wc -l) items; runs: $(sudo ls $h/data/runs 2>/dev/null | wc -l)"
-if sudo test -f $h/config/scanner-keywords.txt; then echo "--- keyword file: present ($(sudo wc -l < $h/config/scanner-keywords.txt) lines)"; else echo "--- keyword file: missing (the timer skips its runs)"; fi
+if sudo test -f $h/config/scanner-keywords.txt; then echo "--- keyword file: present ($(sudo wc -l $h/config/scanner-keywords.txt | cut -d" " -f1) lines)"; else echo "--- keyword file: missing (the timer skips its runs)"; fi
 EOF
 
 WB_KEY='$HOME/.ssh/hack20_sandbox'
