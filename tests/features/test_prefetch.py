@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import argparse
-import json
 import urllib.request
 from pathlib import Path
 
-import numpy as np
 import pytest
 
 pytest.importorskip("huggingface_hub")
@@ -17,14 +15,13 @@ import huggingface_hub  # noqa: E402
 
 from ftf.features import commands, prefetch  # noqa: E402
 from ftf.features.faces import models as face_models  # noqa: E402
-from ftf.features.faces import reference  # noqa: E402
 from ftf.features.offline import hub_file  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
 def model_env(tmp_path, monkeypatch):
     monkeypatch.setenv("FTF_MODEL_DIR", str(tmp_path / "models"))
-    for var in ("FTF_OFFLINE", "FTF_VIDEO_SPEECH", "FTF_IMAGE_EMBED", "FTF_FACES_REFERENCE"):
+    for var in ("FTF_OFFLINE", "FTF_VIDEO_SPEECH", "FTF_IMAGE_EMBED"):
         monkeypatch.delenv(var, raising=False)
 
     def no_network(*a, **k):
@@ -63,30 +60,20 @@ def fake_weights(monkeypatch):
     monkeypatch.setattr(face_models, "fetch_weights", fetch_weights)
 
 
-@pytest.fixture
-def fake_reference(monkeypatch):
-    def build(dest, manifest=None, keep_images=False):
-        dest.mkdir(parents=True, exist_ok=True)
-        np.save(dest / "embeddings.npy", np.zeros((1, 128), np.float32))
-        (dest / "rows.json").write_text(
-            json.dumps({"manifest_sha": reference.manifest_sha(), "names": ["a"], "titles": ["t"]})
-        )
-        return None
-
-    monkeypatch.setattr(reference, "build", build)
-
-
-def test_prefetch_fills_every_part_and_reports_sizes(fake_hub, fake_weights, fake_reference, tmp_path):
+def test_prefetch_fills_every_weight_part_and_reports_sizes(fake_hub, fake_weights, tmp_path):
     lines: list[str] = []
     items = prefetch.prefetch(tmp_path / "fresh", out=lines.append)
 
     names = [i.name for i in items]
     assert any(n.startswith("text:") and "onnx/tokenizer.json" in n for n in names)
     assert any(n.startswith("image:") and "model.safetensors" in n for n in names)
-    assert sum(n.startswith("faces:") for n in names) == 3  # YuNet, SFace, reference set
+    assert sum(n.startswith("faces:") for n in names) == 2  # YuNet and SFace only
+    assert not any("reference" in n for n in names)  # the reference set is HACK-83's
     assert not any(n.startswith("video:") for n in names)  # speech only with --speech
+    assert len(items) == 7
     assert all(i.size > 0 for i in items)
-    assert lines[-1].startswith(f"total {sum(i.size for i in items) / 2**20:.1f} MB ({len(items)} items)")
+    total = sum(i.size for i in items)
+    assert lines[-1].startswith(f"total {total / 2**20:.1f} MB (7 items)")
     assert all(not local for _, _, local in fake_hub)  # downloads, never local-only
 
 
@@ -96,14 +83,10 @@ def test_prefetch_refuses_under_offline(monkeypatch, tmp_path):
         prefetch.prefetch(tmp_path / "x")
 
 
-def test_missing_names_absent_parts_until_prefetch_fills_them(
-    fake_hub, fake_weights, fake_reference, tmp_path
-):
+def test_missing_names_absent_parts_until_prefetch_fills_them(fake_hub, fake_weights):
     before = prefetch.missing(["text", "image", "faces"])
-    # 2 text files, 3 image files, 2 face weights and the reference set
-    assert len(before) == 8
+    assert len(before) == 7  # 2 text files, 3 image files, 2 face weights
     assert any("onnx/tokenizer.json" in n for n in before)
-    assert any(n.startswith("faces: reference") for n in before)
 
     prefetch.prefetch(None, out=lambda s: None)
     assert prefetch.missing(["text", "image", "faces"]) == []
@@ -116,48 +99,10 @@ def test_offline_hub_files_come_from_cache_only(fake_hub, monkeypatch):
     assert fake_hub == [("org/model", "onnx/model.onnx", True)]
 
 
-def test_reference_copy_from_local_dir_must_match_manifest(tmp_path, monkeypatch):
-    src = tmp_path / "src"
-    src.mkdir()
-    np.save(src / "embeddings.npy", np.zeros((1, 128), np.float32))
-    (src / "rows.json").write_text(json.dumps({"manifest_sha": reference.manifest_sha()}))
-    monkeypatch.setenv("FTF_MODEL_DIR", str(tmp_path / "good"))
-    [dest] = prefetch._fetch_reference(str(src))
-    assert (dest / "rows.json").exists() and (dest / "embeddings.npy").exists()
-
-    bad = tmp_path / "bad"
-    bad.mkdir()
-    np.save(bad / "embeddings.npy", np.zeros((1, 128), np.float32))
-    (bad / "rows.json").write_text(json.dumps({"manifest_sha": "0" * 12}))
-    monkeypatch.setenv("FTF_MODEL_DIR", str(tmp_path / "other"))
-    with pytest.raises(RuntimeError, match="manifest"):
-        prefetch._fetch_reference(str(bad))
-    cache = tmp_path / "other" / "faces-reference"
-    leftovers = list(cache.glob("*")) if cache.exists() else []
-    assert leftovers == []  # no half-written set is left behind
-
-
-def test_reference_from_gcs_runs_gcloud_rsync(tmp_path, monkeypatch):
-    seen: list[list[str]] = []
-
-    def fake_run(cmd, check):
-        seen.append(cmd)
-        dest = Path(cmd[-1])
-        np.save(dest / "embeddings.npy", np.zeros((1, 128), np.float32))
-        (dest / "rows.json").write_text(json.dumps({"manifest_sha": reference.manifest_sha()}))
-        return None
-
-    monkeypatch.setattr(prefetch.subprocess, "run", fake_run)
-    monkeypatch.setenv("FTF_MODEL_DIR", str(tmp_path / "m"))
-    prefetch._fetch_reference("gs://bucket/outputs/reference")
-    assert seen[0][:4] == ["gcloud", "storage", "rsync", "-r"]
-    assert seen[0][4] == "gs://bucket/outputs/reference/"
-
-
 def test_speech_part_only_with_flag_or_env(monkeypatch):
     assert [p.name for p in prefetch.parts(["video"])] == []
     [speech] = prefetch.parts(["video"], speech=True)
-    assert speech.name.startswith("video: speech") and "faster-whisper" in speech.name
+    assert speech.name.startswith("video: speech") and "Systran" in speech.name
     monkeypatch.setenv("FTF_VIDEO_SPEECH", "1")
     assert len(prefetch.parts(["video"])) == 1
 

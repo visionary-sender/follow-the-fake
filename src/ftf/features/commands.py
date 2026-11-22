@@ -36,18 +36,13 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     sub = p.add_subparsers(dest="action", metavar="{prefetch}")
     pf = sub.add_parser(
         "prefetch",
-        help="download the models into FTF_MODEL_DIR (text, image, faces; speech with --speech)",
+        help="download the model weights into FTF_MODEL_DIR (speech with --speech)",
     )
     pf.add_argument(
         "--model-dir",
         type=Path,
         default=None,
         help="directory to fill (default: FTF_MODEL_DIR or ~/.cache/ftf/models)",
-    )
-    pf.add_argument(
-        "--reference-from",
-        default=None,
-        help="face reference set from a local directory or gs:// prefix instead of Wikimedia",
     )
     pf.add_argument(
         "--speech", action="store_true", help="also fetch the faster-whisper speech model (video)"
@@ -65,7 +60,7 @@ def _families(spec: Optional[str]) -> Optional[list[str]]:
 
 def run(args: argparse.Namespace) -> int:
     if args.action == "prefetch":
-        models.prefetch(args.model_dir, reference_from=args.reference_from, speech=args.speech)
+        models.prefetch(args.model_dir, speech=args.speech)
         return 0
     if args.out is None:
         raise SystemExit("--out is required")

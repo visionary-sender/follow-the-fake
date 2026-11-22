@@ -1,12 +1,15 @@
-"""Model set for offline runs: ``ftf features prefetch`` fills ``FTF_MODEL_DIR`` with what the families load.
+"""Model weights for offline runs: ``ftf features prefetch`` fills ``FTF_MODEL_DIR``.
 
-Parts (each is one file or one directory, shown with its size):
+Parts (each is one file, shown with its size):
 
 * text: ``intfloat/multilingual-e5-small`` ONNX graph and tokenizer (``text.embed.spec()``);
 * image: ``google/siglip2-base-patch16-224`` processor config and weights at the pinned revision;
-* faces: YuNet and SFace weights (``faces.models``) and the reference set of public figures, built
-  from Wikimedia with the committed manifest, or copied from a local directory or ``gs://`` prefix;
+* faces: YuNet and SFace weights (``faces.models``);
 * video (optional): the faster-whisper speech model, only with ``--speech`` or ``FTF_VIDEO_SPEECH=1``.
+
+The face reference set is not part of prefetch (it lives in its own bucket, HACK-83). With
+``FTF_OFFLINE=1`` and no reference directory the faces family still emits ``face_embedding``
+and ``brand``, just no ``person_face``.
 
 ``missing(families)`` checks the same parts with no network, so ``ftf features`` under
 ``FTF_OFFLINE=1`` can name what is absent before it starts. Downloaders are imported inside the
@@ -16,10 +19,7 @@ functions, so importing this module needs only numpy.
 from __future__ import annotations
 
 import contextlib
-import json
 import os
-import shutil
-import subprocess
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -53,6 +53,14 @@ def _size(path: Path) -> int:
     return path.stat().st_size
 
 
+def _present(check: Callable[[], object]) -> bool:
+    try:
+        check()
+    except Exception:  # not cached (or a broken cache entry): the caller reports it as missing
+        return False
+    return True
+
+
 def _hub_part(family: str, repo: str, revision: Optional[str], filename: str) -> Part:
     rev = (revision or "main")[:7]
     return Part(
@@ -63,20 +71,11 @@ def _hub_part(family: str, repo: str, revision: Optional[str], filename: str) ->
     )
 
 
-def _present(check: Callable[[], object]) -> bool:
-    try:
-        check()
-    except Exception:  # not cached (or a broken cache entry): the caller reports it as missing
-        return False
-    return True
-
-
 def _text_parts() -> list[Part]:
     from ftf.features.text.embed import spec
 
     s = spec()
-    files = [s.onnx_file, "onnx/tokenizer.json"]
-    return [_hub_part("text", s.repo, s.revision, f) for f in files]
+    return [_hub_part("text", s.repo, s.revision, f) for f in (s.onnx_file, "onnx/tokenizer.json")]
 
 
 def _image_parts() -> list[Part]:
@@ -106,101 +105,36 @@ def _face_weight_parts() -> list[Part]:
     ]
 
 
-def _reference_dir() -> Path:
-    from ftf.features.faces import reference
-
-    return model_dir() / "faces-reference" / reference.manifest_sha()
-
-
-def _reference_present() -> bool:
-    env = os.environ.get("FTF_FACES_REFERENCE")
-    dirs = ([Path(env)] if env else []) + [_reference_dir()]
-    return any(_complete(d) for d in dirs)
-
-
-def _complete(d: Path) -> bool:
-    return (d / "rows.json").exists() and (d / "embeddings.npy").exists()
-
-
-def _fetch_reference(source: Optional[str]) -> list[Path]:
-    """Fill the sha-keyed cache directory. Built or copied into a sibling ``.part`` directory and
-    renamed into place only after the manifest check, so an interrupted run leaves no half set."""
-    from ftf.features.faces import reference
-
-    dest = _reference_dir()
-    sha = reference.manifest_sha()
-    if _complete(dest):
-        return [dest]
-    part = dest.with_name(dest.name + ".part")
-    shutil.rmtree(part, ignore_errors=True)
-    part.mkdir(parents=True)
-    try:
-        if source is None:
-            reference.build(part, reference.MANIFEST_PATH, keep_images=False)
-        elif source.startswith("gs://"):
-            prefix = source.rstrip("/") + "/"
-            subprocess.run(["gcloud", "storage", "rsync", "-r", prefix, str(part)], check=True)
-        else:
-            shutil.copytree(source, part, dirs_exist_ok=True)
-        manifest = None
-        if (part / "rows.json").exists():
-            manifest = json.loads((part / "rows.json").read_text(encoding="utf-8")).get("manifest_sha")
-        if manifest != sha or not (part / "embeddings.npy").exists():
-            raise RuntimeError(f"reference set from {_source_name(source)} does not match manifest {sha}")
-    except Exception:
-        shutil.rmtree(part, ignore_errors=True)
-        raise
-    shutil.rmtree(dest, ignore_errors=True)
-    os.replace(part, dest)
-    return [dest]
-
-
-def _source_name(source: Optional[str]) -> str:
-    return "Wikimedia" if source is None else source
-
-
-def _reference_part(source: Optional[str]) -> Part:
-    return Part(
-        name=f"faces: reference set from {_source_name(source)}",
-        family="faces",
-        fetch=lambda: _fetch_reference(source),
-        present=_reference_present,
-    )
-
-
 def _speech_part() -> Part:
     from ftf.features.video import SPEECH_MODEL
 
-    def root() -> Path:
-        return model_dir() / "faster-whisper"
+    def root() -> str:
+        return str(model_dir() / "faster-whisper")
 
     def fetch() -> list[Path]:
         from faster_whisper.utils import download_model
 
-        return [Path(download_model(SPEECH_MODEL, cache_dir=str(root())))]
+        return [Path(download_model(SPEECH_MODEL, cache_dir=root()))]
 
     def check() -> None:
         from faster_whisper.utils import download_model
 
-        download_model(SPEECH_MODEL, cache_dir=str(root()), local_files_only=True)
+        download_model(SPEECH_MODEL, cache_dir=root(), local_files_only=True)
 
-    def present() -> bool:
-        return _present(check)
-
-    return Part(name=f"video: speech {SPEECH_MODEL}", family="video", fetch=fetch, present=present)
+    return Part(
+        name=f"video: speech {SPEECH_MODEL}",
+        family="video",
+        fetch=fetch,
+        present=lambda: _present(check),
+    )
 
 
 def _speech_enabled() -> bool:
     return os.environ.get("FTF_VIDEO_SPEECH", "").lower() in {"1", "true", "yes"}
 
 
-def parts(
-    families: Optional[Iterable[str]] = None,
-    *,
-    reference_from: Optional[str] = None,
-    speech: bool = False,
-) -> list[Part]:
-    """Every part the given families load (all four when ``families`` is None).
+def parts(families: Optional[Iterable[str]] = None, *, speech: bool = False) -> list[Part]:
+    """Every weight part the given families load (all four when ``families`` is None).
 
     The speech model is included with ``speech=True`` or when ``FTF_VIDEO_SPEECH`` is on."""
     wanted = set(families) if families is not None else {"text", "image", "faces", "video"}
@@ -210,7 +144,7 @@ def parts(
     if "image" in wanted and os.environ.get("FTF_IMAGE_EMBED", "1") != "0":
         out += _image_parts()
     if "faces" in wanted:
-        out += _face_weight_parts() + [_reference_part(reference_from)]
+        out += _face_weight_parts()
     if "video" in wanted and (speech or _speech_enabled()):
         out.append(_speech_part())
     return out
@@ -235,17 +169,17 @@ def _model_dir_env(dest: Optional[Path]) -> Iterator[None]:
 def prefetch(
     dest: Optional[Path] = None,
     *,
-    reference_from: Optional[str] = None,
     speech: bool = False,
     out: Callable[[str], None] = print,
 ) -> list[Item]:
-    """Download every part into ``dest`` (default ``FTF_MODEL_DIR``), print each with its size and the total."""
+    """Download every weight part into ``dest`` (default ``FTF_MODEL_DIR``); print each with its
+    size and the total."""
     if offline():
         raise SystemExit("ftf features prefetch downloads the models: unset FTF_OFFLINE first")
     items: list[Item] = []
     with _model_dir_env(dest):
         target = model_dir()
-        for part in parts(reference_from=reference_from, speech=speech):
+        for part in parts(speech=speech):
             size = sum(_size(p) for p in part.fetch())
             items.append(Item(part.name, size))
             out(f"{part.name:<78} {size / 2**20:9.1f} MB")
@@ -255,5 +189,5 @@ def prefetch(
 
 
 def missing(families: Iterable[str]) -> list[str]:
-    """Names of the parts the families need that are not in ``model_dir()``; never downloads."""
+    """Names of the weight parts the families need that are not in ``model_dir()``; never downloads."""
     return [p.name for p in parts(list(families)) if not p.present()]
