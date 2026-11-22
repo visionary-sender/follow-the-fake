@@ -108,12 +108,14 @@ def test_cli_link_and_assign(tmp_path, monkeypatch):
     from ftf import cli
     from ftf.linking import backend as backend_mod
 
+    # The stub replaces Backend.from_dataset, which only the linear scan (--linear) calls; the
+    # indexed path extends the real ledger context (covered in test_index.py).
     monkeypatch.setattr(backend_mod.Backend, "from_dataset", classmethod(lambda cls, ds: stub_backend(ds)))
     a = [simple(f"a{i}", (L.tenant, "T1"), (L.landing, "LA"), (L.kit, "K1")) for i in range(2)]
     (tmp_path / "in.json").write_text(dataset(*a).to_json())
     (tmp_path / "new.json").write_text(dataset(simple("n", (L.tenant, "T1"), (L.landing, "LA"), (L.kit, "K1")), simple("m", (L.kit, "K-other"), (L.tenant, "T8"), (L.landing, "L8"))).to_json())
     assert cli.main(["link", str(tmp_path / "in.json"), "-o", str(tmp_path / "linked.json")]) == 0
-    assert cli.main(["assign", str(tmp_path / "linked.json"), str(tmp_path / "new.json"), "-o", str(tmp_path / "out.json")]) == 0
+    assert cli.main(["assign", str(tmp_path / "linked.json"), str(tmp_path / "new.json"), "-o", str(tmp_path / "out.json"), "--linear"]) == 0
     out = Dataset.from_json((tmp_path / "out.json").read_bytes())
     decisions = {a.incident_id: a.decision for a in out.assignments}
     assert decisions == {"n": Decision.assign, "m": Decision.new}
@@ -221,7 +223,7 @@ def test_cli_assign_handles_new_incidents_duplicating_each_other(tmp_path, monke
     second = simple("n1", (L.tenant, "T8"), (L.landing, "L8"), (L.kit, "K8"))
     (tmp_path / "new.json").write_text(Dataset.model_construct(contract_version="0.1.0", name="n", description=None, incidents=[first, second], links=[], campaigns=[], assignments=[]).model_dump_json())
     assert cli.main(["link", str(tmp_path / "in.json"), "-o", str(tmp_path / "linked.json")]) == 0
-    assert cli.main(["assign", str(tmp_path / "linked.json"), str(tmp_path / "new.json"), "-o", str(tmp_path / "out.json")]) == 0
+    assert cli.main(["assign", str(tmp_path / "linked.json"), str(tmp_path / "new.json"), "-o", str(tmp_path / "out.json"), "--linear"]) == 0
     out = Dataset.from_json((tmp_path / "out.json").read_bytes())
     decisions = {a.incident_id: a.decision for a in out.assignments}
     assert decisions == {"n1": Decision.new, "n2": Decision.review}  # a duplicate of a capture in no campaign
