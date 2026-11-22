@@ -65,3 +65,6 @@ plans/
 notes/
 *.plan.md
 *.local.md
+
+# Face reference images (HACK-83): built on a VM, live in the bucket, never in git
+**/face-reference/

@@ -33,25 +33,34 @@ screenshots are scanned in overlapping square tiles so faces keep their size (at
 and detections duplicated in the overlaps are merged. Each face is aligned on its five landmarks
 and embedded with SFace.
 
-**Reference set.** `src/ftf/features/faces/reference_manifest.json` lists the people
-(name, Wikidata id) and for each the Wikimedia Commons images used, with source page,
-author, licence and licence URL. Only public domain, CC0 and CC BY are accepted (no BY-SA,
-NC or ND; `licence_ok`, enforced again at build time). The manifest was drafted by
-`python -m ftf.features.faces.reference select`: it takes the person's Wikidata portrait (P18)
-and the files of their Commons category, keeps the licence-clean JPEG/PNG files with exactly one
-clear face, and keeps up to 5 whose face agrees with the Wikidata portrait (or the medoid). No
-organiser image is ever used as a reference. Images and embeddings are not in git:
+**Reference set.** `person_face` compares each face with a reference set of public figures that
+scam ads impersonate. The set is built once, on a VM, from a names file that lives outside git
+(`python -m ftf.features.faces.reference build --names <names.txt> --out <dir>`). For each name the
+builder takes the Wikidata human (`Name=Qid` pins an ambiguous name), collects that person's
+portraits (Wikidata P18 and the Commons category), keeps the JPEG and PNG files with exactly one
+clear face (YuNet, score at least 0.9, at least 60 px) and keeps up to five whose face agrees with
+the person's portrait. Only Wikidata and Wikimedia Commons are contacted. No organiser creative
+is ever a reference, and no face is cropped from one.
 
-- built on first use from the manifest (downloads ~500 px Commons thumbnails, embeds the
-  largest face) into `$FTF_MODEL_DIR/faces-reference/<manifest sha>/`;
-- or read from a prebuilt copy given by `FTF_FACES_REFERENCE=<dir>`. Ours is at
-  `gs://follow-the-fake-data/outputs/visual/hack-15/reference/` (`embeddings.npy`, `rows.json`).
-- `FTF_OFFLINE=1` skips the build; if the build fails (no network, Wikimedia throttling) the
-  family still emits `face_embedding` and `brand`, just no `person_face`.
+The set is a directory: `manifest.json` (per image: name, source URL, file, licence, SHA-256),
+`images/`, `embeddings.npy` (SFace, one row per image, precomputed) and `build-report.json` (per
+name: Wikidata id, candidates, images kept, or the reason a name was not found). It is not in git
+and not in the container image. It lives in `gs://follow-the-fake-data/outputs/visual/face-reference/`.
+At run time:
 
-Build it ahead of time with `python -m ftf.features.faces.reference build` (e.g. in a container
-build step). Wikimedia throttles bulk thumbnail downloads; the builder paces itself and honours
-`Retry-After`.
+- `FTF_FACE_REFERENCE=<dir>` points at the directory. Default: `<model_dir()>/face-reference`
+  (`$FTF_MODEL_DIR/face-reference`; in the jury image `/opt/ftf-models/face-reference`). The old name
+  `FTF_FACES_REFERENCE` is still read for one release, with a deprecation note on stderr.
+- Layout the loader reads: `manifest.json` (`images`: name, source, file, licence, sha256; `file` is
+  relative to the directory, e.g. `images/<hash>.jpg`), `images/`, `embeddings.npy` (row i for
+  `images[i]`). The bucket folder `gs://follow-the-fake-data/outputs/visual/face-reference/` holds
+  exactly this layout, so it copies as-is into the image.
+- if `manifest.json` is missing, faces are still embedded (`face_embedding`), no `person_face` is
+  emitted, and one note goes to stderr;
+- if `embeddings.npy` is missing, the loader embeds the images itself (slower, same result).
+
+The git tree keeps only `reference_manifest.example.json` (invented names on `.example` URLs) as
+the format reference. Nothing is downloaded at scan time.
 
 **Brands.** A gazetteer in `brands.py` of about 50 Polish news portals, TV and radio, banks,
 large companies and public institutions that scam pages impersonate (general public knowledge;
@@ -75,7 +84,7 @@ Logo matching (no text) is not implemented; see limits.
 | opencv-python-headless | PyPI, `features` extra | Apache-2.0 (bundled FFmpeg LGPL-2.1, dynamically linked) | ~50 MB wheel |
 | Pillow | PyPI, `features` extra | MIT-CMU (HPND) | ~4.5 MB wheel |
 | Tesseract + `pol`, `eng` data | Debian packages (optional, OCR fallback) | Apache-2.0 | ~20 MB |
-| Reference images | Wikimedia Commons, per image in the manifest | PD / CC0 / CC BY (attribution in the manifest) | 2.7 MB for the 24 thumbnails |
+| Reference images | Wikimedia Commons and Wikidata, per image in the manifest (source URL and licence recorded per image; not in git) | per image | in the bucket, not in git |
 
 Weights download on first use into `ftf.features.common.model_dir()` and are checked against
 pinned SHA-256 digests.
@@ -94,19 +103,34 @@ Measured on `ftf-visual` (Debian, e2-standard-8: 8 vCPUs, no GPU), with
 | CPU per image, faces only | about 0.26 s: 107.6 s CPU (user 93.2 s, sys 14.4 s) over the 420 decodable images, including model and reference loading; 52.6 s wall |
 | CPU per image, earlier faces-only run | 0.21 s on 394 organiser creatives (528 faces) |
 
-Reference set: 11 people and 24 images, with licences CC BY 2.0, CC BY 3.0, CC BY 3.0 pl,
-CC BY 4.0, CC0 and public domain. The embeddings take 12 KB (`embeddings.npy`, 24 × 128 float32).
-The prebuilt copy is at `gs://follow-the-fake-data/outputs/visual/hack-15/reference/`.
+Re-run on the organiser dataset (34 captures, 768 artefacts), with the reference set of 33 people and
+96 images (`FTF_FACE_REFERENCE`, from the bucket). Before is the old organiser run; after is
+`--families text,faces`, same dataset, same code, new reference:
+
+| Measure | Before | After |
+|---|---|---|
+| Captures with a face | 27 | 26 |
+| Faces (`face_embedding`) | 626 | 526 |
+| Captures with a named `person_face` | 27 | 26 |
+| Named `person_face` indicators | 626 | 526 |
+| Best cosine, p5 / p50 / p95 | 0.138 / 0.252 / 0.546 | 0.192 / 0.296 / 0.717 |
+| Best cosine ≥ 0.363 (SFace same-person cut-off) | 15.5 % | 26.8 % |
+
+Best-cosine histogram (count of faces): before `<0.2` 137, `0.2–0.3` 317, `0.3–0.363` 75, `0.363–0.4` 26,
+`0.4–0.5` 20; after `<0.2` 31, `0.2–0.3` 244, `0.3–0.363` 110, `0.363–0.4` 26, `0.4–0.5` 30.
+
+Text family and faces, CPU: about 1 min wall on `ftf-visual` (2 min 30 s CPU) for the 34 captures.
 
 ## Known limits
 
-- **Reference coverage.** Only people with licence-clean, single-face Commons photos are in the
-  set. The draft kept at most five images per person. Tomasz Lis and Adam Glapiński were skipped: the
-draft found no licence-clean, single-face Commons portrait for either. Wikimedia throttling
-(HTTP 429) cut the draft run short for some candidates, so the set is smaller than it could be.
-A face of anyone else of anyone else still gets a `person_face` (its nearest reference,
-  with a low cosine) and, more usefully, a `face_embedding` that matches the same face in other
-  captures.
+- **Reference coverage.** The set covers 33 public figures (96 portraits): the figures named in the
+  organiser cases plus people often impersonated in Polish investment ads. Two of the 35 names had
+  no single-face portrait on Wikimedia Commons or Wikidata and are not in the set. A person outside
+  the set still gets a `face_embedding`, which matches the same face across captures, and a
+  `person_face` to the nearest reference person with a low cosine.
+- **Reference images from the open web.** Portraits come from Wikidata and Wikimedia Commons with
+  their source URL and licence recorded per image in the manifest (no licence filter applied: the
+  owner's decision, HACK-83). The manifest is in git; the images are not, and live in the bucket.
 - **Small faces.** YuNet is trained for faces of about 10–300 px; avatars under ~20 px and
   heavily stylised or AI-generated faces are missed or embed poorly.
 - **Brands without text.** A brand shown only as a logo image (no OCR-readable name, no title)
