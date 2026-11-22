@@ -15,11 +15,14 @@ Covers the runtime dependencies and the `app`, `dev` and `fetch` extras of `ftf`
 | certifi | MPL-2.0 (named exception, unmodified CA bundle; see README Licence section) |
 | charset-normalizer | MIT |
 | click | BSD-3-Clause |
+| contourpy | BSD License |
 | ctranslate2 | MIT |
+| cycler | BSD License |
 | datasketch | MIT License |
 | faster-whisper | MIT License |
 | filelock | MIT |
 | flatbuffers | Apache Software License |
+| fonttools | MIT |
 | fsspec | BSD-3-Clause |
 | greenlet | MIT AND PSF-2.0 |
 | h11 | MIT License |
@@ -34,9 +37,11 @@ Covers the runtime dependencies and the `app`, `dev` and `fetch` extras of `ftf`
 | jinja2 | BSD License |
 | jsonschema | MIT |
 | jsonschema-specifications | MIT |
+| kiwisolver | BSD License |
 | lxml | BSD-3-Clause |
 | markdown-it-py | MIT License |
 | markupsafe | BSD-3-Clause |
+| matplotlib | Python Software Foundation License |
 | mdurl | MIT License |
 | mpmath | BSD License |
 | narwhals | MIT |
@@ -57,6 +62,7 @@ Covers the runtime dependencies and the `app`, `dev` and `fetch` extras of `ftf`
 | pydeck | Apache License 2.0 |
 | pyee | MIT License |
 | pygments | BSD-2-Clause |
+| pyparsing | MIT |
 | pytest | MIT |
 | python-dateutil | BSD-3-Clause |
 | python-multipart | Apache-2.0 |
