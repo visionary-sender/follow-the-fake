@@ -71,6 +71,8 @@ def fetch_weights(w: Weights) -> Path:
     p = d / w.filename
     if p.exists() and p.stat().st_size == w.size:
         return p
+    if os.environ.get("FTF_OFFLINE") == "1":
+        raise OSError(f"{w.id}: not in {d} and FTF_OFFLINE=1, so not downloaded")
     d.mkdir(parents=True, exist_ok=True)
     tmp = d / f".{w.filename}.part"
     req = urllib.request.Request(w.url, headers={"User-Agent": USER_AGENT})

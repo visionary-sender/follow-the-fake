@@ -143,3 +143,28 @@ def test_real_engine_on_blank_and_tall_image():
     eng = models.FaceEngine()
     assert eng.faces(np.full((480, 640, 3), 255, np.uint8)) == []
     assert eng.faces(np.full((6000, 1280, 3), 128, np.uint8)) == []
+
+
+def test_missing_engine_skips_faces_and_keeps_brands(tmp_path, monkeypatch, capsys):
+    def no_cv2():
+        raise ImportError("No module named 'cv2'")
+
+    monkeypatch.setattr(faces, "_engine", no_cv2)
+    assert faces._engine_or_none() is None
+    p = tmp_path / "frame.png"
+    p.write_bytes(b"x")
+    feats = faces.features_for_image(p, text="InPost")
+    assert [f.kind for f in feats] == ["brand"]
+    assert "no face engine" in capsys.readouterr().err
+
+
+def test_offline_weights_are_not_downloaded(tmp_path, monkeypatch):
+    monkeypatch.setenv("FTF_OFFLINE", "1")
+    monkeypatch.setattr(models, "model_dir", lambda: tmp_path)
+
+    def no_network(*a, **k):
+        raise AssertionError("download attempted while FTF_OFFLINE=1")
+
+    monkeypatch.setattr(models.urllib.request, "urlopen", no_network)
+    with pytest.raises(OSError, match="FTF_OFFLINE"):
+        models.fetch_weights(models.YUNET)

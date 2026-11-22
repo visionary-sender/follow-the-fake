@@ -58,6 +58,17 @@ def _engine():
     return _engine_cache
 
 
+def _engine_or_none():
+    """The face engine, or None when it cannot start (cv2 missing, weights absent offline, a
+    failed download or a checksum mismatch). Faces are then skipped; brands still run."""
+    try:
+        return _engine()
+    except (ImportError, OSError, RuntimeError) as e:
+        print(f"ftf features: faces: no face engine ({type(e).__name__}: {e}); no face indicators",
+              file=sys.stderr)
+        return None
+
+
 def _face_features(faces, ref) -> list[Feature]:
     from ftf.features.faces.models import EMBEDDING_MODEL
 
@@ -126,7 +137,8 @@ def features_for_image(path: Path, text: Optional[str] = None, ocr: bool = True)
     from ftf.features.faces.reference import load_reference
 
     path = Path(path)
-    feats = _face_features(_engine().faces(load_bgr(path)), load_reference())
+    engine = _engine_or_none()
+    feats = [] if engine is None else _face_features(engine.faces(load_bgr(path)), load_reference())
     if text is None and ocr:
         text = ocr_text(path)
     if text:
@@ -138,13 +150,13 @@ def apply(ds: Dataset, raw_root: Path, out_dir: Path) -> Dataset:
     from ftf.features.faces.models import load_bgr
     from ftf.features.faces.reference import load_reference
 
-    engine = _engine()
-    ref = load_reference()
+    engine = _engine_or_none()
+    ref = load_reference() if engine is not None else None
     w = IndicatorWriter(ds, out_dir, EXTRACTOR)
     stats: dict = {"images": 0, "faces": 0, "errors": [], "cpu_s": [], "wall_s": [], "ocr_fallback": 0}
 
-    # Faces on every still image.
-    for inc, cap, art in iter_artefacts(ds, IMAGE_TYPES, IMAGE_SUFFIXES):
+    # Faces on every still image (none when the engine is unavailable).
+    for inc, cap, art in (iter_artefacts(ds, IMAGE_TYPES, IMAGE_SUFFIXES) if engine is not None else ()):
         c0, t0 = time.process_time(), time.perf_counter()
         try:
             faces = engine.faces(load_bgr(resolve(raw_root, art)))
