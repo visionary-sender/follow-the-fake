@@ -127,7 +127,7 @@ def collect(*, since: date, client: Client, project: Optional[str], max_total: i
             {"name": "limit", "parameterType": {"type": "INT64"}, "parameterValue": {"value": str(max_total + len(skip))}},
         ],
         "maximumBytesBilled": str(MAX_BYTES_BILLED),
-        "labels": {"ftf-issue": "hack-20"},
+        "labels": {"ftf-component": "scanner"},
         "timeoutMs": 60000,
     }
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
