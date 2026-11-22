@@ -488,16 +488,19 @@ The offline package is an AES-256 encrypted 7z file. The link does not expire, a
 ```bash
 curl -LO <PACKAGE_LINK>
 7z x ftf-offline-*.7z   # asks for the password: <PASSWORD>
-docker run --network none -v "$PWD/ftf-offline-package:/data/package:ro" -e FTF_PACKAGE=/data/package -p 127.0.0.1:8501:8501 <image>
+# the app, offline: open http://127.0.0.1:8501
+docker run --rm -e FTF_OFFLINE=1 -v "$PWD/ftf-offline-package:/data/package:ro" -e FTF_PACKAGE=/data/package -p 127.0.0.1:8501:8501 <image>
+# the CLI with no network at all
+docker run --rm --network none -v "$PWD/ftf-offline-package:/data/package:ro" -e FTF_PACKAGE=/data/package <image> analyze <INPUT>
 ```
 
 The package holds the campaign base, the enrichment cache, the models, the face reference set and the brand stop-list. `FTF_PACKAGE` support is coming in HACK-92; the command above is the intended form.
 
-With `--network none` the run makes no network calls. Enrichment answers come from the cache in the package, and a lookup that is not cached is recorded as `unknown`.
+Docker cannot publish the app's port from a container started with `--network none`, so the app runs with `FTF_OFFLINE=1` instead: it makes no network calls. The CLI line shows the strict form, with no network device at all. Enrichment answers come from the cache in the package, and a lookup that is not cached is recorded as `unknown`.
 
 ### Online, with the base bundle
 
-With internet access the same image serves the app, using the bundle as the base and live lookups only when asked for:
+With internet access the same image serves the app. Lookups are online by default and fall back to the cache in the package when a lookup fails or the network is down; each result says which source it used (online, offline cache, mixed or no answer):
 
 ```bash
 docker run --rm -p 127.0.0.1:8501:8501 -v "$PWD/base-bundle:/base:ro" ftf
