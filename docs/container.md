@@ -135,7 +135,7 @@ makes no network requests.
 
 On a cloud VM the same image runs with `--network none` or `-e FTF_OFFLINE=1`: analyze and
 enrichment make no lookups there. `ftf fetch` and the scanner do not read `FTF_OFFLINE`; live fetching
-stays off the build VM by rule.
+stays off the cloud VM by rule.
 
 ## Resources
 

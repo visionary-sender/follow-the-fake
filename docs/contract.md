@@ -66,7 +66,7 @@ major version is 0, a **minor** bump is breaking: renamed or removed fields, cha
 members, tighter invariants. A **patch** bump is additive, such as a new optional field or a new indicator `kind` (kinds are
 free snake_case strings). New code reads older documents of the same `0.MINOR`. Unknown fields
 are rejected, so read a newer-patch document with code at least that new. Any other version
-fails validation. v0.1 is frozen. Propose changes to the maintainers
+fails validation. v0.1 is frozen. Propose changes
 before editing the models.
 
 ## Fixture v0 (private; not in git)

@@ -105,7 +105,7 @@ pages yield 0 indicators.
 
 ## Sampling and biases
 
-**Scam side (batch 0).** The scanner ran for ads started in a recent window:
+**Scam side (batch 0).** The scanner ran for ads started since <YYYY-MM-DD>:
 
 - **Meta Ad Library**: country PL, all ads, sorted by impressions, 4 keyword queries:
   "platforma inwestycyjna", "pasywny dochód", and two public figures' names. Meta throttled after

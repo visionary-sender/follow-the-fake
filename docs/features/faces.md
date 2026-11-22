@@ -137,7 +137,7 @@ Text family and faces, CPU: about 1 min wall on a cloud VM (2 min 30 s CPU) for 
 - **Small faces.** YuNet is trained for faces of about 10–300 px; avatars under ~20 px and
   heavily stylised or AI-generated faces are missed or embed poorly.
 - **Brands without text.** A brand shown only as a logo image (no OCR-readable name, no title)
-  is not found. Logo matching against licensed logo crops was left out.
+  is not found. Logo matching against licensed logo crops was left out for time.
 - **Gazetteer, not a classifier.** A brand named in a fake comment or a "featured in" strip
   counts the same as the impersonated masthead; the `src` and `matches` fields let the linker
   tell the sources apart.

@@ -95,7 +95,7 @@ Scam pages are hostile. The fetcher assumes the page will try to attack the mach
   the internal network with a key that can only run a fixed transfer command, and from there to
   `gs://<DATA_BUCKET>/outputs/fetcher/`. They never pass through a laptop.
 
-### Sandbox VM 
+### Sandbox VM
 
 ```bash
 scripts/sandbox.sh create                 # once: <SANDBOX_VM>, e2-medium, no service account, auto-stop 8 h
@@ -131,7 +131,7 @@ use it, and nothing changes when it is absent.
 ```bash
 scripts/egress.sh up 6                    # workers 1..6 (Warsaw x3, Frankfurt, Eemshaven, Hamina)
 scripts/egress.sh sync                    # code -> /opt/ftf on every worker
-scripts/egress.sh push-list <wb-file> urls.txt <EGRESS_VM>
+scripts/egress.sh push-list <local-file> urls.txt <EGRESS_VM>
 scripts/egress.sh job <EGRESS_VM> r1 -- ftf fetch --list /srv/ftf/inbox/urls.txt --out /srv/ftf/captures/run1/<EGRESS_VM>
 scripts/egress.sh rotate <EGRESS_VM>     # new IP between jobs
 scripts/egress.sh pull run1               # workers -> cloud VM /data/derived/egress/ -> bucket

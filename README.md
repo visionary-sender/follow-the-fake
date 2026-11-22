@@ -263,9 +263,9 @@ With platform ids hidden, the engine finds 11 of 11 campaign pairs, every pair i
 <!-- eval:e1-hidden end -->
 
 <!-- eval:e1-final start -->
-E1 as a method ablation, each row adding one step to the one before:
+E1 across the build history:
 
-| method | campaign pairs found | what is added |
+| build | campaign pairs found | what changed |
 |---|---|---|
 | identifier layers only | 0 of 11 | tracking, kit and infrastructure layers |
 | + content features (faces, images, text) | 4 of 11 | face, image and text layers counted |
@@ -446,7 +446,7 @@ Next steps, ranked by expected gain:
 | 3 | Use nameserver and registrar in the campaign gate | medium to high: they split operator pairs well | low to medium |
 | 4 | Grow the reference base in E7, so later items can join one another | medium: tests the realistic case | low |
 | 5 | Test shared certificates once a certificate source answers reliably | medium: untested today | medium, depends on the source |
-| 6 | Get a licence answer for reading Ad Library pages and for the face reference set | high for a real deployment, no effect on the score | low; needs a legal opinion |
+| 6 | Get a licence answer for reading Ad Library pages and for the face reference set | high for a real deployment, no effect on the score | low; depends on a licence answer |
 | 7 | Re-run the evaluation on a fresh corpus; keep the evaluation blocks replaceable | medium: guards against overfitting | low |
 
 ## 4. How to run the demo
@@ -460,8 +460,8 @@ The offline package is an AES-256 encrypted 7z file. The link does not expire, a
 1.69 GB; sha256 `20ecf2e245b61645d7d5e15baefbdbf10f109f66b659e737b50a2a7229dd5dde` (check with `sha256sum`). `7z x <file>` asks for the password and unpacks to `ftf-offline-package/`.
 
 ```bash
-curl -LO https://storage.googleapis.com/ftf-pkg-9d5a7a89ee6a4981/ftf-offline-6de92251feecb7ff82f64098.7z
-7z x ftf-offline-6de92251feecb7ff82f64098.7z   # asks for the password: <PASSWORD>
+curl -LO <PACKAGE_LINK>
+7z x ftf-offline-*.7z   # asks for the password: <PASSWORD>
 # the app, offline: open http://127.0.0.1:8501
 docker run --rm -e FTF_OFFLINE=1 -v "$PWD/ftf-offline-package:/data/package:ro" -e FTF_PACKAGE=/data/package -p 127.0.0.1:8501:8501 <image>
 # the CLI with no network at all

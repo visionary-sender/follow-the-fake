@@ -139,7 +139,7 @@ Coverage run: the ingestion module's organiser dataset (`outputs/ingest/organise
 - Screen recordings are detected by file name. A renamed recording is treated as an ad video,
   which would emit its duration and screen resolution as `video_meta`.
 - Keyframes of a screen recording include the browser and OS chrome of the analyst's phone.
-  The still families see that too; masking it is left to the image features.
+  The still families see that too; masking it is left to the still-image families.
 - The `.m3u8` playlists of saved HLS videos are not followed (on purpose). Each `.ts` segment is
   handled as its own short video.
 - The scene threshold and grid are tuned on the three organiser videos only.
@@ -155,4 +155,4 @@ Coverage run: the ingestion module's organiser dataset (`outputs/ingest/organise
   organiser videos are under 5 minutes, so nothing is cut today); rotation side data is not
   applied to `resolution` / `screen_size`.
 - Container: Debian's ffmpeg package is a GPL build. It is called as a separate program, not
-  linked, but the demo has two options: ship it, or build an LGPL-only variant.
+  linked, but the two options are to ship it or to build an LGPL-only variant, and neither is chosen yet.

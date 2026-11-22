@@ -4,7 +4,7 @@ The image built from [`Dockerfile`](../Dockerfile) on `main`. Only what is in th
 image counts. Tools used only to build or collect data are not covered.
 This page lists what the image carries, with licences and usage limits. The Python package table
 is generated: [`LICENSES-THIRD-PARTY.md`](../LICENSES-THIRD-PARTY.md) (`scripts/vm.sh licences`,
-checked by the licence test). Licences were last checked against the current image.
+checked by the licence test). Licences were checked on <YYYY-MM-DD>.
 
 ## 1. Python packages
 
@@ -18,7 +18,7 @@ Base: `python:3.11-slim` pinned by digest (`sha256:07d4824036af…`), Debian 13 
 packages. Each keeps its Debian licence, which its `copyright` file states. The slim image has
 these files removed, so read them from the Debian archive. **Not covered by a named exception:**
 the base packages include GPL and LGPL ones (for example `bash` and `coreutils`, GPL-3+, and
-`libc6`, LGPL-2.1+). They are not covered by a named exception and are listed here for review.
+`libc6`, LGPL-2.1+). They are not covered by a named exception, and this is still open.
 
 Added by the Dockerfile's `playwright install --with-deps --only-shell chromium`: 112 Debian
 packages, plus the Chromium headless shell `chromium_headless_shell-1248` and `ffmpeg-1013` under
@@ -31,7 +31,7 @@ Named exception: the Debian system libraries that Chromium needs, installed
 by `playwright install --with-deps`, are allowed in the image even where they are LGPL, MPL or GPL
 in part. They are unmodified Debian packages, and no package is patched. The list is every package
 that the `--with-deps` step adds, as the issue defines it: some are not linked by Chromium itself
-(X11 utilities, fonts, Xvfb). Narrowing the list would be a separate change. This is the only exception
+(X11 utilities, fonts, Xvfb). Narrowing the list is still open. This is the only exception
 for system packages; it does not extend to other packages. In
 `scripts/licences.py` a package is accepted only if `scripts/chromium-debian-packages.tsv` lists
 it with exactly the licence recorded there. `scripts/licences.py --audit-image FILE` checks the
