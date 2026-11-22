@@ -134,6 +134,10 @@ A shared value counts only if it is rare. For each shared value:
 - **discount** is 1.0 bit for a private id (tenant, owner, tracker, pixel) not seen live on both sides, because a copied kit can carry the original's ids.
 - **k** is the number of groups carrying the value. The more groups share it, the less it is worth. A value worth less than 0.5 bit after this step is a **hub**: the ledger shows 0 bits, and it never proposes a pair. A value carried by more than 500 captures never proposes a pair.
 
+![Rank-frequency of indicator values in the background corpus](docs/figures/rarity_rank_frequency.png)
+
+*In a background corpus of 895 captures, 57% of the 10,174 distinct values of the six most common indicator kinds occur on a single capture, while a handful occur on hundreds, which is why evidence is weighted by rarity.*
+
 Within one layer only the best shared value counts. Across layers the bits add, on the assumption that different actors set different layers.
 
 #### What is ignored, and why
