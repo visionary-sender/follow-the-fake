@@ -336,7 +336,7 @@ class CandidateIndex:
             "weights": weights_fingerprint(self.weights),
             "n_captures": self.n_captures,
             "incidents": sorted(self.incidents),
-            "postings": [[k[0].value, k[1], k[2], sorted(v), *self.counts.get(k, (0, 0))] for k, v in sorted(self.postings.items(), key=lambda kv: (kv[0][0].value, kv[0][1], kv[0][2]))],
+            "postings": [[k[0].value, k[1], k[2], sorted(v), *self._count(k)] for k, v in sorted(self.postings.items(), key=lambda kv: (kv[0][0].value, kv[0][1], kv[0][2]))],
             "campaigns": {r.value: [[c.id, list(c.capture_ids)] for c in cs] for r, cs in self.campaigns.items()},
             "stage": {k: v.value for k, v in sorted(self.stage.items())},
             "canonical": {k: v for k, v in sorted(self.canonical.items()) if k != v},
@@ -438,8 +438,14 @@ class CandidateIndex:
 
     def _upper_bits(self, key: Key, relation: Relation) -> float:
         prior = _prior_cap(self.weights, key[1], key[0], relation)
-        groups = self.counts.get(key, (0, 0))[1]
-        return prior - math.log2(max(groups, 1))
+        return prior - math.log2(max(self._count(key)[1], 1))
+
+    def _count(self, key: Key) -> tuple[int, int]:
+        """(incidents, pre-groups) carrying `key`: live from the scoring context when attached
+        (so `add()` never has to refresh them), else as saved."""
+        if self._ctx is not None:
+            return len(self._ctx.index.get(key, ())), self._ctx.groups(key)
+        return self.counts.get(key, (0, 0))
 
     def candidates(
         self,
@@ -526,7 +532,6 @@ class CandidateIndex:
                 flat[name] = old
             else:
                 flat[name] = dict(new)  # recomputed (pre-groups)
-        regrouped = not isinstance(ext.group_of, ChainMap)
         self._ctx = replace(ext, **flat)
         for name in ("live_private", "owners"):
             new, old = getattr(ext_ex, name), getattr(ex, name)
@@ -534,9 +539,6 @@ class CandidateIndex:
         ex.incidents = ext_ex.incidents
         self._added.append(incident)
         self._artefacts |= {a.id for c in incident.captures for a in c.artefacts}
-        base_members = set()
-        for rel_map in self.campaign_of.values():
-            base_members |= rel_map.keys()
         for cap in incident.captures:
             self.canonical[cap.id] = cap.duplicate_of or cap.id
             self.stage[cap.id] = cap.stage
@@ -545,12 +547,9 @@ class CandidateIndex:
         # reach the member's campaigns from now on.
         for ind in incident.indicators:
             canon = self.canonical[ind.capture_id]
-            if canon != ind.capture_id and canon in base_members:
+            if canon != ind.capture_id and any(canon in m for m in self.campaign_of.values()):
                 for key in self._keys([ind]):
                     self.postings.setdefault(key, set()).add(canon)
-        keys = set(self.postings) if regrouped else self.probe_keys(incident)
-        for key in keys:
-            self.counts[key] = (len(self._ctx.index.get(key, ())), self._ctx.groups(key))
         for layer, mods in modalities_of([incident]).items():
             self.modalities.setdefault(layer, set()).update(mods)
         self.incidents.add(incident.id)

@@ -52,7 +52,7 @@ from ftf.contract.models import (
 )
 from ftf.linking.backend import Backend
 from ftf.linking.grouping import CANNOT_LINK_RELATIONS, MIN_LAYERS, SINGLE_VALUED_LAYERS, canonical_map, has_conflict, link_id, qualifies
-from ftf.linking.index import CandidateIndex, cached_index, modalities_of
+from ftf.linking.index import CandidateIndex, cached_index, dataset_digest, modalities_of
 from ftf.linking.ledger import ScoringContext
 from ftf.linking.types import METHOD, PairScore
 from ftf.linking.weights import WeightTable
@@ -111,6 +111,8 @@ def link_incident(
         # The cached index was built with the hand-table ledger; a custom scorer may match on
         # other kinds, so it always takes the linear scan unless an index is passed explicitly.
         index = cached_index(base)
+    if index is not None and index._base is not base and (not index.digest or dataset_digest(base) != index.digest):
+        raise ValueError("the index belongs to another base dataset; build or load it for this one")
     if index is not None:
         return _decide(_indexed_setup(index, incident, relation, backend, weights), incident, relation)
     if any(i.id == incident.id for i in base.incidents):

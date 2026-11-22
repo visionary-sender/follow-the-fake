@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import sys
 
 import numpy as np
@@ -30,23 +31,24 @@ def _split(n: int = 60, seed: int = 7, cut: float = 0.7) -> tuple[Dataset, list]
     return base, new
 
 
+def _plain(x):
+    """Comparable plain form of a context field: mappings and sets recursively, _Values as tuples."""
+    from collections.abc import Mapping, Set
+
+    from ftf.linking.ledger import _Values
+
+    if isinstance(x, _Values):
+        return (_plain(x.ids), _plain(x.display), _plain(x.live))
+    if isinstance(x, Mapping):
+        return {k: _plain(x[k]) for k in set(x)}
+    if isinstance(x, (Set, list, tuple)) and not isinstance(x, str):
+        return type(x)(_plain(v) for v in x) if not isinstance(x, Set) else frozenset(_plain(v) for v in x)
+    return x
+
+
 def _ctx_view(ctx: ScoringContext) -> dict:
-    vals = {
-        c: {k: (dict(v.ids), dict(v.display), set(v.live)) for k, v in ctx.values[c].items()}
-        for c in set(ctx.values)
-    }
-    return {
-        "canonical": dict(ctx.canonical),
-        "incident_of": dict(ctx.incident_of),
-        "indicator_incident": dict(ctx.indicator_incident),
-        "values": vals,
-        "layers": {c: set(ctx.layers[c]) for c in set(ctx.layers)},
-        "index": {k: set(ctx.index[k]) for k in set(ctx.index)},
-        "group_of": dict(ctx.group_of),
-        "n_groups": ctx.n_groups,
-        "n": ctx.n,
-        "n_incidents": ctx.n_incidents,
-    }
+    """Every field of the context (new ones included), except the dataset object itself."""
+    return {f.name: _plain(getattr(ctx, f.name)) for f in dataclasses.fields(ctx) if f.name not in ("ds", "weights")}
 
 
 @pytest.mark.parametrize("seed", [7, 8, 9])
@@ -354,3 +356,11 @@ def test_loading_with_another_weight_table_is_refused(tmp_path):
     CandidateIndex.load(tmp_path / "i.json")  # same table: fine
     with pytest.raises(ValueError, match="weight table"):
         CandidateIndex.load(tmp_path / "i.json", weights=dc_replace(HAND_TABLE, hub_bits=0.7))
+
+
+def test_an_index_for_another_base_is_refused():
+    base, new = _split()
+    other, _ = _split(seed=99)
+    idx = CandidateIndex.build(other, cache=False)
+    with pytest.raises(ValueError, match="another base"):
+        link_incident(base, new[0], index=idx)
