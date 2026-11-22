@@ -123,8 +123,12 @@ Coverage run: Ingestion's organiser dataset (`outputs/ingest/organiser/dataset.j
 
 - **The organiser videos produce keyframe features in the contract format:** yes. All five video
   artefacts gave keyframe indicators with `artefact_id` and `t=<s>s` locators, and the dataset
-  validates. While text, image and faces are not merged, the feature per keyframe is the
-  stopgap `image_phash`. Once they merge, the same keyframes feed them without code changes.
+  validates. With text and image installed (rerun over the ingested organiser dataset, output
+  in `gs://follow-the-fake-data/outputs/visual/hack-16/organiser-v2/`), the 5 videos give 820
+  indicators: 125 keyframes with `image_phash`, `image_dhash`, `image_pdq` and
+  `image_embedding` each, plus 107 `ocr_text`, 96 `text_embedding`, 70 `text_template` and
+  41 `keyword`, 4 `video_meta`, and 2 `screen_size` in the collector layer. Faces join when
+  HACK-15 merges.
 - **Everything runs on CPU in the container, or is clearly optional:** keyframes are CPU-only
   ffmpeg + Pillow (seconds per video). Speech is opt-in by flag. ffmpeg still has to be added
   to the Dockerfile (see the container gap above).
