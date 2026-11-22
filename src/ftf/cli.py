@@ -11,6 +11,7 @@ from collections.abc import Callable, Sequence
 
 from ftf import __version__
 from ftf.enrich.commands import register as register_enrich_domain
+from ftf.evaluate.commands import register as register_eval
 from ftf.features.commands import register as register_features
 from ftf.fetch.cli import register as register_fetch
 from ftf.ingest.commands import register as register_ingest
@@ -27,6 +28,7 @@ COMMANDS: list[Callable[[argparse._SubParsersAction], None]] = [
     register_analyze,
     register_assign,
     register_enrich_domain,
+    register_eval,
     register_export,
     register_features,
     register_fetch,
