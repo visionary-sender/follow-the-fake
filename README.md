@@ -24,8 +24,9 @@ Without `--base`, the commands use `$FTF_BASE`, and otherwise the private fixtur
 
 ## Container
 
-The image contains only the installed `ftf` package (no data, no secrets, no git metadata; the
-build context is default-deny in `.dockerignore`). It runs as a non-root user, and the
+The image contains the installed `ftf` package and the hashed brand stop-list from
+`docker/brand-stoplist/` (see the data section above), but no organiser data, no secrets and no git
+metadata; the build context is default-deny in `.dockerignore`. It runs as a non-root user, and the
 entry point is `ftf`. Building needs internet access, because pip and apt fetch the dependencies.
 The image is 1.63 GB and includes Playwright's headless Chromium with its Debian system libraries,
 which `ftf fetch` needs. Run it with the hardening flags in [docs/container.md](docs/container.md).
