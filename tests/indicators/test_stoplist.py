@@ -60,7 +60,7 @@ def test_hits(kind, value):
         ("url", "https://www.facebook.com/some-scam-page"),  # SDK host is not stopped on URL kinds
         ("meta_pixel_id", "1234567890123456"),
         ("fb_pixel", "1234567890123456"),
-        ("tenant_id", "666"),
+        ("tenant_id", "424242"),
         ("pixel_host", "connect.facebook.net"),
         ("asset_phash", JQUERY_371),
         ("page_title", "jquery-3.7.1.min.js"),  # no family
