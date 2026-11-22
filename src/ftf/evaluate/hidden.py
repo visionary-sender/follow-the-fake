@@ -33,6 +33,12 @@ def _value(x: Any) -> Any:
     return getattr(x, "value", x)
 
 
+def dataset_build(dataset_path: str | Path) -> str | None:
+    """The build record Ingestion writes next to the dataset (BUILD.txt), read at run time; None if absent."""
+    build = Path(dataset_path).parent / "BUILD.txt"
+    return build.read_text(encoding="utf-8").strip() if build.is_file() else None
+
+
 def _capture_ids(ds: Dataset) -> set[str]:
     return {c.id for inc in ds.incidents for c in inc.captures}
 
@@ -215,6 +221,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     def run(args: argparse.Namespace) -> int:
         ds = load_dataset(args)
         result = run_hidden(ds, load_spec(args.spec), args.engine)
+        result["dataset_build"] = dataset_build(args.dataset)
         out = Path(args.out_dir) / "hidden"
         write_json(out / f"hidden-{args.engine}.json", result)
         md = out / f"hidden-{args.engine}.md"
