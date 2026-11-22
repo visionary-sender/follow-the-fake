@@ -26,7 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Mapping, Optional
 
-from ftf.contract.models import Layer, Relation
+from ftf.contract.models import ArtefactType, Layer, Relation
 
 R = Relation
 T, TA, OP, CA, EC = R.template, R.tracking_account, R.operator, R.campaign, R.ecosystem
@@ -259,6 +259,35 @@ CAMPAIGN_EVIDENCE_KINDS = frozenset({
     "aio_campaign", "aio_campaign_name", "offer_id",
 })
 
+
+# Which artefact types can yield a kind, for evidence capacity (HACK-67). Read off the extractors
+# and checked against the indicator provenance of the challenge data. Kinds not listed come from
+# any modality (HTML yields almost every kind), so an unlisted kind never makes a missing input
+# look useful. Shared by every weight table: it describes the extractors, not the weights.
+_ASSET_FILES = frozenset({ArtefactType.asset, ArtefactType.har, ArtefactType.mhtml})
+_TRAFFIC = frozenset({ArtefactType.har})
+KIND_MODALITIES: dict[str, frozenset[ArtefactType]] = {
+    # whole asset files: saved next to the page, recorded in traffic or packed in an MHTML
+    "asset_sha256": _ASSET_FILES,
+    "asset_norm_sha256": _ASSET_FILES,
+    "aio_action_files": _ASSET_FILES,
+    "aio_sdk_asset": _ASSET_FILES,
+    "capi_gateway": _ASSET_FILES,
+    # requests between pages: only recorded traffic shows postbacks and redirect hops
+    "tracker_postback": _TRAFFIC,
+    "chain_host": _TRAFFIC,
+    "chain_domain": _TRAFFIC,
+    "redirect_chain_shape": _TRAFFIC,
+}
+# Modalities whose indicators are observed live. A private id seen only in other modalities loses
+# `static_discount` in the ledger, so its capacity does too.
+LIVE_MODALITIES = frozenset({ArtefactType.har})
+
+
+def extractable(kind: str, modalities: frozenset[ArtefactType]) -> bool:
+    """True if an item showing `modalities` could carry an indicator of `kind`."""
+    allowed = KIND_MODALITIES.get(kind)
+    return allowed is None or bool(allowed & modalities)
 
 def is_campaign_evidence(layer: Layer, kind: str) -> bool:
     """A shared value of this kind tells one campaign from another of the same operator (`layer` unused:

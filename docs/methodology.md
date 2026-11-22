@@ -244,9 +244,11 @@ the best pairwise score between a probe and a campaign member. With K campaigns 
   every other campaign that could be assigned the same way by at least 1 bit (a likelihood ratio
   of 2). A smaller lead is a tie at the top: the item goes to review with both campaigns named.
   The margin is the same for every relation;
-- **new** when the best score is at most τ − 3 **and** the item's evidence capacity is at least τ;
+- **new** when the best score is at most τ − 3, the item's evidence capacity is at least τ, **and**
+  the best score plus the capacity of its missing modalities stays below the bar;
 - **review** otherwise, including every case where the item could still earn enough evidence to
-  reach τ. An item with a conflict on a campaign member goes to review, not assign.
+  reach τ, or where its missing inputs could lift the best score to the bar. An item with a
+  conflict on a campaign member goes to review, not assign.
 
 **Evidence capacity** is the most bits the item could still earn: for each layer it can show, the
 largest weight the table allows, summed over the layers the item's modalities can reach. A
@@ -254,6 +256,13 @@ screenshot-only item can show a creative and nothing else, so its capacity is fa
 review, never to new. The item is not evidence that it is a new campaign; it is evidence that the
 pages that would settle the question are missing. Each assignment lists the modalities whose absence
 limits it.
+
+The **capacity of the missing modalities** is the same sum over the layers that only an absent
+modality would open (a HAR opens the tracking and infrastructure layers, for example), each layer
+counted once. If the best candidate's score plus that capacity reaches the bar, the missing input
+could have produced the assignment, so a low score is not evidence of a new campaign: the item goes
+to review and the note names the missing inputs. Both capacities are upper bounds from the weight
+table; they never add bits to a score.
 
 ## 8. Explanation
 

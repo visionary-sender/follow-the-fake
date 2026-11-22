@@ -408,3 +408,44 @@ def test_missing_input_rule_is_the_same_on_the_indexed_path():
             assert [l.model_dump() for l in fast.links] == [l.model_dump() for l in lin.links]
             decisions.add(lin.assignment.decision)
     assert decisions == {Decision.new, Decision.review}
+
+
+def test_layer_caps_per_kind_follow_the_modalities_present():
+    from ftf.contract.models import ArtefactType as A
+    from ftf.linking import HAND_TABLE
+    from ftf.linking.backend import layer_caps
+
+    full = layer_caps(HAND_TABLE, Relation.campaign)
+    page = layer_caps(HAND_TABLE, Relation.campaign, frozenset({A.html, A.asset, A.ad_screenshot}))
+    traffic = layer_caps(HAND_TABLE, Relation.campaign, frozenset({A.html, A.har}))
+    assert traffic == full
+    # Without recorded traffic a private id is only seen in saved files: the ledger's copy discount.
+    assert page[L.tenant] == full[L.tenant] - HAND_TABLE.static_discount
+    # Postbacks and redirect hops need traffic; the static kinds of the layer still count.
+    assert page[L.tracker_instance] < full[L.tracker_instance]
+    assert all(page.get(layer, 0.0) <= cap for layer, cap in full.items())
+    # Unlisted kinds come from any modality: a screenshot alone keeps its creative cap.
+    shot = layer_caps(HAND_TABLE, Relation.campaign, frozenset({A.ad_screenshot}))
+    assert shot[L.creative] == full[L.creative]
+
+
+def test_capacity_per_kind_reports_a_missing_har_inside_reachable_layers():
+    from ftf.contract.models import ArtefactType as A
+    from ftf.linking.assign import evidence_capacity, layer_modalities
+
+    col = _har_layers_collection()
+    inc = simple("n", *NO_MATCH, **NO_HAR)
+    lm = layer_modalities(combine(col, [inc]))
+    probe = [c.id for c in inc.captures]
+
+    def mod_caps(mods):
+        # Every layer reachable from html, but the tenant id is worth 2 bits more with traffic.
+        return {**WEIGHTS, L.tenant: WEIGHTS[L.tenant] - (0.0 if A.har in mods else 2.0)}
+
+    lm_all_html = {layer: mods | {A.html} for layer, mods in lm.items()}
+    cap_layer, gains_layer, extra_layer = evidence_capacity(None, inc, probe, WEIGHTS, lm=lm_all_html)
+    assert gains_layer == [] and extra_layer == 0.0
+    cap_kind, gains_kind, extra_kind = evidence_capacity(None, inc, probe, WEIGHTS, lm=lm_all_html, modality_caps=mod_caps)
+    assert cap_kind == cap_layer - 2.0
+    assert extra_kind == 2.0
+    assert [(g[0], g[1], g[2], g[3]) for g in gains_kind] == [(A.har, "not captured", 2.0, [L.tenant])]
