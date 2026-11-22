@@ -7,6 +7,7 @@ import pytest
 from ftf.cli import main
 from ftf.contract import (
     Artefact,
+    Campaign,
     Capture,
     Dataset,
     Decision,
@@ -20,6 +21,7 @@ from ftf.contract import (
 )
 from ftf.evaluate.engine import BaselineEngine, get_engine
 from ftf.evaluate.labels import build_labels, compare_expected, partition
+from ftf.evaluate.metrics import predicted_partition
 from ftf.evaluate.leak import HIDDEN_KINDS, MASK, hide_platform_ids, leak_check
 from ftf.evaluate.units import GroundTruthSpec, canonical, load_spec, source_keys
 
@@ -167,11 +169,43 @@ def test_hide_and_leak_check(ds):
     assert art.path == f"p1/{MASK}/page.html"
     # unhidden data leaks, in values and in other fields, including a uuid's 8-hex prefix
     assert leak_check(ds, values)
-    probe = ds.model_copy(deep=True)
+    # a miss by hide_platform_ids is what the leak check exists to catch: plant one after hiding
+    probe = hide_platform_ids(ds)[0]
     probe.incidents[-1].indicators[0].provenance.note = f"see {TENANT_A[:8]} here"
-    hits = leak_check(hide_platform_ids(probe)[0], values)
+    hits = leak_check(probe, values)
     assert [(h.path.rsplit(".", 1)[-1], h.indicator_id, h.hidden_value) for h in hits] == [
         ("note", probe.incidents[-1].indicators[0].id, TENANT_A)]
+
+
+def test_hide_masks_every_spelling_of_hidden_ids(ds):
+    """A dash-less uuid and an 8-hex prefix in other fields are masked as well: the leak check finds 0."""
+    dashless, prefix = OWNER.replace("-", ""), OWNER[:8]
+    marked = ds.model_copy(deep=True)
+    last = marked.incidents[0].indicators[-1]
+    last.provenance.note = f"ref {dashless} and {prefix}"
+    hidden, values = hide_platform_ids(marked)
+    note = next(i for i in hidden.indicators() if i.id == last.id).provenance.note
+    assert dashless not in note and prefix not in note and MASK in note
+    assert leak_check(hidden, values) == []
+
+
+def test_predicted_partition_counts_each_canonical_once():
+    canon = Capture(id="SETC:1:c1", stage="lander")
+    dup = Capture(id="SETC:2:c1", stage="lander", duplicate_of="SETC:1:c1")
+    other = Capture(id="SETC:3:c1", stage="lander")
+    ds = Dataset(name="dups", incidents=[
+        Incident(id="SETC:1", source="SETC", source_ref="1", captures=[canon]),
+        Incident(id="SETC:2", source="SETC", source_ref="2", captures=[dup]),
+        Incident(id="SETC:3", source="SETC", source_ref="3", captures=[other]),
+    ], campaigns=[
+        # the duplicate is linked in a different cluster from its canonical capture
+        Campaign(id="cmp:1", label="x", relation=Relation.campaign, capture_ids=["SETC:2:c1", "SETC:3:c1"]),
+        Campaign(id="cmp:2", label="y", relation=Relation.campaign, capture_ids=["SETC:1:c1"]),
+    ])
+    parts = predicted_partition(ds, "campaign")
+    assert parts == [["SETC:3:c1"], ["SETC:1:c1"]]
+    flat = [m for part in parts for m in part]
+    assert sorted(flat) == ["SETC:1:c1", "SETC:3:c1"], "every canonical capture counted once"
 
 
 def test_baseline_engine(ds):
@@ -190,6 +224,8 @@ def test_baseline_engine(ds):
     assert res.links and res.links[0].a == "NEW:1:c1"
     lonely = new.model_copy(update={"indicators": []})
     assert BaselineEngine().link_incident(out, lonely).assignment.decision is Decision.new
+    with pytest.raises(ValueError):
+        engine.link_incident(out, ds.incidents[0], relation="campaign")
 
 
 def test_unknown_engine():
@@ -214,6 +250,9 @@ def test_dataset_build_is_read_from_build_file(tmp_path, capsys):
     assert "dataset_build recorded as null" in capsys.readouterr().err
     (tmp_path / "BUILD.txt").write_text("build: main abc1234\n", encoding="utf-8")
     assert dataset_build(data) == "abc1234"
+    (tmp_path / "BUILD.txt").write_text("garbage line\n", encoding="utf-8")
+    assert dataset_build(data) is None
+    assert "no 'build: <branch> <sha>' line" in capsys.readouterr().err
 
 
 def test_cli_eval_commands(tmp_path, capsys, ds):
@@ -275,3 +314,31 @@ def test_cli_linking_engine_writes_result(tmp_path, capsys, ds):
     assert result["engine"] == "linking" and result["platform_ids"] == "hidden"
     assert result["levels"], "one row per label level"
     assert "engine linking, platform ids hidden" in capsys.readouterr().out
+
+
+def test_build_labels_rejects_mixed_or_colliding_analyst_levels(ds):
+    base = {k: v for k, v in SPEC.items() if k != "analyst_groups"}
+    mixed = {"analyst_groups": {"analyst_mixed": [
+        {"members": [A1, A2], "relation": "campaign", "reason": "x"},
+        {"members": [A3, B2], "relation": "operator", "reason": "y"},
+    ]}}
+    with pytest.raises(ValueError, match="mixes relations"):
+        build_labels(ds, GroundTruthSpec.from_dict({**base, **mixed}))
+    clash = {"analyst_groups": {"campaign": [{"members": [A1, A2], "relation": "campaign", "reason": "x"}]}}
+    with pytest.raises(ValueError, match="collides"):
+        build_labels(ds, GroundTruthSpec.from_dict({**base, **clash}))
+
+
+def test_compare_expected_projects_both_sides(ds):
+    """Captures of a collapsed incident are one unit on both sides of the E1 comparison."""
+    spec = GroundTruthSpec.from_dict({**SPEC, "collapse_incidents": ["SETA:2"],
+                                      "expected_e1": {"campaign": [[A1, A2], [B1]]}})
+    labels = build_labels(ds, spec)
+    assert compare_expected(labels, spec, ds) == []
+
+
+def test_cli_bad_input_exits_2(tmp_path, capsys, ds):
+    common = _write(tmp_path, ds)
+    (tmp_path / "spec.json").write_text("{not json", encoding="utf-8")
+    assert main(["eval", "labels", *common]) == 2
+    assert "ftf eval: error" in capsys.readouterr().err

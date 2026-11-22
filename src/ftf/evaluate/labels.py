@@ -99,6 +99,11 @@ def build_labels(ds: Dataset, spec: GroundTruthSpec) -> dict[str, Any]:
         return sorted(set(out))
 
     for level, entries in spec.analyst_groups.items():
+        if level in PLATFORM_LEVELS:
+            raise ValueError(f"analyst level {level!r} collides with a platform-id level; rename it in the spec")
+        relations = sorted({e["relation"] for e in entries})
+        if len(relations) > 1:
+            raise ValueError(f"analyst level {level!r} mixes relations {relations}; use one level per relation")
         for n, entry in enumerate(entries):
             members = resolve(entry["members"], f"analyst_groups.{level}[{n}]")
             if members:
@@ -158,7 +163,7 @@ def compare_expected(labels: dict[str, Any], spec: GroundTruthSpec, ds: Dataset)
     report = []
     for level, expected in spec.expected_e1.items():
         got = {_project(m, spec, incident) for m in partition(labels, level)}
-        want = {frozenset(e) for e in expected}
+        want = {_project(list(e), spec, incident) for e in expected}
         for g in sorted(got - want, key=sorted):
             report.append(f"{level}: derived group {sorted(g)} is not an expected E1 group")
         for w in sorted(want - got, key=sorted):

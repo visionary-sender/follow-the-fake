@@ -109,7 +109,8 @@ def hide_platform_ids(ds: Dataset) -> tuple[Dataset, dict[str, str]]:
             if ind.kind not in HIDDEN_KINDS and not (ind.value is not None and _hidden_asset_url(ind.value, segments))
         ]
     out.links, out.campaigns, out.assignments = [], [], []
-    patterns = [_pattern(v) for v in sorted(values, key=len, reverse=True)]
+    variants = {var for v in values for var in _variants(v)}
+    patterns = [_pattern(var) for var in sorted(variants, key=len, reverse=True)]
     data = _mask_all(out.model_dump(mode="json"), patterns)
     return Dataset.model_validate(data), values
 

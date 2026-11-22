@@ -126,9 +126,15 @@ def openset_counts(outcomes: Iterable[tuple[set[str] | None, str, set[str] | Non
 
 
 def predicted_partition(ds: Dataset, relation: str) -> list[list[str]]:
-    """Campaign members of one relation, duplicates mapped onto their canonical capture."""
-    canon = {c.id: (c.duplicate_of or c.id) for inc in ds.incidents for c in inc.captures}
-    return [sorted({canon.get(m, m) for m in c.capture_ids}) for c in ds.campaigns if c.relation.value == relation]
+    """Campaign members of one relation, one entry per canonical capture.
+
+    A duplicate is scored as its canonical capture, so it is dropped from every cluster: the
+    canonical capture keeps its own cluster and is counted once, even when a duplicate was linked
+    elsewhere. Clusters left empty by this are dropped.
+    """
+    dups = {c.id for inc in ds.incidents for c in inc.captures if c.duplicate_of}
+    out = [sorted({m for m in c.capture_ids if m not in dups}) for c in ds.campaigns if c.relation.value == relation]
+    return [members for members in out if members]
 
 
 def score_against_labels(clustered: Dataset, labels: dict[str, Any]) -> dict[str, Any]:

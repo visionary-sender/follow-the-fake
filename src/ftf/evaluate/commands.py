@@ -44,9 +44,11 @@ def dataset_build(dataset: Path) -> str | None:
     if not build_file.is_file():
         print(f"warning: no {build_file}; dataset_build recorded as null", file=sys.stderr)
         return None
-    text = build_file.read_text(encoding="utf-8")
-    m = re.search(r"^build:\s*\S+\s+(\S+)", text, re.M)
-    return m.group(1) if m else text.splitlines()[0].strip()
+    m = re.search(r"^build:\s*\S+\s+(\S+)", build_file.read_text(encoding="utf-8"), re.M)
+    if m is None:
+        print(f"warning: no 'build: <branch> <sha>' line in {build_file}; dataset_build recorded as null", file=sys.stderr)
+        return None
+    return m.group(1)
 
 
 def add_common(parser: argparse.ArgumentParser) -> None:
@@ -181,7 +183,7 @@ def _guard(func: Callable[[argparse.Namespace], int]) -> Callable[[argparse.Name
     def run(args: argparse.Namespace) -> int:
         try:
             return func(args)
-        except (EvalInputError, FileNotFoundError, RuntimeError) as exc:
+        except (EvalInputError, FileNotFoundError, RuntimeError, ValueError, KeyError, json.JSONDecodeError) as exc:
             print(f"ftf eval: error: {exc}", file=sys.stderr)
             return 2
 

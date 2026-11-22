@@ -31,7 +31,7 @@ command refuses a dataset that has none of the ground-truth platform kinds (exit
 captures-only file cannot produce numbers by accident.
 
 Every output records `dataset_build`: the build commit read at run time from the `BUILD.txt` beside
-the dataset (`build: <branch> <sha>`). It is `null`, with a warning, when that file is absent. Each
+the dataset (`build: <branch> <sha>`). It is `null`, with a warning, when that file is absent or has no `build:` line. Each
 number can therefore be traced to the exact Ingestion build it was computed on.
 
 ## Private spec: `ground-truth-spec/spec.json`
@@ -54,6 +54,8 @@ error; `note` is allowed as free text.
 
 `<Relation>` is one of `template`, `tracking_account`, `operator`, `campaign`, `ecosystem`. A
 capture id named in the spec that is not in the dataset is reported, never silently dropped.
+Each analyst level holds one relation: `build_labels` rejects a level that mixes relations, and a
+level whose name equals a platform level (`campaign`, `owner`, `tenant`, `landing`, `template`).
 
 ## Ground truth: `labels.json`
 
@@ -117,7 +119,8 @@ writes `<out>/leak/leak.json` with the counts and each hit. The expected hit cou
   that level's relation.
 
 Scoring is restricted to the label universe. A labelled capture that the prediction does not place
-anywhere counts as a singleton.
+anywhere counts as a singleton. A duplicate capture is dropped from every predicted cluster, so its
+canonical capture is counted once, in its own cluster.
 
 ## Engines (`ftf.evaluate.engine`)
 
@@ -130,7 +133,8 @@ get_engine("baseline" | "linking") -> Engine
 ```
 
 - `baseline` (`BaselineEngine`): connected components over any shared linkable (non-collector)
-  value, per relation. It is the loose floor and is expected to merge too much.
+  value, per relation. It is the loose floor and is expected to merge too much. `link_incident`
+  raises `ValueError` if the incident is already in `base`, as `ftf.linking` does.
 - `linking` (`LinkingEngine`): calls `ftf.linking.link_dataset(ds)` and
   `ftf.linking.link_incident(base, incident, relation=relation)`. Both are exported from
   `ftf.linking`. `link_incident` raises `ValueError` if the incident is already in `base`.

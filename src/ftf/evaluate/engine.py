@@ -105,6 +105,8 @@ class BaselineEngine:
 
     def link_incident(self, base: Dataset, incident: Incident, relation: Relation = Relation.campaign) -> IncidentResult:
         relation = Relation(relation)
+        if any(i.id == incident.id for i in base.incidents):
+            raise ValueError(f"incident {incident.id} is already in the collection")
         base_values = _values(base.indicators())
         new_values = _values(incident.indicators)
         camp_of = {cid: c for c in base.campaigns if c.relation is relation for cid in c.capture_ids}
