@@ -23,6 +23,7 @@ from ftf.linking.similarity import (
     minhash_similarity,
     register_view,
     save_calibrations,
+    text_template_similarity,
     view_evidence,
     view_for_kind,
 )
@@ -91,6 +92,19 @@ def test_minhash_and_jaccard():
     assert minhash_similarity("1 2 3", "1 2") is None
     assert jaccard_similarity("a b c", "b c d") == pytest.approx(2 / 4)
     assert jaccard_similarity("", "a") is None
+
+
+def test_text_template_is_a_minhash_view():
+    from ftf.features.text.template import estimate, to_hex
+
+    a = to_hex(np.arange(128, dtype=np.uint32))
+    b = to_hex(np.concatenate([np.arange(64, dtype=np.uint32), np.arange(1000, 1064, dtype=np.uint32)]))
+    assert view_for_kind("text_template").similarity is text_template_similarity
+    assert text_template_similarity(a, a) == 1.0
+    assert text_template_similarity(a, b) == pytest.approx(estimate(a, b)) == 0.5
+    assert text_template_similarity(a, a[:-8]) is None  # not the same 128-word length
+    assert text_template_similarity(a, "zz" * 512) is None
+    assert view_for_kind("text_minhash").similarity is minhash_similarity  # alias kept
 
 
 def test_view_registry_defaults_and_extension():
