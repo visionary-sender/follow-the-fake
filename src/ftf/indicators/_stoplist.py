@@ -66,6 +66,15 @@ def lists() -> _Lists:
     return _Lists(json.loads(text))
 
 
+@lru_cache(maxsize=1)
+def groups() -> dict[str, frozenset[str]]:
+    """Stop-list group name (`cdn`, `sdk`, `brands`, ...; `bare_domain` for exact names) -> its entries."""
+    data = json.loads(resources.files("ftf.indicators").joinpath("stoplist.json").read_text(encoding="utf-8"))
+    out = {k: frozenset(h.lower() for h in v) for k, v in data["hosts"].items() if k != "about"}
+    out["bare_domain"] = frozenset(d.lower() for d in data["bare_domains"]["values"])
+    return out
+
+
 def family(kind: str) -> str | None:
     """The stop-list family of an indicator kind, or None if the stop-list does not apply."""
     k = kind.lower()
