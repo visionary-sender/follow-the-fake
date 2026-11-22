@@ -274,3 +274,81 @@ def test_ad_match_elsewhere_than_the_landers_point_goes_to_review():
     a = assign(col, new, backend=stub_backend)
     assert a.decision is Decision.review
     assert f"n-x -> {camp_a}" in a.note
+
+
+# --- tie at the top (HACK-64) ---------------------------------------------------------
+
+
+def _two_campaigns() -> Dataset:
+    # Two campaigns that share nothing with each other; stub bits: landing 4, kit 3, offer 2,
+    # platform 1.5, infrastructure 1. K = 2, so the assign bar is TAU + 1 = 7 bits.
+    a = [simple(f"a{i}", (L.platform, "P1"), (L.landing, "LA"), (L.kit, "KA"), (L.offer, "OA"), (L.infrastructure, "IA")) for i in range(3)]
+    b = [simple(f"b{i}", (L.landing, "LB"), (L.kit, "KB"), (L.offer, "OB"), (L.infrastructure, "IB")) for i in range(2)]
+    ds = dataset(*a, *b)
+    return link_dataset(ds, backend=stub_backend(ds))
+
+
+def _camp(col: Dataset, member: str) -> str:
+    return next(c.id for c in col.campaigns if c.relation is Relation.campaign and member in c.capture_ids)
+
+
+TIE_CASES = {
+    # equal scores: 9 bits against each campaign
+    "tie": simple("n", (L.landing, "LA"), (L.kit, "KA"), (L.offer, "OA"), (L.landing, "LB"), (L.kit, "KB"), (L.offer, "OB")),
+    # near tie: a 8.5 (landing, kit, platform) vs b 8 (landing, kit, infrastructure), lead 0.5 bit
+    "near": simple("n", (L.platform, "P1"), (L.landing, "LA"), (L.kit, "KA"), (L.landing, "LB"), (L.kit, "KB"), (L.infrastructure, "IB")),
+    # clear winner: a 9 vs b 7 (both clear the bar), lead 2 bits
+    "clear": simple("n", (L.landing, "LA"), (L.kit, "KA"), (L.offer, "OA"), (L.landing, "LB"), (L.kit, "KB")),
+    # lead exactly the margin: a 10 vs b 9, lead 1 bit, still assign
+    "margin": simple("n", (L.landing, "LA"), (L.kit, "KA"), (L.offer, "OA"), (L.infrastructure, "IA"), (L.landing, "LB"), (L.kit, "KB"), (L.offer, "OB")),
+}
+
+
+def test_tie_at_the_top_goes_to_review_naming_both():
+    col = _two_campaigns()
+    ca, cb = _camp(col, "a0-c1"), _camp(col, "b0-c1")
+    assert _k(col) == 2
+    for case in ("tie", "near"):
+        a = assign(col, TIE_CASES[case], backend=stub_backend)
+        assert a.decision is Decision.review, case
+        assert a.campaign_id is None
+        assert "tie at the top" in a.note and ca in a.note and cb in a.note, case
+        assert {ca, cb} <= {c.campaign_id for c in a.candidates}
+        top = sorted((c.score_bits for c in a.candidates), reverse=True)[:2]
+        assert top[0] - top[1] < 1.0 and top[1] >= TAU + 1
+
+
+def test_clear_winner_is_still_assigned():
+    col = _two_campaigns()
+    ca = _camp(col, "a0-c1")
+    for case in ("clear", "margin"):
+        a = assign(col, TIE_CASES[case], backend=stub_backend)
+        assert a.decision is Decision.assign, case
+        assert a.campaign_id == ca
+        assert "tie at the top" not in a.note
+
+
+def test_tie_rule_is_the_same_on_the_indexed_path():
+    from ftf.linking.index import CandidateIndex
+
+    col = _two_campaigns()
+    idx = CandidateIndex.build(col, cache=False)
+    for case, inc in TIE_CASES.items():
+        lin = link_incident(col, inc, backend=stub_backend)
+        fast = link_incident(col, inc, backend=stub_backend, index=idx)
+        assert fast.assignment.model_dump() == lin.assignment.model_dump(), case
+        assert [l.model_dump() for l in fast.links] == [l.model_dump() for l in lin.links], case
+
+
+def test_tie_rule_holds_for_every_relation_with_two_campaigns():
+    # Relation-agnostic: the template relation (kit, landing, creative, offer) sees the same tie.
+    a = [simple(f"a{i}", (L.landing, "LA"), (L.kit, "KA")) for i in range(2)]
+    b = [simple(f"b{i}", (L.landing, "LB"), (L.kit, "KB")) for i in range(2)]
+    ds = dataset(*a, *b)
+    col = link_dataset(ds, [Relation.template], backend=stub_backend(ds))
+    tie = simple("n", (L.landing, "LA"), (L.kit, "KA"), (L.landing, "LB"), (L.kit, "KB"))
+    t = assign(col, tie, relation=Relation.template, backend=stub_backend)
+    assert t.decision is Decision.review and "tie at the top" in t.note
+    win = simple("n", (L.landing, "LA"), (L.kit, "KA"), (L.landing, "LB"))
+    w = assign(col, win, relation=Relation.template, backend=stub_backend)
+    assert w.decision is Decision.assign

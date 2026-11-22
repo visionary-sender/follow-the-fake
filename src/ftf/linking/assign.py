@@ -14,6 +14,12 @@ Method (07 §2.4, D1/D2 "Assignment"):
   layers for the relation, or a live private id; see `grouping.MIN_LAYERS`); `new` if it is <= tau - 3; `review` otherwise. An item whose
   evidence capacity is below tau cannot reach the bar at all, so it goes to `review`, never `new`
   (a screenshot-only item is not proof of a new campaign).
+* Tie at the top (HACK-64): if another campaign also clears the bar with a qualifying ledger
+  and no tenant/owner conflict, and the target leads it by less than `TIE_MARGIN` (1 bit, a
+  likelihood ratio under 2), the incident goes to review with a note naming both, never to
+  `assign`. The margin is a fixed number of bits for every relation: the bits are already on
+  one log-likelihood-ratio scale, and the review band (`NEW_MARGIN`, 3 bits) is a distance from
+  tau, not between two candidates, so it would send clear winners to review.
 * Evidence capacity = sum, over the layers the item can still show, of the most bits the weight
   table gives that layer. Which layers a modality can show is read from the collection itself
   (indicator provenance -> artefact type), not hard-coded.
@@ -64,6 +70,7 @@ from ftf.linking.types import METHOD, PairScore
 from ftf.linking.weights import WeightTable
 
 NEW_MARGIN = 3.0  # bits below tau at which an item is declared new
+TIE_MARGIN = 1.0  # the assign target must lead the next assignable campaign by at least this many bits
 TOP_CANDIDATES = 5
 LINKED_CANDIDATES = 3  # campaigns whose members get ledgers in `link_incident`
 
@@ -295,6 +302,22 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
         None,
     )
 
+    # The runner-up: the next campaign that could itself be assigned (clears the bar with a
+    # qualifying ledger and has no cannot-link conflict). Such campaigns are always reachable, so
+    # the indexed path finds the same one as the linear scan.
+    rival = None
+    if target is not None:
+        rival = next(
+            (
+                (camp, ps)
+                for camp, ps, _ in scored
+                if camp.id != target.id and camp.id not in conflicted and ps is not None and ps.bits >= bar and qualifies(ps, tau, min_layers)
+            ),
+            None,
+        )
+    target_bits = next((ps.bits for camp, ps, _ in scored if target is not None and camp.id == target.id), 0.0)
+    tie = rival is not None and target_bits - rival[1].bits < TIE_MARGIN
+
     if setup.campaigns_of is not None:
         holding = setup.campaigns_of
     else:
@@ -319,6 +342,8 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
         decision, campaign_id = Decision.assign, dup_camp.id
     elif target is not None and target.id in conflicted:
         decision, campaign_id = Decision.review, None
+    elif tie:
+        decision, campaign_id = Decision.review, None
     elif target is not None:
         decision, campaign_id = Decision.assign, target.id
         if all(c.campaign_id != target.id for c in candidates):
@@ -329,6 +354,11 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
     else:
         decision, campaign_id = Decision.review, None
 
+    if tie and decision is Decision.review:
+        for camp in (target, rival[0]):
+            if all(c.campaign_id != camp.id for c in candidates):
+                ps = next(p for cmp, p, _ in scored if cmp.id == camp.id)
+                candidates.append(Candidate(campaign_id=camp.id, score_bits=round(ps.bits, 3), note=_candidate_note(ps)))
     off_lander = decision is Decision.assign and bool(reach) and campaign_id not in common
     if off_lander:
         decision, campaign_id = Decision.review, None
@@ -342,6 +372,11 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
         note = f"exact duplicate of {', '.join(dup_of)} ({where}); " + note
     if decision is Decision.review and conflicted & {c.id for c in [target, dup_camp] if c is not None}:
         note = "tenant/owner conflict with the best campaign; " + note
+    if tie and decision is Decision.review and not disagree and not dup_of and target.id not in conflicted:
+        note = (
+            f"tie at the top: {target.id} {target_bits:.1f} bits vs {rival[0].id} {rival[1].bits:.1f} bits "
+            f"(lead under the {TIE_MARGIN:.0f}-bit margin); " + note
+        )
     if off_lander:
         named = "; ".join(f"{x} -> {cid}" for x, cid in sorted(pointed.items()))
         note = f"best match is not the campaign the landers point to ({named}); " + note
