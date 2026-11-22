@@ -12,6 +12,7 @@
 # name (override with FTF_VM_SLUG), so several worktrees can use the VM at once. The venv installs
 # the pip extras in FTF_VM_EXTRAS (default app,dev,fetch; the visual families need features too).
 # Nothing is computed locally: the laptop only lists files, packs them and drives ssh.
+# Runs on the VM always export FTF_OFFLINE=1, so nothing there resolves or contacts scam domains.
 set -euo pipefail
 
 VM=${FTF_VM:-ftf-workbench}
@@ -37,6 +38,8 @@ case "$slug" in ''|.|..|-*) echo "vm.sh: bad slug '$slug'" >&2; exit 2 ;; esac
 # Runs on the VM as: bash -c "$remote" ftf-vm <slug> <mode> [args...]; the tarball is on stdin.
 read -r -d '' remote <<'REMOTE' || true
 set -euo pipefail
+# Our VMs never resolve or contact scam domains (HACK-91): every run here is offline by default.
+export FTF_OFFLINE=1
 slug=$1; mode=$2; shift 2
 w=/work/$slug
 mkdir -p "$w"
