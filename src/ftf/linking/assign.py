@@ -21,8 +21,12 @@ Method (07 §2.4, D1/D2 "Assignment"):
   one log-likelihood-ratio scale, and the review band (`NEW_MARGIN`, 3 bits) is a distance from
   tau, not between two candidates, so it would send clear winners to review.
 * Evidence capacity = sum, over the layers the item can still show, of the most bits the weight
-  table gives that layer. Which layers a modality can show is read from the collection itself
-  (indicator provenance -> artefact type), not hard-coded.
+  table gives that layer's kinds the item's modalities can carry (`weights.KIND_MODALITIES`; a
+  private id without recorded traffic counts minus the static discount). Which layers a modality
+  can show is read from the collection itself (indicator provenance -> artefact type).
+* A `new` call becomes `review` when the best score plus the capacity of the missing modalities
+  (what the capacity would rise by with them) reaches the assign bar: the missing input could
+  have produced the assignment. The note names those inputs (HACK-67).
 * An incident whose (non-decoy) capture is an exact duplicate (`duplicate_of`) of a collection
   capture is assigned to the campaign holding that capture; if that capture is in no campaign
   or in several, it goes to review.
@@ -276,7 +280,11 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
         dup_camps = [camp for camp in campaigns if camp.id in dup_ids]
     scored.sort(key=_order)
 
-    capacity, gains = evidence_capacity(None, incident, probe or dup_of, be.layer_caps(relation), lm=setup.modalities)
+    mod_caps = be.modality_caps
+    capacity, gains, missing_bits = evidence_capacity(
+        None, incident, probe or dup_of, be.layer_caps(relation), lm=setup.modalities,
+        modality_caps=(lambda mods: mod_caps(relation, mods)) if mod_caps is not None else None,
+    )
 
     dup_camp = dup_camps[0] if len(dup_camps) == 1 else None
     candidates = [
@@ -318,6 +326,9 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
     target_bits = next((ps.bits for camp, ps, _ in scored if target is not None and camp.id == target.id), 0.0)
     tie = rival is not None and target_bits - rival[1].bits < TIE_MARGIN - 1e-9
 
+    missing_reach = _missing_could_reach_bar(best, bar, gains, missing_bits)
+    held_back = False
+
     if setup.campaigns_of is not None:
         holding = setup.campaigns_of
     else:
@@ -349,10 +360,11 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
         if all(c.campaign_id != target.id for c in candidates):
             ps = next(p for camp, p, _ in scored if camp.id == target.id)
             candidates.append(Candidate(campaign_id=target.id, score_bits=round(ps.bits, 3), note=_candidate_note(ps)))
-    elif best <= tau - NEW_MARGIN and capacity >= tau:
+    elif best <= tau - NEW_MARGIN and capacity >= tau and missing_reach is None:
         decision, campaign_id = Decision.new, None
     else:
         decision, campaign_id = Decision.review, None
+        held_back = best <= tau - NEW_MARGIN and capacity >= tau  # new, but for the missing inputs
 
     if tie and decision is Decision.review:
         for camp in (target, rival[0]):
@@ -367,6 +379,8 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
         candidates.append(Candidate(campaign_id=cid, score_bits=round(ps.bits, 3) if ps is not None else 0.0, note="a lander of the incident points here"))
 
     note = _note(relation, best, tau, bar, k, capacity, gains, best_ps, min_layers)
+    if held_back and missing_reach is not None:
+        note = missing_reach + "; " + note
     if dup_of:
         where = f"campaign {dup_camp.id}" if dup_camp is not None else f"{len(dup_camps)} campaigns"
         note = f"exact duplicate of {', '.join(dup_of)} ({where}); " + note
@@ -558,16 +572,21 @@ def evidence_capacity(
     probe: list[str],
     caps: dict[Layer, float],
     lm: Optional[dict[Layer, set[ArtefactType]]] = None,
-) -> tuple[float, list[tuple[ArtefactType, Optional[str], float, list[Layer]]]]:
-    """Most bits the item could earn given its modalities, and what each absent modality could add.
+    modality_caps: Optional[Callable[[frozenset[ArtefactType]], dict[Layer, float]]] = None,
+) -> tuple[float, list[tuple[ArtefactType, Optional[str], float, list[Layer]]], float]:
+    """Most bits the item could earn given its modalities, what each absent modality could add, and all of them together.
 
-    Returns (capacity, gains) where gains are (modality, missing reason or None, extra bits,
-    layers) for every absent modality that would open a layer the item cannot show now.
+    Returns (capacity, gains, missing_bits). Gains are (modality, missing reason or None, extra
+    bits, layers) for every absent modality that would raise the capacity; missing_bits is the
+    rise with every absent modality at once (each layer counted once).
     `lm` (layer -> modalities of the collection plus the incident) replaces the scan of `ds`.
+    `modality_caps(modalities)` gives per-layer caps for an item showing those modalities (per
+    kind: `backend.layer_caps`); without it every item gets `caps` and only layers no present
+    modality reaches can add bits.
     """
     probe_set = set(probe)
     captures = [c for c in incident.captures if c.id in probe_set or c.duplicate_of in probe_set]
-    has = {t for c in captures for t in c.modalities}
+    has = frozenset(t for c in captures for t in c.modalities)
     reasons: dict[ArtefactType, str] = {}
     for c in captures:
         for m in c.missing:
@@ -577,18 +596,44 @@ def evidence_capacity(
         if ds is None:
             raise ValueError("evidence_capacity needs the collection or its layer modalities")
         lm = layer_modalities(ds)
-    reachable = own_layers | {layer for layer, mods in lm.items() if mods & has}
-    capacity = sum(max(caps.get(layer, 0.0), 0.0) for layer in reachable)
+    caps_for = modality_caps or (lambda mods: caps)
 
-    all_mods = {t for mods in lm.values() for t in mods} | set(reasons)
+    def reach(mods: frozenset[ArtefactType]) -> dict[Layer, float]:
+        layer_caps = caps_for(mods)
+        layers = own_layers | {layer for layer, ms in lm.items() if ms & mods}
+        return {layer: max(layer_caps.get(layer, 0.0), 0.0) for layer in layers}
+
+    now = reach(has)
+    capacity = sum(now.values())
+    absent = ({t for mods in lm.values() for t in mods} | set(reasons)) - has
     gains = []
-    for mod in sorted(all_mods - has, key=lambda m: m.value):
-        opened = sorted((layer for layer, mods in lm.items() if mod in mods and layer not in reachable), key=lambda l: l.value)
-        extra = sum(max(caps.get(layer, 0.0), 0.0) for layer in opened)
-        if extra > 0:
+    for mod in sorted(absent, key=lambda m: m.value):
+        more = reach(has | {mod})
+        extra = sum(more.values()) - capacity
+        opened = sorted((layer for layer, bits in more.items() if bits > now.get(layer, 0.0)), key=lambda l: l.value)
+        if extra > 1e-9 and opened:
             gains.append((mod, reasons.get(mod), extra, opened))
     gains.sort(key=lambda g: (-g[2], g[0].value))
-    return capacity, gains
+    missing_bits = max(sum(reach(has | absent).values()) - capacity, 0.0) if gains else 0.0
+    return capacity, gains, missing_bits
+
+
+def _missing_could_reach_bar(
+    best: float,
+    bar: float,
+    gains: list[tuple[ArtefactType, Optional[str], float, list[Layer]]],
+    extra: float,
+) -> Optional[str]:
+    """A note naming the missing inputs if they could lift the best score to the assign bar, else None.
+
+    `extra` is the capacity of the missing modalities (`evidence_capacity`'s missing_bits). When
+    the best candidate's score plus that capacity reaches the bar, the absence of a match is not
+    evidence of a new campaign, so the item goes to review instead of new (HACK-67).
+    """
+    if not gains or best + extra < bar:
+        return None
+    named = ", ".join(f"{mod.value} ({reason})" if reason else mod.value for mod, reason, _, _ in gains)
+    return f"missing inputs could reach the assign bar ({best:.1f} + up to {extra:.1f} bits >= {bar:.1f}): {named}"
 
 
 def _strong_layers(ps: PairScore, n: int = 3) -> str:
