@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
+import os
 import json
 import re
 import sys
@@ -30,11 +32,16 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 MIN_LENGTH = 6
-SKIP_DIRS = {".git", "venv", ".venv", "data", "__pycache__", ".pytest_cache", ".mypy_cache"}
+# Skipped at any depth (never tracked) and only at the root (local data and environments).
+SKIP_ANY_DEPTH = frozenset({".git", "__pycache__", ".pytest_cache", ".mypy_cache"})
+SKIP_AT_ROOT = frozenset({"data", "venv", ".venv"})
+# One random key per run: digests compare equal within a run, but a guessed value cannot be
+# confirmed against a digest printed in a log or a ticket later.
+RUN_KEY = os.urandom(16)
 # Public services and brands (a host matches the name and its subdomains). Chosen from the
 # third-party services that public pages load and from the brands that scams impersonate; none
 # of them is an organiser identifier. Keep this list short and public.
-PUBLIC_HOSTS = (
+PUBLIC_HOSTS = frozenset({
     "google.com", "google.pl", "googleapis.com", "gstatic.com", "googleusercontent.com",
     "googletagmanager.com", "google-analytics.com", "googleadservices.com", "googlesyndication.com",
     "doubleclick.net", "facebook.com", "facebook.net", "fb.com", "fbcdn.net", "fbsbx.com", "meta.com",
@@ -42,11 +49,10 @@ PUBLIC_HOSTS = (
     "cloudflareinsights.com", "jsdelivr.net", "unpkg.com", "jquery.com", "bootstrapcdn.com",
     "fontawesome.com", "tailwindcss.com", "github.com", "githubusercontent.com", "youtube.com",
     "ytimg.com", "twitter.com", "twimg.com", "tiktok.com", "snapchat.com", "linkedin.com", "licdn.com",
-    "yandex.ru", "yandex.net", "yahoo.com", "amazon.com", "microsoft.com", "apple.com", "onet.pl",
-    "wp.pl", "interia.pl", "tvn24.pl", "gazeta.pl", "money.pl", "vuejs.org", "npmjs.com", "fpjs.dev",
-    "npms.io", "python.org", "pypi.org", "linear.app", "anthropic.com", "docker.com", "debian.org",
-    "ubuntu.com", "apache.org", "gnu.org", "mozilla.org",
-)
+    "yandex.ru", "yandex.net", "vuejs.org", "npmjs.com", "fpjs.dev", "npms.io", "python.org",
+    "pypi.org", "linear.app", "anthropic.com", "docker.com", "debian.org", "ubuntu.com", "apache.org",
+    "gnu.org", "mozilla.org",
+})
 # Not organiser infrastructure: file names that look like domains, reserved test names.
 FILE_EXTENSIONS = frozenset({
     "php", "html", "htm", "asp", "aspx", "jsp", "js", "mjs", "css", "json", "txt", "xml", "png", "jpg",
@@ -65,7 +71,10 @@ TITLE_KIND_RE = re.compile(r"(title|name|caption|text|label)$|^page_title$")
 
 
 def _public(host: str) -> bool:
-    return any(host == p or host.endswith("." + p) for p in PUBLIC_HOSTS)
+    """Exact host match (a leading `www.` is ignored). Subdomains are never exempt: a user-hosted
+    or brand subdomain can carry an organiser value."""
+    host = host.lower()
+    return (host[4:] if host.startswith("www.") else host) in PUBLIC_HOSTS
 
 
 def _real_domain(name: str) -> bool:
@@ -135,9 +144,16 @@ def _scan_text(text: str, pattern: re.Pattern, needles: dict[str, str]):
             yield lineno, needles[m.group(0)], m.group(0)
 
 
+def _digest(matched: str) -> str:
+    return hmac.new(RUN_KEY, matched.encode("utf-8"), hashlib.sha256).hexdigest()[:12]
+
+
 def _files(root: Path):
     for path in sorted(root.rglob("*")):
-        if not path.is_file() or any(part in SKIP_DIRS for part in path.relative_to(root).parts):
+        parts = path.relative_to(root).parts
+        if not path.is_file():
+            continue
+        if any(part in SKIP_ANY_DEPTH for part in parts) or parts[0] in SKIP_AT_ROOT:
             continue
         yield path
 
@@ -168,15 +184,15 @@ def check(dataset_path: Path, root: Path, messages: Path | None) -> int:
         files += 1
         for lineno, cat, matched in _scan_text(data.decode("utf-8", "replace"), pattern, needles):
             hits += 1
-            digest = hashlib.sha256(matched.encode("utf-8")).hexdigest()[:12]
-            print(f"{path.relative_to(root)}:{lineno}: organiser {cat} (sha256 {digest})")
+            digest = _digest(matched)
+            print(f"{path.relative_to(root)}:{lineno}: organiser {cat} (digest {digest})")
     print(f"tracked files scanned: {files}")
     if messages is not None:
         text = messages.read_text(encoding="utf-8", errors="replace")
         for lineno, cat, matched in _scan_text(text, pattern, needles):
             hits += 1
-            digest = hashlib.sha256(matched.encode("utf-8")).hexdigest()[:12]
-            print(f"commit-messages:{lineno}: organiser {cat} (sha256 {digest})")
+            digest = _digest(matched)
+            print(f"commit-messages:{lineno}: organiser {cat} (digest {digest})")
         print("commit messages scanned: yes")
     else:
         print("commit messages scanned: no (no --messages file given)")

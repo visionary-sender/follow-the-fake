@@ -24,7 +24,7 @@ The system takes four kinds of input, and each arrives as a contract incident:
   declared landing URL and creative links. The scanner never opens a landing page.
 - **A keyword, an ad screenshot or a base item** given to `ftf analyze`.
 
-Nothing is executed or rendered. Captured HTML, scripts and PDFs are read as inert bytes.
+The analysis never executes or renders captured files: HTML, scripts and PDFs are read as inert text. Only the sandboxed fetcher loads a live page, in a locked-down browser.
 
 ## 2. Captures (the contract)
 
@@ -90,15 +90,15 @@ Here `s` is the **persistence** (how likely the attacker keeps the value inside 
 Both are priors in the code. The code writes the same weight as `prior × relation scale`, and then
 subtracts the rarity term:
 
-    bits = max(prior × scale − static discount, 0) − log2(k)
+    bits = max(max(prior × scale − static discount, 0) − log2(k), 0)
 
 - `prior` is the kind's bits in `ftf.linking.weights.HAND_TABLE`, for example `aio_cdn_tenant` 6.0,
   `aio_owner` 6.0, `aio_landing` 4.0, `kit_asset_set` 6.5, `meta_pixel` 3.0, `ad_caption` 2.0,
   `platform_name` 1.7, `third_party_host` 1.5, `registrar` 0.5.
 - `scale` is how much the layer bears on the relation being scored (table below).
 - `static discount` is 1.0 bit for an operator-private id (tenant, owner, tracker, tracking
-  account) seen only in saved files, because a copied kit can carry the original's ids. A live id
-  seen on both sides has no discount.
+  account) not live on both sides (in saved files, or seen in one capture's traffic only), because a
+  copied kit can carry the original's ids. A live id seen on both sides has no discount.
 - `k` is the **number of pre-groups** that carry the value, not the number of incidents. Incidents
   that share a live operator-private id are joined into one pre-group first, so a large campaign's
   own identifiers are not penalised for the campaign being large (`ftf.linking.ledger._pre_groups`).
@@ -155,12 +155,12 @@ platforms.
 
 The values below are invented. The priors, scales and rules are the ones in the code, and the
 rarity counts `k` are assumed for the example. Two captures are compared under the campaign
-relation in a collection of 30 captures, where a campaign typically has 3 captures.
+relation in a collection of 30 captures (the 2026-11-22 demo slice, a snapshot), where a campaign typically has 3 captures.
 
 | Layer | Kind (prior × scale) | Shared value (invented) | k | Bits | Status |
 |---|---|---|---:|---:|---|
 | `tracking_account` | `meta_pixel` (3.0 × 1.0), live on both sides | `pixel-demo-1000001` | 1 | 3.0 | shared, strict |
-| `tenant` | `aio_cdn_tenant` (6.0 × 1.0), single-valued | `tenant-demo-07` | 2 | 5.0 | shared |
+| `tenant` | `aio_cdn_tenant` (6.0 × 1.0), single-valued, live on both sides | `tenant-demo-07` | 2 | 5.0 | shared |
 | `landing` | `aio_landing` (4.0 × 1.0) | `landing-demo-42` | 1 | 4.0 | shared |
 | `kit` | `kit_asset_set` (6.5 × 0.8 = 5.2) | `set-demo-a1` | 4 | 3.2 | shared |
 | `creative` | `ad_caption` (2.0 × 1.0) | `caption-demo-x` | 3 | 0 | hub-subsumed (0.415 < 0.5) |
@@ -252,7 +252,7 @@ the engine publishes its τ in the dataset. The two differ, so read the score as
 linkable values, so a pair is scored only when it shares at least one non-hub value, and values
 carried by more than 500 captures are skipped. The ledger costs O(pairs × layers). The clustering is
 greedy merging, O(E log E) for E edges. A new item is assigned with one index lookup per value and one
-score per campaign member. The demo base has 30 captures, so none of these numbers has been measured
+score per campaign member. The 2026-11-22 demo slice has 30 captures, so none of these numbers has been measured
 at scale. The design targets 10^5 incidents; that target is a plan, not a result.
 
 **Limits, stated plainly:**

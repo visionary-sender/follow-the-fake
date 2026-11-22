@@ -60,7 +60,7 @@ def register_export(subparsers: argparse._SubParsersAction) -> None:
             "Write incidents, captures, indicators, links, evidence and campaigns as CSV files, a "
             "validated copy of the dataset (dataset.json) and campaign_patterns.md (one section per "
             "campaign) into --out. Existing files there are overwritten. Exit 0 on success; 2 if the "
-            "dataset cannot be loaded. Outputs built from organiser data belong in the private bucket."
+            "dataset cannot be loaded; 1 if the output cannot be written. Outputs built from organiser data belong in the private bucket."
         ),
     )
     parser.add_argument("--base", type=Path, help="linked contract dataset.json (default: $FTF_BASE, else the fixture)")
@@ -76,7 +76,11 @@ def run_export(args: argparse.Namespace) -> int:
     except (OSError, ValueError) as exc:
         print(f"ftf export: cannot load the dataset: {exc}", file=sys.stderr)
         return USAGE_EXIT
-    counts = export(dataset, args.out)
+    try:
+        counts = export(dataset, args.out)
+    except OSError as exc:
+        print(f"ftf export: cannot write the output: {exc.strerror or exc}", file=sys.stderr)
+        return ERROR_EXIT
     print(json.dumps({"out": str(args.out), "files": counts}, indent=2, ensure_ascii=False))
     return 0
 

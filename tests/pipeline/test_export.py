@@ -7,8 +7,6 @@ import json
 import subprocess
 import sys
 
-import pytest
-
 from ftf.cli import build_parser, main
 from ftf.contract import Dataset
 from ftf.pipeline.export import REPORT_FILE, TABLE_FILES, campaign_report, export
@@ -44,6 +42,7 @@ def test_tables_keep_contract_ids_and_flag_collector_rows(tmp_path):
     assert indicators["s-1/pixel"]["incident_id"] == "s-1"
     links = {r["link_id"]: r for r in _rows(out / "links.csv")}
     assert links["L1"]["cert_tier"] == "Strong" and links["L1"]["score_bits"] == "12"
+    assert links["L2"]["cert_tier"] == "Insufficient alone"  # 2 bits, below the threshold of the 6-capture base
     evidence = _rows(out / "evidence.csv")
     assert {r["status"] for r in evidence} >= {"shared", "collector_excluded", "missing"}
     incidents = {r["incident_id"]: r for r in _rows(out / "incidents.csv")}
@@ -90,18 +89,40 @@ def test_export_parser_requires_out():
     assert (str(args.base), str(args.out)) == ("b.json", "d")
 
 
-def test_cli_and_export_import_without_networkx():
-    """networkx is an `app` extra; the container installs only the base package, so `ftf` must import."""
+def test_export_runs_without_networkx(tmp_path):
+    """networkx is an `app` extra; the container installs only the base package. The synthetic base has
+    a singleton campaign with no stored links, the case that used to reach the networkx graph."""
+    base = write_base(tmp_path)
+    out = tmp_path / "out"
     code = (
         "import sys\n"
         "sys.modules['networkx'] = None\n"
+        "from pathlib import Path\n"
         "from ftf.cli import main\n"
+        "from ftf.contract import Dataset\n"
         "from ftf.pipeline.export import export\n"
+        "export(Dataset.from_json(Path(sys.argv[1]).read_bytes()), Path(sys.argv[2]))\n"
         "try:\n"
         "    main(['export', '--help'])\n"
         "except SystemExit as exc:\n"
         "    sys.exit(exc.code)\n"
     )
-    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
+    done = subprocess.run([sys.executable, "-c", code, str(base), str(out)], capture_output=True, text=True, check=False)
     assert done.returncode == 0, done.stderr
-    assert "--out" in done.stdout
+    assert (out / "campaign_patterns.md").is_file()
+
+
+def test_export_reports_unwritable_output(tmp_path, capsys):
+    base = write_base(tmp_path)
+    blocker = tmp_path / "file-not-dir"
+    blocker.write_text("x", encoding="utf-8")
+    assert main(["export", "--base", str(base), "--out", str(blocker)]) == 1
+    assert "cannot write the output" in capsys.readouterr().err
+
+
+def test_csv_cells_cannot_start_a_spreadsheet_formula(tmp_path):
+    from ftf.pipeline.export import _safe_cell
+
+    assert _safe_cell("=HYPERLINK(\"x\")") == "'=HYPERLINK(\"x\")"
+    assert _safe_cell("-4") == "-4" and _safe_cell("-4.5") == "-4.5"
+    assert _safe_cell("plain") == "plain"

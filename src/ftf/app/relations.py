@@ -307,7 +307,7 @@ def clusters(ds: Dataset, relation: Relation, threshold: float | None = None) ->
     rel = Relation(relation)
     g = relation_graph(ds, rel, threshold)
     out = [
-        Cluster(c.id, c.label, rel, tuple(c.capture_ids), tuple(_campaign_link_ids(ds, c, g)), "campaign")
+        Cluster(c.id, c.label, rel, tuple(c.capture_ids), tuple(_campaign_link_ids(ds, c)), "campaign")
         for c in ds.campaigns
         if c.relation is rel
     ]
@@ -326,7 +326,7 @@ def clusters(ds: Dataset, relation: Relation, threshold: float | None = None) ->
     return out
 
 
-def _campaign_link_ids(ds: Dataset, campaign, g: nx.Graph | None = None) -> list[str]:
+def _campaign_link_ids(ds: Dataset, campaign) -> list[str]:
     """The campaign's own links of its relation with both ends inside it, else the drawable
     links of its relation inside it."""
     if campaign.link_ids:
@@ -334,11 +334,8 @@ def _campaign_link_ids(ds: Dataset, campaign, g: nx.Graph | None = None) -> list
         by_id = {l.id: l for l in ds.links}
         return [lid for lid in campaign.link_ids
                 if by_id[lid].relation is campaign.relation and {by_id[lid].a, by_id[lid].b} <= inside]
-    if g is None:
-        g = relation_graph(ds, campaign.relation)
     inside = set(campaign.capture_ids)
-    sub = g.subgraph([c for c in inside if c in g])
-    return sorted({e.link_id for _, _, d in sub.edges(data=True) for e in d["edges"]})
+    return sorted(l.id for l in ds.links if l.relation is campaign.relation and {l.a, l.b} <= inside)
 
 
 def campaign_summary(ds: Dataset, relation: Relation | None = None, top: int = 5) -> list[CampaignSummary]:

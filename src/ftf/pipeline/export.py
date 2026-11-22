@@ -59,6 +59,24 @@ def export(ds: Dataset, out: Path) -> dict[str, int]:
 # --- flat tables -------------------------------------------------------------------------------
 
 
+FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _safe_cell(value: object) -> object:
+    """Neutralise spreadsheet formulas: a text cell starting with = + - @ gets a leading apostrophe.
+
+    Captured titles and ad text are attacker-chosen; a spreadsheet would evaluate them. Numbers are
+    left alone, so bits columns stay numeric.
+    """
+    if not isinstance(value, str) or not value.startswith(FORMULA_START):
+        return value
+    try:
+        float(value)
+    except ValueError:
+        return "'" + value
+    return value
+
+
 def _write_csv(path: Path, rows: Sequence[dict]) -> None:
     if not rows:
         path.write_text("", encoding="utf-8")
@@ -66,7 +84,7 @@ def _write_csv(path: Path, rows: Sequence[dict]) -> None:
     with path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=list(rows[0]), lineterminator="\n")
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows({k: _safe_cell(v) for k, v in row.items()} for row in rows)
 
 
 def _assignments(ds: Dataset) -> dict[str, Assignment]:
@@ -132,6 +150,7 @@ def _indicator_rows(ds: Dataset) -> list[dict]:
 
 
 def _link_rows(ds: Dataset) -> list[dict]:
+    threshold = rel.review_threshold_bits(ds)  # the app's threshold, so the CSV and the app agree
     rows = []
     for link in sorted(ds.links, key=lambda l: l.id):
         rows.append({
@@ -140,7 +159,7 @@ def _link_rows(ds: Dataset) -> list[dict]:
             "b": link.b,
             "relation": link.relation.value,
             "level": link.level.value,
-            "cert_tier": rel.LEVEL_LABEL.get(link.level, ""),
+            "cert_tier": rel.tier(link.level, link.score_bits, threshold),
             "score_bits": "" if link.score_bits is None else f"{link.score_bits:g}",
             "method": link.method,
             "n_evidence": len(link.evidence),
@@ -293,4 +312,5 @@ def _holding_relations(c: Campaign, campaigns: Iterable[Campaign]) -> list[Relat
 def _cell(text: object) -> str:
     """Defang and escape a value for one Markdown table cell, heading or inline code span."""
     s = rel.defang("" if text is None else str(text))
+    s = s.replace("<", "&lt;").replace(">", "&gt;").replace("[", "&#91;").replace("]", "&#93;")
     return s.replace("\r", " ").replace("\n", " ").replace("|", "\\|").replace("`", "'")

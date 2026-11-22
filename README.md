@@ -117,7 +117,7 @@ The hour-4 slice result, with case numbers only: held-out case `do_udostepnienia
 ## Limitations
 
 - **The weights are priors.** They are explicit, hand-set bits, not fitted to the data, and the case sample is 25 scams with no true negatives. Section 9 of [docs/methodology.md](docs/methodology.md) lists what that implies. A learned table is planned (HACK-23).
-- **The demo base is small.** The slice holds 30 captures. The scaling figures in the methodology are design estimates and have not been measured.
+- **The demo base is small.** The 2026-11-22 slice (a dated snapshot) is small, and the scaling figures in the methodology are design estimates and have not been measured.
 - **Content features are scaffolding.** Text embeddings, image hashes and faces do not yet carry bits, and the Visual layer is paused.
 - **Enrichment and live fetching depend on outside services.** When a service is down, the item carries less evidence and is more likely to go to review.
 - **Campaigns rotate.** Operators change pages, pixels and ad accounts inside a campaign. The campaign relation is kept strict for that reason, so variants can end in review rather than in a campaign.
