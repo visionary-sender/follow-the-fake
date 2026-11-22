@@ -10,7 +10,7 @@ D=/data/derived/corpus/$batch
 inputs=()
 # scanner-v1: batch 0's scanner items in the v1 layout (ftf corpus convert-scanner). All folders go
 # in ONE call, so ftf ingest can merge a victim-profile re-fetch with its default fetch.
-for d in "$D"/scanner-v1 "$D"/fetch-* "$D"/picked-*; do
+for d in "$D"/scanner-v1 "$D"/fetch-* "$D"/picked-*; do  # fetch-* includes fetch-victim-* and fetch-egress-*
   [ -d "$d" ] && inputs+=("${d#"$D"/}")
 done
 [ ${#inputs[@]} -gt 0 ] || { echo "no fetch-*/picked-*/scanner-v1 folders under $D" >&2; exit 1; }
@@ -18,6 +18,12 @@ rm -rf "$D/ingested"
 mkdir -p "$D/ingested"
 cd "$D"
 ftf ingest "${inputs[@]}" --root . --out ingested/dataset.json --timing ingested/timing.json
-ftf corpus tag-ingested --dataset ingested/dataset.json --manifest manifest.jsonl --out ingested/corpus_kind.jsonl \
+# Label lists live in the bucket (gs://follow-the-fake-data/outputs/corpus/lists/), never in git.
+L=/data/derived/corpus/lists
+lists=()
+[ -f $L/legit-domains.txt ] && lists+=(--legit-list $L/legit-domains.txt)
+[ -f $L/person-keywords.txt ] && lists+=(--person-keywords $L/person-keywords.txt)
+[ -f $L/certpl-listed.txt ] && lists+=(--listed-domains $L/certpl-listed.txt)
+ftf corpus tag-ingested --dataset ingested/dataset.json --manifest manifest.jsonl --out ingested/corpus_kind.jsonl "${lists[@]}" \
   | tee ingested/summary.json
 gcloud storage rsync -r --delete-unmatched-destination-objects "$D/ingested/" "gs://follow-the-fake-data/outputs/corpus/$batch/ingested/" 2>&1 | tail -1
