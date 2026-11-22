@@ -20,11 +20,11 @@ rotation are used, and the network guard and lockdown are the same. Every captur
 profile in `capture.json` (`profile`); this describes our visit, so it never links captures. All
 profiles send client hints matching the user agent, without Chromium's `HeadlessChrome` brand.
 
-Each visit becomes a capture folder laid out like an organiser case folder, so Ingestion reads
+Each visit becomes a capture folder laid out like an organiser case folder, so the ingestion step reads
 both the same way:
 
 ```
-captures/<capture_id>/            e.g. 20261121T221500Z-landing.example-1a2b3c4d
+captures/<capture_id>/            e.g. <timestamp>-landing.example-1a2b3c4d
     url.txt          requested URL, then every main-frame URL visited, one per line
     page.har         network traffic, response bodies embedded
     page.html        final DOM
@@ -91,25 +91,25 @@ Scam pages are hostile. The fetcher assumes the page will try to attack the mach
 - **Where it runs.** During the build, live URLs are fetched only on the sandbox VM
   (`scripts/sandbox.sh`): no service account and no scopes (no cloud credentials at all), SSH
   only through IAP, outbound traffic through an ephemeral IP, automatic stop after 8 h, fetcher
-  running as an unprivileged user. Captures move from the sandbox straight to the workbench over
+  running as an unprivileged user. Captures move from the sandbox straight to the cloud VM over
   the internal network with a key that can only run a fixed transfer command, and from there to
-  `gs://follow-the-fake-data/outputs/fetcher/`. They never pass through a laptop.
+  `gs://<DATA_BUCKET>/outputs/fetcher/`. They never pass through a laptop.
 
-### Sandbox VM (team only)
+### Sandbox VM 
 
 ```bash
-scripts/sandbox.sh create                 # once: ftf-sandbox, e2-medium, no service account, auto-stop 8 h
+scripts/sandbox.sh create                 # once: <SANDBOX_VM>, e2-medium, no service account, auto-stop 8 h
 scripts/sandbox.sh start                  # later sessions
 scripts/sandbox.sh sync                   # code -> /opt/ftf, venv + Chromium (rebuilt when pyproject changes)
-scripts/sandbox.sh authorize-workbench    # once: workbench key, restricted to the transfer command
-scripts/sandbox.sh push-list /data/raw/<link-list>.txt links.txt   # workbench -> sandbox
+scripts/sandbox.sh authorize-workbench    # once: cloud VM key, restricted to the transfer command
+scripts/sandbox.sh push-list /data/raw/<link-list>.txt links.txt   # cloud VM -> sandbox
 scripts/sandbox.sh run -- ftf fetch --list /srv/ftf/inbox/links.txt --out /srv/ftf/captures/run1
-scripts/sandbox.sh pull run1              # sandbox -> workbench /data/derived/fetcher/ -> bucket
+scripts/sandbox.sh pull run1              # sandbox -> cloud VM /data/derived/fetcher/ -> bucket
 scripts/sandbox.sh stop
 ```
 
 The fetcher's browser tests run against a local test server only. The `dev` extra does not
-install Playwright, so they are skipped by default. To run them on the workbench, add the extra to
+install Playwright, so they are skipped by default. To run them on the cloud VM, add the extra to
 your worktree's venv once (and Chromium for your user, `playwright install --only-shell chromium`):
 
 ```bash
@@ -117,24 +117,24 @@ scripts/vm.sh run -- pip install -c /work/<slug>/base-constraints.txt -e '.[fetc
 scripts/vm.sh test tests/fetch
 ```
 
-### Egress workers (team only, corpus building during the hackathon)
+### Egress workers (optional, corpus building)
 
 Ad libraries and cloaked scam pages rate-limit or block a single cloud IP. While building the
 corpus we spread collection over a few short-lived Google Cloud VMs (`scripts/egress.sh`), each a
 clone of the sandbox's safety model (no service account, IAP-only SSH, no firewall rule of its own,
 deleted automatically after 2 h), each with its own ephemeral IP, at low volume per IP. Workers are
-sandbox VMs in the sense of the project rule: live scam pages are fetched there and nowhere else
-besides `ftf-sandbox`, and captures go straight to the workbench. This was
-used only to build the corpus during the hackathon. It is opt-in: the container and the demo never
+sandbox VMs in the sense of the rule: live scam pages are fetched there and nowhere else
+besides the sandbox VM, and captures go straight to the cloud VM. This was
+used only to build the corpus. It is opt-in: the container and the demo never
 use it, and nothing changes when it is absent.
 
 ```bash
 scripts/egress.sh up 6                    # workers 1..6 (Warsaw x3, Frankfurt, Eemshaven, Hamina)
 scripts/egress.sh sync                    # code -> /opt/ftf on every worker
-scripts/egress.sh push-list <wb-file> urls.txt ftf-egress-1
-scripts/egress.sh job ftf-egress-1 r1 -- ftf fetch --list /srv/ftf/inbox/urls.txt --out /srv/ftf/captures/run1/ftf-egress-1
-scripts/egress.sh rotate ftf-egress-1     # new IP between jobs
-scripts/egress.sh pull run1               # workers -> workbench /data/derived/egress/ -> bucket
+scripts/egress.sh push-list <wb-file> urls.txt <EGRESS_VM>
+scripts/egress.sh job <EGRESS_VM> r1 -- ftf fetch --list /srv/ftf/inbox/urls.txt --out /srv/ftf/captures/run1/<EGRESS_VM>
+scripts/egress.sh rotate <EGRESS_VM>     # new IP between jobs
+scripts/egress.sh pull run1               # workers -> cloud VM /data/derived/egress/ -> bucket
 scripts/egress.sh down                    # delete all workers, confirm none is left
 ```
 

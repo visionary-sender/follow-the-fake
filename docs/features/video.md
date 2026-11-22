@@ -1,4 +1,4 @@
-# Video features (`ftf.features.video`, HACK-16)
+# Video features (`ftf.features.video`)
 
 Turns ad videos, screen recordings and saved HLS video segments into keyframes. The still-image
 families then read those keyframes, so a video is linked through the same image, text and face
@@ -33,7 +33,7 @@ families). Extractor name: `video@0.1`.
    `provenance.locator = "t=<s>s"`. When the still family set its own locator (for example
    `face=0`), it becomes `t=12.50s;face=0`. A family that is missing or fails on one frame is
    skipped with a note on stderr.
-   **Stopgap:** until the image family (HACK-14) is installed, the video family emits its own
+   **Stopgap:** until the image family is installed, the video family emits its own
    64-bit pHash per keyframe (`image_phash`, ImageHash `phash`, hex). It switches itself off as
    soon as `ftf.features.image` imports.
 5. **Video metadata (`video_meta`).** For ad videos and HLS segments: `resolution=<w>x<h>`, and
@@ -83,9 +83,9 @@ use an LGPL-only ffmpeg.
 
 **Container gap:** the current `Dockerfile` installs neither ffmpeg nor the `features` extra.
 Without ffmpeg the family logs a note and skips every video, so the pipeline still runs.
-Adding both is the Demo project's job (HACK-32).
+Adding both is the demo's job.
 
-## CPU time (ftf-visual, e2-standard-8, 4 threads)
+## CPU time (cloud VM, e2-standard-8, 4 threads)
 
 | Video | Length, size | Keyframes | Wall | CPU (user+sys) |
 |---|---|---|---|---|
@@ -107,14 +107,14 @@ Speech (CPU int8, 4 threads, audio of case 5, 198 s):
 Small transcribes Polish visibly better than base (fewer broken words) at 2.3× the CPU.
 At about 80 CPU s per audio minute plus a 486 MB download, speech is **opt-in**
 (`FTF_VIDEO_SPEECH=1`): the default container run does keyframes only. With `base` it is
-35 CPU s per minute and 148 MB. In the coverage run (four other workers sharing the VM) the
+35 CPU s per minute and 148 MB. In the coverage run (other workers sharing the VM) the
 same 198 s video took 315 CPU s with small.
 
 ## Results against the acceptance criteria
 
-Coverage run: Ingestion's organiser dataset (`outputs/ingest/organiser/dataset.json`,
+Coverage run: the ingestion module's organiser dataset (`outputs/ingest/organiser/dataset.json`,
 25 incidents, 31 captures) with `--families video` and speech on (small). Exit 0, 234 s wall,
-730 s CPU on ftf-visual. Outputs (dataset, keyframes, log): `gs://follow-the-fake-data/outputs/visual/hack-16/coverage/`.
+730 s CPU on <VM>. Outputs (dataset, keyframes, log): `gs://<DATA_BUCKET>/outputs/visual/<run>/coverage/`.
 
 | Case | Video artefacts | Keyframes (`image_phash`) | `video_meta` | `screen_size` (collector) | `speech_text` |
 |---|---|---|---|---|---|
@@ -125,11 +125,11 @@ Coverage run: Ingestion's organiser dataset (`outputs/ingest/organiser/dataset.j
 - **The organiser videos produce keyframe features in the contract format:** yes. All five video
   artefacts gave keyframe indicators with `artefact_id` and `t=<s>s` locators, and the dataset
   validates. With text and image installed (rerun over the ingested organiser dataset, output
-  in `gs://follow-the-fake-data/outputs/visual/hack-16/organiser-v2/`), the 5 videos give 820
+  in `gs://<DATA_BUCKET>/outputs/visual/<run>/organiser-v2/`), the 5 videos give 820
   indicators: 125 keyframes with `image_phash`, `image_dhash`, `image_pdq` and
   `image_embedding` each, plus 107 `ocr_text`, 96 `text_embedding`, 70 `text_template` and
   41 `keyword`, 4 `video_meta`, and 2 `screen_size` in the collector layer. Faces join when
-  HACK-15 merges.
+  the faces work merges.
 - **Everything runs on CPU in the container, or is clearly optional:** keyframes are CPU-only
   ffmpeg + Pillow (seconds per video). Speech is opt-in by flag. ffmpeg still has to be added
   to the Dockerfile (see the container gap above).
@@ -139,14 +139,14 @@ Coverage run: Ingestion's organiser dataset (`outputs/ingest/organiser/dataset.j
 - Screen recordings are detected by file name. A renamed recording is treated as an ad video,
   which would emit its duration and screen resolution as `video_meta`.
 - Keyframes of a screen recording include the browser and OS chrome of the analyst's phone.
-  The still families see that too; masking it is theirs to decide.
+  The still families see that too; masking it is left to the image features.
 - The `.m3u8` playlists of saved HLS videos are not followed (on purpose). Each `.ts` segment is
   handled as its own short video.
 - The scene threshold and grid are tuned on the three organiser videos only.
 - Speech: one transcript per video, no per-segment timestamps. Music-only or silent audio
   (case 47 has a silent track, −91 dB) gives no indicator.
 
-## Review notes (HACK-16)
+## Review notes
 
 - Screen-recording keyframes lose their top 8 % (status bar: clock, date, notifications) before
   the still-image families run, so collector data does not become creative indicators. Browser
@@ -155,4 +155,4 @@ Coverage run: Ingestion's organiser dataset (`outputs/ingest/organiser/dataset.j
   organiser videos are under 5 minutes, so nothing is cut today); rotation side data is not
   applied to `resolution` / `screen_size`.
 - Container: Debian's ffmpeg package is a GPL build. It is called as a separate program, not
-  linked, but the Demo project (HACK-32) must decide whether to ship it or an LGPL-only build.
+  linked, but the demo has two options: ship it, or build an LGPL-only variant.

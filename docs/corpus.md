@@ -1,22 +1,22 @@
-# Background corpus (HACK-18)
+# Background corpus
 
 A background set of Polish scam ads, scam landing pages and real pages of the outlets and brands
 that scams impersonate. Linking uses it to measure how rare a feature is and to set similarity
-baselines. Visual uses it as a background set for embeddings. Evaluation uses the real pages as
+baselines. The visual features use it as a background set for embeddings. Evaluation uses the real pages as
 must-not-link distractors.
 
 The data is private and never goes into git:
 
-| Batch | Bucket (`gs://follow-the-fake-data/outputs/corpus/…`) | What |
+| Batch | Bucket (`gs://<DATA_BUCKET>/outputs/corpus/…`) | What |
 |---|---|---|
 | batch-0 | `batch-0/` | scanner ads (Meta, Google ATC), CERT Polska domains, their landing pages (default fetch, victim-profile re-fetch, re-fetches from other egress IPs) |
 | batch-1 | `batch-1/` | must-not-link real pages (outlet home and article pages, banks, brands, public bodies, public figures) |
-| batch-2 | `batch-2/` | ads first seen by the HACK-45 egress scans, not already in batch 0 |
+| batch-2 | `batch-2/` | ads first seen by the egress scans, not already in batch 0 |
 | lists | `lists/` | hand-picked seed lists and the label lists used below |
 
 ## What to read: `ingested/`
 
-**The canonical data is `<batch>/ingested/`.** It is the output of `ftf ingest` (HACK-9, with the
+**The canonical data is `<batch>/ingested/`.** It is the output of `ftf ingest` (with the
 indicator extractors on main) over every folder of the batch, with these files:
 
 - `dataset.json`: contract `Dataset`, ids from `ftf.ingest.ids`. Artefact paths are relative to the
@@ -81,11 +81,11 @@ egress results) and `dataset.json` (the packager's own contract view, superseded
 
 ## How it is built
 
-Live pages are fetched only on `ftf-sandbox`; everything else runs on the workbench and needs no
+Live pages are fetched only on the sandbox VM; everything else runs on a cloud VM and needs no
 network.
 
 ```bash
-# ftf-sandbox, as user ftf: fetch each target URL once per batch, concurrency <= 2
+# sandbox VM, as user ftf: fetch each target URL once per batch, concurrency <= 2
 ftf corpus targets --queue scanner/queue.jsonl --run <scanner run> --out targets --parts 2
 ftf fetch --list targets/urls-1.txt --out fetch-1
 ftf fetch --profile victim-pl-mobile [--referer https://l.facebook.com/ --fbclid] \
@@ -93,7 +93,7 @@ ftf fetch --profile victim-pl-mobile [--referer https://l.facebook.com/ --fbclid
 ftf corpus targets --picked lists/must-not-link-home.tsv --out targets-home
 ftf fetch --list targets-home/urls-1.txt --out picked-home
 ftf corpus articles --picked lists/must-not-link-home.tsv --fetch picked-home --per-page 3 --out lists/articles.tsv
-# workbench, after pulling the runs from the sandbox
+# cloud VM, after pulling the runs from the sandbox
 ftf corpus convert-scanner --scanner scanner --out scanner-v1
 ftf corpus build --root <batch> --scanner scanner --fetch fetch-1 --fetch fetch-2 --fetch fetch-3 \
     --victim-fetch fetch-victim-r1 --egress-fetch fetch-egress-1-meta ...     # -> manifest.jsonl
@@ -105,14 +105,14 @@ pages yield 0 indicators.
 
 ## Sampling and biases
 
-**Scam side (batch 0).** HACK-20 scanner runs on 2026-11-21 (ads started since 2026-11-14):
+**Scam side (batch 0).** The scanner ran for ads started in a recent window:
 
 - **Meta Ad Library**: country PL, all ads, sorted by impressions, 4 keyword queries:
   "platforma inwestycyjna", "pasywny dochód", and two public figures' names. Meta throttled after
   30 ads per query and then answered HTTP 403, so the sample is the top 30 by impressions per
-  keyword, not a random draw: 98 ads. HACK-45 repeated the queries from 6 other IPs and saw the
+  keyword, not a random draw: 98 ads. A repeat of the queries from 6 other IPs saw the
   same 98 ads (no new Meta ads).
-- **Google Ads Transparency Center**: queries "trading" (50) and "invest" (9); HACK-45's egress
+- **Google Ads Transparency Center**: queries "trading" (50) and "invest" (9); the egress
   scans added 26 more (batch-2). Google gives no landing URL, so the fetch target is the ad's
   display domain.
 - **CERT Polska warning list**: the newest entries (150 per scanner run, 3 runs). These are bare
@@ -122,7 +122,7 @@ pages yield 0 indicators.
 
 **Fetches.** One Polish GCP IP, Chromium, no evasion, each URL once per profile. Bot walls,
 decoys and empty pages got a second attempt with the victim profile (Polish phone; Meta items with
-a Facebook referer and fbclid), and HACK-45 re-fetched the cloaked landers from other EU egress
+a Facebook referer and fbclid), and a later run re-fetched the cloaked landers from other EU egress
 IPs. Results per attempt are in `summary.json` (`fetch_outcomes`, `victim_profile`, `egress`).
 Over half of the CERT Polska domains were already dead (many resolve to a non-public sinkhole
 address, which the fetcher's guard refuses). The `fb.me` links in Meta ads lead to facebook.com
