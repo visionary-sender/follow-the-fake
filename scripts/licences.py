@@ -158,8 +158,26 @@ def shown_licence(name: str, licence: str) -> str:
     return licence
 
 
+# HACK-80 named exception (owner decision, pending HACK-74): Debian's ffmpeg, installed by the
+# Dockerfile's features slot (FTF_WITH_FFMPEG). Used unmodified and run as a separate program. Its
+# copyright file lists GPL parts, so only this exact licence string is accepted, and no other package.
+SYSTEM_EXCEPTIONS = {
+    "ffmpeg": {
+        "licence": ("BSD-1-clause; BSD-2-clause; BSD-3-clause; BSL; Expat; GPL-2+; GPL-3+; IJG; ISC; "
+                    "LGPL-2+; LGPL-2.1+; LGPL-2.1+ and BSD-2-clause; LGPL-2.1+ and BSD-3-clause; "
+                    "LGPL-2.1+ and BSL; LGPL-2.1+ and Expat; LGPL-2.1+ and Sundry; Sundry; Zlib; "
+                    "man-page; public-domain"),
+        "shown_as": "ffmpeg (named exception: unmodified, run as a separate program, pending owner decision (HACK-74))",
+    },
+}
+
+
 def is_allowed_system(name: str, licence: str, chromium: dict[str, str]) -> bool:
-    """Permissive licence, or the HACK-68 exception: listed in CHROMIUM_TSV with the same licence."""
+    """Permissive licence, the HACK-68 exception (listed in CHROMIUM_TSV with the same licence), or the
+    named exception in SYSTEM_EXCEPTIONS (exact licence string)."""
+    exception = SYSTEM_EXCEPTIONS.get(name)
+    if exception is not None and licence == exception["licence"]:
+        return True
     return chromium.get(name) == licence or is_permissive(licence)
 
 

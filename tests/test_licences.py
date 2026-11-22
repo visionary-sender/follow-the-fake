@@ -94,6 +94,14 @@ def test_chromium_exception_is_exact_and_narrow():
     assert licences.is_allowed_system("libfake-other", "MIT", chromium)  # permissive needs no exception
 
 
+def test_ffmpeg_exception_is_exact_and_narrow():
+    # HACK-80: Debian's ffmpeg with exactly its recorded licence string; GPL is not allowed in general.
+    ffmpeg = licences.SYSTEM_EXCEPTIONS["ffmpeg"]["licence"]
+    assert licences.is_allowed_system("ffmpeg", ffmpeg, {})
+    assert not licences.is_allowed_system("ffmpeg", "GPL-3+", {})
+    assert not licences.is_allowed_system("some-other-package", ffmpeg, {})
+
+
 def test_image_audit_reports_unlisted_copyleft_and_missing_entries():
     chromium = {"libfake-lgpl1": "LGPL-2.1+", "libfake-gone": "MIT"}
     rows = {"libfake-lgpl1": "LGPL-2.1+", "libfake-new": "GPL-2+"}
