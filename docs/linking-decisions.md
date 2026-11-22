@@ -97,3 +97,50 @@ recorded traffic shows. A bound that starts from the indicators the item actuall
 it shows nothing in gets the missing modality's full cap) would send those items and :3 to review.
 That changes what capacity means for the capacity-below-τ rule too, so it is left for a separate
 decision.
+
+## Brand skin, platform constants and a creative alone never link into a campaign (HACK-66)
+
+**The case.** E4 (`ftf eval distractors --engine linking`) adds pages that must stay outside every
+campaign. On the organiser dataset, the engine linked 34 of 58 real outlet pages (e), 3 of 3
+platform-only pages (c) and 2 of 2 creative-only incidents (f). The engine called every one of those
+items `new`, but `link_incident` still returned a loose campaign link for any candidate pair with
+positive bits, and E4 counts any campaign link as a violation.
+
+**What carried the links.** For (e) it was one shared third-party domain: the outlet's own CDN or
+analytics host, which a scam clone also loads. For (c) it was the platform SDK asset, sometimes with a
+third-party host. For (f) it was the ad id of the copied creative. Ingestion files third-party hosts
+and domains at platform level.
+
+**The rules.**
+- *Platform and creative gate.* Under the campaign, operator and tracking-account relations, a pair
+  needs one positive row outside the platform and creative layers whose value sits below platform
+  level. Without one, the pair counts at most one positive layer and no live private id, so it never
+  links or assigns. `link_incident` then explains the pair under the ecosystem relation.
+- *Brand skin.* `ftf brand-stoplist` hashes every value on the corpus's real outlet pages. The default
+  path loads it (`$FTF_BRAND_STOPLIST`, else a default path on the workbench). A stop-listed value is
+  `hub_subsumed` with 0 bits under every relation except ecosystem. The `brand_asset` kind counts under
+  ecosystem only. Without the file the engine warns and scores as before.
+
+**Not circular.** The stop-list is built from the same real pages that E4 (e) uses. With the stop-list
+switched off (`FTF_BRAND_STOPLIST=off`, as in the jury container), (e) is still 0 of 58, so the gate
+alone carries the result. The stop-list matters for kinds the gate does not cover, for example an
+outlet's analytics id below platform level.
+
+| Check | Before | After |
+| -- | -- | -- |
+| E4 (c) platform-only | 3 of 3 fail | 0 of 3 |
+| E4 (d) collector injection | 0 of 2 | 0 of 2 |
+| E4 (e) brand negatives | 34 of 58 fail | 0 of 58 (also 0 without the stop-list) |
+| E4 (f) creative-only | 2 of 2 fail | 0 of 2 |
+| E4 (b) kit copy | 1 of 3 fail | 1 of 3 (outside this change) |
+| E1 hidden, E7 time split (hidden and visible), E3 degrade | | identical output |
+| `ftf eval baseline --no-hide` (visible platform ids) | | identical output |
+| `ftf eval baseline` (platform ids hidden), operator vs owner | pairwise 7/7 of 23 | 6/6 of 23, precision still 1.00 |
+
+**The one lost pair.** With platform ids hidden, the two pages of do_udostepnienia:61 were linked
+under the operator relation at 5.75 bits against a 5.46-bit bar. They share a live ads id, an inline
+script, a form field set and third-party domains. The best of those domains is one that real outlet
+pages also load, so the stop-list takes it to 0 bits. The next domain is worth 0.5 bits, the pair
+drops to 4.75 bits, and the verdict goes from link to review. That is the intended behaviour: a host
+that real outlets load says nothing about the operator. With platform ids visible the pair is
+unchanged.
