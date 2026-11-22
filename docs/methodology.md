@@ -116,8 +116,8 @@ subtracts the rarity term:
   `must_not_link`). The default scoring path reads that file from `$FTF_BRAND_STOPLIST`, or from
   `/data/derived/linking/brand-stoplist/brand-stoplist.json` when the variable is not set. A
   stop-listed value is `hub_subsumed` with 0 bits under every relation except ecosystem. The
-  `brand_asset` kind counts under ecosystem only, with or without the list. Without the file (for
-  example in the jury container), the engine prints a warning and scores as if no stop-list existed.
+  `brand_asset` kind counts under ecosystem only, with or without the list. Without the file (the jury
+  image ships it, HACK-75), the engine prints a warning and scores as if no stop-list existed.
   The file holds digests only.
 - A value carried by more than 500 captures never proposes a candidate pair (`HUB_POSTINGS`).
 - The priors above are the **hand table**. `ftf link --weights FILE` replaces them with a learned table
