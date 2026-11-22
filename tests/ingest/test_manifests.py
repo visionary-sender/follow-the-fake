@@ -1,4 +1,4 @@
-"""Fetcher (HACK-17) and scanner (HACK-20) capture folders; synthetic, example.test only."""
+"""Fetcher and scanner capture folders; synthetic, example.test only."""
 
 from __future__ import annotations
 

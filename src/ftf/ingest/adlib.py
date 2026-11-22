@@ -1,6 +1,6 @@
 """Read the scanner's ``ad.json`` record of a capture, so extractors need not re-parse it.
 
-``load_ad(capture, root)`` returns a dict with every field of the HACK-20 layout (``None`` when
+``load_ad(capture, root)`` returns a dict with every field of the layout (``None`` when
 absent) plus readable aliases::
 
     ad_text      = body              first_date = start_date

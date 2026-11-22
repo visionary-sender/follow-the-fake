@@ -20,7 +20,7 @@ def fixture(name: str) -> bytes:
 
 
 def example_routes() -> dict[str, bytes | int]:
-    """Answers recorded on the workbench for example.com (a reserved domain), plus the list head."""
+    """Answers recorded on a VM for example.com (a reserved domain), plus the list head."""
     return {
         "https://data.iana.org/rdap/dns.json": fixture("iana.json"),
         "https://rdap.verisign.com/com/v1/domain/example.com": fixture("rdap-example.json"),

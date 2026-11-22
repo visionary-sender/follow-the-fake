@@ -1,4 +1,4 @@
-"""URL lists: one http(s) URL per line, read as inert text (HACK-62).
+"""URL lists: one http(s) URL per line, read as inert text.
 
 A list such as the organiser's ``scam_links*.txt`` has a header and blank lines besides its URLs;
 only lines that are one http(s) URL count. Each URL becomes its own ``url`` artefact that names

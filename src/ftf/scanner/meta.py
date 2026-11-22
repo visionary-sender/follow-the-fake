@@ -1,6 +1,6 @@
 """Meta Ad Library: parse search results and collect them with a no-login headless browser.
 
-Owner decision (HACK-6): no official API (it needs an identity-verified developer account), so
+No official API (it needs an identity-verified developer account), so
 the scanner opens the public Ad Library search page in headless Chromium without logging in,
 and reads the ads from the page's own GraphQL responses (`AdLibrarySearchPaginationQuery`) and
 from the JSON embedded in the first page. It never replays requests itself, because Meta's
@@ -9,7 +9,7 @@ README ("Ad-library scanner") for the terms issue and the production route (offi
 
 Parsing is pure (no browser) and unit-tested against sanitised fixtures. The collector needs
 the optional `playwright` package and a Chromium build (`pip install 'ftf[fetch]'` and
-`playwright install chromium`) and runs only on the sandbox VM; the jury image does not include it (the source then reports
+`playwright install chromium`) and runs only on the sandbox VM; the container image does not include it (the source then reports
 `unavailable`).
 """
 

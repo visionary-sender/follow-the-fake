@@ -68,7 +68,7 @@ def test_prefetch_fills_every_weight_part_and_reports_sizes(fake_hub, fake_weigh
     assert any(n.startswith("text:") and "onnx/tokenizer.json" in n for n in names)
     assert any(n.startswith("image:") and "model.safetensors" in n for n in names)
     assert sum(n.startswith("faces:") for n in names) == 2  # YuNet and SFace only
-    assert not any("reference" in n for n in names)  # the reference set is HACK-83's
+    assert not any("reference" in n for n in names)  # the reference set is kept out of prefetch
     assert not any(n.startswith("video:") for n in names)  # speech only with --speech
     assert len(items) == 7
     assert all(i.size > 0 for i in items)

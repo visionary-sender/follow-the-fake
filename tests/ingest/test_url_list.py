@@ -1,4 +1,4 @@
-"""URL lists (HACK-62): a text file of URLs, one incident per URL, read back by the URL-aware extractors.
+"""URL lists: a text file of URLs, one incident per URL, read back by the URL-aware extractors.
 
 Fixtures are invented: example.com/.net/.org hosts with gclid, utm and ad params. (`.test` has no
 registrable domain in the Public Suffix List, so it cannot exercise landing_domain.)

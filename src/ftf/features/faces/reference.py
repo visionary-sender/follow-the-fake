@@ -1,4 +1,4 @@
-"""Reference set of public figures that scam ads impersonate (HACK-83).
+"""Reference set of public figures that scam ads impersonate.
 
 Built once, on a VM, from a names file kept outside git; loaded at run time from a directory:
 

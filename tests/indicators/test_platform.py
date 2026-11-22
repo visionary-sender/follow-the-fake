@@ -1,4 +1,4 @@
-"""HACK-10 platform extractor on small synthetic captures (fake ids, example.test domains)."""
+"""platform extractor on small synthetic captures (fake ids, example.test domains)."""
 
 from __future__ import annotations
 

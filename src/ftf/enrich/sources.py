@@ -6,7 +6,7 @@ A 404 from RDAP or NXDOMAIN from DNS is an answer (`not_found`), not an outage.
 Services (all free, no key, no account):
 - IANA RDAP bootstrap (data.iana.org): which RDAP server runs each TLD.
 - RDAP, the registry's own server: registrar, IANA registrar id, registration date.
-- DNS over HTTPS (dns.google JSON API): A, NS, MX. The workbench asks a public resolver, so it
+- DNS over HTTPS (dns.google JSON API): A, NS, MX. The VM asks a public resolver, so it
   never queries the scanned domain's own nameservers.
 - crt.sh (Certificate Transparency search, JSON): issuers, earliest certificate date, names on
   the same certificates.

@@ -257,7 +257,7 @@ def natural_must_not_link(
     pairs: Iterable[tuple[Iterable[str], Iterable[str]]],
     relations: Iterable[Relation] = (Relation.campaign,),
 ) -> list[Distractor]:
-    """(a) Natural must-not-link pairs from the ground-truth labels (HACK-26 supplies them).
+    """(a) Natural must-not-link pairs from the ground-truth labels (supplies them).
 
     Each pair is (capture ids, capture ids) that must not share a link or campaign under any of
     `relations`. Nothing is added to the dataset.

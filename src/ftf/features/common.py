@@ -321,7 +321,7 @@ def _artefact_type(path: Path) -> ArtefactType:
 
 
 def dataset_from_files(paths: Iterable[Path], raw_root: Path, name: str = "dev-files") -> Dataset:
-    """DEV ONLY until the ingestion adapters (HACK-9) land: one incident and capture per file.
+    """Stub until the ingestion adapters land: one incident and capture per file.
 
     This is not a parser and must not grow into one; switch to the ingestion output once it exists.
     """
@@ -344,7 +344,7 @@ def add_io_args(parser: argparse.ArgumentParser) -> None:
     """Standard I/O flags shared by every feature subcommand."""
     parser.add_argument("--dataset", type=Path, help="input contract dataset JSON")
     parser.add_argument(
-        "--files", type=Path, nargs="+", help="DEV ONLY: raw files to wrap one capture each"
+        "--files", type=Path, nargs="+", help="raw files to wrap, one capture each"
     )
     parser.add_argument("--raw-root", type=Path, default=Path("/data/raw"))
     parser.add_argument("--out", type=Path, required=True, help="output directory")
