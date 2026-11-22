@@ -60,3 +60,30 @@ def test_lgpl_gpl_mpl_denied_outside_named_exceptions():
 )
 def test_not_permissive(licence):
     assert not licences.is_permissive(licence)
+
+
+def test_chromium_exception_is_exact_and_narrow():
+    # HACK-68: only the listed Debian packages, with exactly the recorded licence string.
+    chromium = {"libfake-lgpl1": "LGPL-2.1+", "libfake-mit1": "MIT"}
+    assert licences.is_allowed_system("libfake-lgpl1", "LGPL-2.1+", chromium)
+    assert not licences.is_allowed_system("libfake-lgpl1", "GPL-3+", chromium)
+    assert not licences.is_allowed_system("libfake-other", "LGPL-2.1+", chromium)
+    assert not licences.is_allowed_system("libfake-other", "GPL-2+", chromium)
+    assert licences.is_allowed_system("libfake-other", "MIT", chromium)  # permissive needs no exception
+
+
+def test_image_audit_reports_unlisted_copyleft_and_missing_entries():
+    chromium = {"libfake-lgpl1": "LGPL-2.1+", "libfake-gone": "MIT"}
+    rows = {"libfake-lgpl1": "LGPL-2.1+", "libfake-new": "GPL-2+"}
+    errors = licences.audit_image(rows, chromium)
+    assert errors == [
+        "not permissive and not the HACK-68 exception: libfake-new (GPL-2+)",
+        "listed in chromium-debian-packages.tsv but absent from the image: libfake-gone",
+    ]
+    assert licences.audit_image({"libfake-lgpl1": "LGPL-2.1+"}, {"libfake-lgpl1": "LGPL-2.1+"}) == []
+
+
+def test_committed_chromium_list_loads_and_is_complete():
+    chromium = licences.load_chromium_packages()
+    assert len(chromium) == 112
+    assert all(lic and "UNDETERMINED" not in lic for lic in chromium.values())
