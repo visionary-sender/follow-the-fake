@@ -105,7 +105,7 @@ DECOY_MARKERS: list[tuple[str, str]] = [
 # Landing on one of these after starting elsewhere is the classic cloaker "white page" move.
 WELL_KNOWN_HOSTS = (
     "google.com", "google.pl", "youtube.com", "facebook.com", "instagram.com", "wikipedia.org",
-    "bing.com", "yahoo.com", "amazon.com", "microsoft.com", "apple.com", "onet.pl", "wp.pl",
+    "bing.com", "yahoo.com", "ebay.com", "microsoft.com", "apple.com", "onet.pl", "wp.pl",
     "interia.pl", "allegro.pl", "msn.com", "tiktok.com", "x.com", "twitter.com",
 )
 
