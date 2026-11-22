@@ -16,6 +16,7 @@ import re
 import string
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 
 from ftf.contract import (
@@ -48,8 +49,9 @@ MODES: dict[str, frozenset[ArtefactType]] = {
 def degrade_incident(incident: Incident, mode: str) -> Incident:
     """Keep only the artefacts of `mode` and the indicators extracted from them.
 
-    An indicator survives only if its provenance names a kept artefact; indicators without an
-    artefact provenance are dropped, since we cannot tell which modality they came from. Every
+    An indicator survives if its provenance names a kept artefact. Collector indicators survive
+    every mode: the engine ignores them, so rows differ only by modality. Other indicators without
+    an artefact provenance are dropped, since we cannot tell which modality they came from. Every
     dropped modality is added to the capture's `missing` with reason `degraded:<mode>`.
     """
     keep_types = MODES[mode]  # KeyError on an unknown mode is intended
@@ -66,7 +68,8 @@ def degrade_incident(incident: Incident, mode: str) -> Incident:
         captures.append({**cap.model_dump(), "artefacts": [a.model_dump() for a in arts], "missing": missing})
     indicators = [
         i.model_dump() for i in incident.indicators
-        if i.provenance.artefact_id is not None and i.provenance.artefact_id in kept_artefacts
+        if i.layer is Layer.collector
+        or (i.provenance.artefact_id is not None and i.provenance.artefact_id in kept_artefacts)
     ]
     return Incident.model_validate({**incident.model_dump(), "captures": captures, "indicators": indicators})
 
@@ -167,6 +170,17 @@ def _reid(prefix: str, x: str) -> str:
     return f"{prefix}{x}"
 
 
+def _map_strings(obj, fn):
+    """`fn` applied to every string in a nested dict/list; enum members and other values are kept."""
+    if isinstance(obj, dict):
+        return {k: _map_strings(v, fn) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_map_strings(v, fn) for v in obj]
+    if isinstance(obj, str) and not isinstance(obj, Enum):
+        return fn(obj)
+    return obj
+
+
 def _copy_captures(
     incident: Incident,
     capture_ids: Iterable[str],
@@ -175,7 +189,7 @@ def _copy_captures(
     new_incident_id: str,
     source: str,
     prefix: str,
-    value_map: callable = lambda ind: ind.value,
+    string_map: callable | None = None,
     drop_artefacts: bool = False,
     missing_reason: str | None = None,
 ) -> Incident:
@@ -183,7 +197,9 @@ def _copy_captures(
 
     Ids get `prefix`. Artefacts lose `path` and `sha256`: the synthetic item has no file on disk,
     and a file hash would make it an exact duplicate of the original. With `drop_artefacts`,
-    artefacts not cited by a kept indicator are removed and listed as missing.
+    artefacts not cited by a kept indicator are removed and listed as missing. With `string_map`,
+    it is applied to every string of the copied captures and indicators (not to the new incident's
+    own id or source).
     """
     capture_ids = set(capture_ids)
     inds = [i for i in incident.indicators if i.capture_id in capture_ids and keep(i)]
@@ -211,9 +227,10 @@ def _copy_captures(
         d["capture_id"] = _reid(prefix, ind.capture_id)
         aid = ind.provenance.artefact_id
         d["provenance"] = {**d["provenance"], "artefact_id": _reid(prefix, aid) if aid else None}
-        if ind.value is not None:
-            d["value"] = value_map(ind)
         indicators.append(d)
+    if string_map is not None:
+        captures = _map_strings(captures, string_map)
+        indicators = _map_strings(indicators, string_map)
     return Incident.model_validate({
         "id": new_incident_id,
         "source": source,
@@ -263,9 +280,10 @@ def kit_copy(dataset: Dataset, capture_id: str, *, seed: int = 0, tag: str = "0"
     values replaced by random values of the same shape.
 
     Replaced indicators are those in `KIT_COPY_LAYERS` or whose kind matches `KIT_COPY_KINDS`.
-    Their identity tokens are also scrubbed from every other indicator value (a landing path
-    inside a URL, say), so no original id survives. Replaced indicators that hold only a vector
-    are dropped. Expected: template link to the original, no campaign/operator/tracking link,
+    Their identity tokens are scrubbed, as whole alphanumeric tokens, from every string of the
+    copy (values, provenance, ids), so a landing path inside a URL or a locator keeps no original
+    identity. Vector-only indicators are dropped, since a copied vector would keep the original
+    store and key. Expected: template link to the original, no campaign/operator/tracking link,
     never assigned.
     """
     rng = random.Random(f"{seed}:{capture_id}:{tag}")
@@ -280,20 +298,18 @@ def kit_copy(dataset: Dataset, capture_id: str, *, seed: int = 0, tag: str = "0"
             for tok in _id_tokens(ind.value):
                 if tok not in mapping:
                     mapping[tok] = _fresh_token(tok, rng)
-    # Longest first so a token that contains another is replaced whole.
-    scrub = sorted((t for t in mapping if len(t) >= 6), key=len, reverse=True)
-    scrub_re = re.compile("|".join(re.escape(t) for t in scrub)) if scrub else None
+    # Whole alphanumeric tokens only, longest first; the same map scrubs every string of the copy.
+    alts = "|".join(re.escape(t) for t in sorted(mapping, key=len, reverse=True))
+    scrub_re = re.compile(rf"(?<![A-Za-z0-9])({alts})(?![A-Za-z0-9])") if mapping else None
 
-    def value_map(ind: Indicator) -> str:
-        v = ind.value
-        if replaced(ind):
-            return _TOKEN.sub(lambda m: mapping.get(m.group(0), m.group(0)), v)
-        return scrub_re.sub(lambda m: mapping[m.group(0)], v) if scrub_re else v
+    def scrub(s: str) -> str:
+        return scrub_re.sub(lambda m: mapping[m.group(1)], s) if scrub_re else s
 
     prefix = f"syn-kitcopy-{tag}:"
     new = _copy_captures(
-        inc, [capture_id], lambda i: not (replaced(i) and i.vector_ref is not None),
-        new_incident_id=f"syn-kitcopy-{tag}", source="synthetic", prefix=prefix, value_map=value_map,
+        inc, [capture_id],
+        lambda i: i.vector_ref is None,  # a copied vector would keep the original store and key
+        new_incident_id=f"syn-kitcopy-{tag}", source="synthetic", prefix=prefix, string_map=scrub,
     )
     return Distractor(
         code="b",
@@ -576,6 +592,37 @@ def with_incidents(dataset: Dataset, add: Iterable[Incident] = (), drop: Iterabl
     return Dataset(name=name or dataset.name, description=dataset.description, incidents=incidents)
 
 
+def hold_out(dataset: Dataset, incident_ids: Iterable[str], *, name: str | None = None) -> Dataset:
+    """`dataset` without the given incidents and without their exact duplicates, at capture level.
+
+    The held-out captures are closed under exact duplication in both directions: a capture is
+    removed when its canonical capture (`duplicate_of`, or itself) is the canonical of a held-out
+    capture, wherever it sits. An incident whose captures all go is dropped; a mixed incident
+    keeps its other captures, with their indicators. So no kept capture points at a removed one.
+    Engine output is not carried over.
+    """
+    drop = set(incident_ids)
+    held = [c.id for i in dataset.incidents if i.id in drop for c in i.captures]
+    canon = {c.id: (c.duplicate_of or c.id) for i in dataset.incidents for c in i.captures}
+    roots = {canon[c] for c in held}
+    gone = {cid for cid, root in canon.items() if root in roots}
+    incidents = []
+    for inc in dataset.incidents:
+        if inc.id in drop:
+            continue
+        if not any(c.id in gone for c in inc.captures):
+            incidents.append(inc)
+            continue
+        kept = {c.id for c in inc.captures if c.id not in gone}
+        if not kept:
+            continue
+        d = inc.model_dump()
+        d["captures"] = [c for c in d["captures"] if c["id"] in kept]
+        d["indicators"] = [i for i in d["indicators"] if i["capture_id"] in kept]
+        incidents.append(Incident.model_validate(d))
+    return Dataset(name=name or dataset.name, description=dataset.description, incidents=incidents)
+
+
 def replace_incidents(dataset: Dataset, replacements: Mapping[str, Incident] | Iterable[Incident]) -> Dataset:
     """`dataset` with incidents swapped for same-id replacements, order kept, engine output dropped."""
     rep = dict(replacements) if isinstance(replacements, Mapping) else {i.id: i for i in replacements}
@@ -603,6 +650,7 @@ __all__ = [
     "degrade",
     "degrade_incident",
     "expected_met",
+    "hold_out",
     "kit_copy",
     "link_violations",
     "natural_must_not_link",

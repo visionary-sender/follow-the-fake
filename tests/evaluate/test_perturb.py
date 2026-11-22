@@ -1,7 +1,8 @@
+import json
 import re
 
 import pytest
-from evaluate_support import FakeEngine, dataset
+from evaluate_support import FakeEngine, dataset, incident
 
 from ftf.contract import ArtefactType, Dataset, Layer, Relation
 from ftf.evaluate.openset import run_distractors
@@ -12,6 +13,7 @@ from ftf.evaluate.perturb import (
     collector_injection,
     decision_diff,
     degrade,
+    hold_out,
     kit_copy,
     natural_must_not_link,
     platform_only,
@@ -28,7 +30,7 @@ def test_degrade_keeps_only_mode(mode):
     for inc in out.incidents:
         arts = {a.id: a for c in inc.captures for a in c.artefacts}
         assert all(a.type in keep for a in arts.values())
-        assert all(i.provenance.artefact_id in arts for i in inc.indicators)
+        assert all(i.layer is Layer.collector or i.provenance.artefact_id in arts for i in inc.indicators)
         for cap in inc.captures:
             reasons = {m.modality: m.reason for m in cap.missing}
             assert reasons[ArtefactType.video] == "not captured"  # pre-existing entry kept
@@ -39,10 +41,11 @@ def test_degrade_keeps_only_mode(mode):
     assert not out.links and not out.campaigns and not out.assignments
 
 
-def test_degrade_drops_unattributed_indicators():
+def test_degrade_keeps_collector_indicators_in_every_mode():
     out = degrade(dataset(), "har")
     kinds = {i.kind for i in out.indicators()}
-    assert kinds == {"fb_pixel"}  # viewport has no artefact provenance, so it goes
+    # viewport is a collector indicator with no artefact provenance: kept, like in every mode.
+    assert kinds == {"fb_pixel", "viewport"}
 
 
 def test_degrade_unknown_mode():
@@ -70,6 +73,74 @@ def test_kit_copy_scrubs_identity_and_keeps_template():
     assert r.passed, r.violations
     assert r.expected_met is True
     assert r.decisions == {new.id: "new"}
+
+
+def _with_raw(ds: Dataset, edit) -> Dataset:
+    """`ds` with `edit` applied to each incident's dict, validated again."""
+    raw = ds.model_dump(mode="json")
+    for inc in raw["incidents"]:
+        edit(inc)
+    return Dataset.model_validate(raw)
+
+
+def test_kit_copy_scrubs_provenance_and_drops_vectors():
+    def edit(inc):
+        if inc["id"] != "ia1":
+            return
+        tenant = next(i for i in inc["indicators"] if i["kind"] == "tenant_id")
+        tenant["provenance"]["locator"] = "/pages/a1a1a1a1/x"
+        tenant["provenance"]["note"] = "tenant a1a1a1a1 seen"
+        inc["indicators"].append({
+            **tenant, "id": "a1:vec", "kind": "face_embedding", "layer": "creative", "value": None,
+            "vector_ref": {"store": "vectors/orig.npy", "key": "orig-key", "model": "m", "dim": 4},
+        })
+
+    (new,) = kit_copy(_with_raw(dataset(), edit), "a1", seed=1).incidents
+    dumped = json.dumps(new.model_dump(mode="json"))
+    for secret in ("a1a1a1a1", "orig.npy", "orig-key"):
+        assert secret not in dumped
+    assert all(i.vector_ref is None for i in new.indicators)
+
+
+def _small(*incidents):
+    return Dataset.model_validate({"name": "small", "incidents": list(incidents)})
+
+
+def test_hold_out_removes_duplicates_from_a_mixed_reference_incident():
+    # Held-out ia1 is duplicated inside the mixed imix: that duplicate goes, imix keeps x2.
+    ds = _small(
+        incident("ia1", [("a1", "A")]),
+        incident("imix", [("x1", "A"), ("x2", "B")], dup_of={"x1": "a1"}),
+    )
+    (mixed,) = hold_out(ds, ["ia1"]).incidents
+    assert mixed.id == "imix"
+    assert [c.id for c in mixed.captures] == ["x2"]
+    assert {i.capture_id for i in mixed.indicators} == {"x2"}
+
+
+def test_hold_out_of_a_mixed_incident_removes_its_duplicates_elsewhere():
+    # Held-out imix's capture x1 is duplicated inside the mixed iz: y1 goes, iz keeps z1.
+    ds = _small(
+        incident("imix", [("x1", "A"), ("x2", "B")]),
+        incident("iz", [("z1", "C"), ("y1", "A")], dup_of={"y1": "x1"}),
+        incident("ia2", [("a2", "A")]),
+    )
+    rest = hold_out(ds, ["imix"])
+    assert {c.id for i in rest.incidents for c in i.captures} == {"z1", "a2"}
+    iz = next(i for i in rest.incidents if i.id == "iz")
+    assert {i.capture_id for i in iz.indicators} == {"z1"}
+
+
+def test_collector_check_does_not_match_an_item_against_its_duplicate():
+    # ip's exact duplicate iq sits in the same campaign as ir. The check must hold iq out with
+    # ip, so the swapped ip has nothing to be assigned to.
+    ds = _small(
+        incident("ip", [("p1", "A")]),
+        incident("iq", [("p2", "A")], dup_of={"p2": "p1"}),
+        incident("ir", [("r1", "A")]),
+    )
+    (r,) = run_distractors(FakeEngine(), ds, [collector_injection(ds, "p1", "r1", seed=3)])
+    assert r.passed and r.decisions["ip"] == "new"
 
 
 def test_platform_only_passes_and_flags_a_leaky_engine():
