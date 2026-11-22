@@ -7,13 +7,21 @@ The output is JSON (never pickle): the learned `WeightTable`, the background ope
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
 from pydantic import ValidationError
 
 from ftf.contract.models import Dataset
-from ftf.linking.background import BackgroundCounts, read_corpus_kinds
+from ftf.linking.background import (
+    DEFAULT_BRAND_STOPLIST,
+    BackgroundCounts,
+    brand_digests,
+    brand_stoplist_doc,
+    read_corpus_kinds,
+    real_pages,
+)
 from ftf.linking.learned import dump_weights, learn_weights, load_weights
 from ftf.linking.ledger import ScoringContext
 from ftf.linking.weights import HAND_TABLE
@@ -99,3 +107,34 @@ def context_from_args(ds: Dataset, args: argparse.Namespace, loaded=None) -> Sco
         return ScoringContext.from_dataset(ds, weights=HAND_TABLE)
     table, bg = loaded
     return ScoringContext.from_dataset(ds, weights=table, background=bg)
+
+
+def register_brand_stoplist(subparsers: argparse._SubParsersAction) -> None:
+    parser = subparsers.add_parser(
+        "brand-stoplist",
+        help="build the hashed brand stop-list from the corpus's real outlet pages",
+        description="Hash every linkable value on the corpus incidents tagged must_not_link (corpus_kind.jsonl "
+        "beside CORPUS.json) into a brand stop-list. The default scoring path reads it from "
+        "$FTF_BRAND_STOPLIST or " + DEFAULT_BRAND_STOPLIST + "; the file holds digests only.",
+    )
+    parser.add_argument("corpus", type=Path, metavar="CORPUS.json", help="contract dataset of the background corpus")
+    parser.add_argument("-o", "--out", type=Path, default=Path(DEFAULT_BRAND_STOPLIST), metavar="brand-stoplist.json")
+    parser.set_defaults(func=run_brand_stoplist)
+
+
+def run_brand_stoplist(args: argparse.Namespace) -> int:
+    try:
+        corpus = Dataset.from_json(args.corpus.read_bytes())
+        kinds = read_corpus_kinds(args.corpus)
+        if kinds is None:
+            print(f"ftf brand-stoplist: no corpus_kind.jsonl beside {args.corpus}", file=sys.stderr)
+            return 2
+        real = real_pages(corpus, kinds)
+        brand = brand_digests(real)
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(json.dumps(brand_stoplist_doc(brand, len(real.incidents))) + "\n", encoding="utf-8")
+    except (OSError, ValidationError, ValueError, KeyError) as exc:
+        print(f"ftf brand-stoplist: {exc}", file=sys.stderr)
+        return 2
+    print(f"brand stop-list: {len(brand)} values from {len(real.incidents)} real pages -> {args.out}")
+    return 0

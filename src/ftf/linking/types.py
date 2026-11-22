@@ -28,6 +28,9 @@ class PairScore:
     # decisions (link, qualify, assign bar, cluster weights) read `decision_bits`, so content
     # similarity ranks and lifts to review but never decides a link
     id_bits: Optional[float] = None
+    # False when the gate of HACK-66 failed: only platform-level or creative evidence is shared (a gated
+    # relation then never links; link_incident explains the pair under the ecosystem relation instead)
+    substantive: bool = True
 
 
 class PairScorer(Protocol):

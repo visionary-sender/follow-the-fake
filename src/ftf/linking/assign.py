@@ -453,7 +453,13 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
         for m, mps in sorted(per_member.items()):
             if mps.bits <= 0:
                 continue
-            lid = link_id(relation, mps.a, mps.b, prefix=f"link:{incident.id}")
+            if not mps.substantive and relation is not Relation.ecosystem:
+                # platform-level or creative evidence only (HACK-66): explained at ecosystem level, never as
+                # a link of `relation`
+                mps = setup.be.score(mps.a, mps.b, Relation.ecosystem)
+                if mps.bits <= 0:
+                    continue
+            lid = link_id(mps.relation, mps.a, mps.b, prefix=f"link:{incident.id}")
             if lid in seen:
                 continue
             link = be.link(mps, lid)

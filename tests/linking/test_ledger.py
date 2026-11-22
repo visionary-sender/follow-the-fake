@@ -153,7 +153,8 @@ def test_b_distractor_on_other_platform_is_new(ctx):
     assert row(s, "platform_name").status is EvidenceStatus.conflict
     assert row(s, "platform_name").bits == HAND_TABLE.conflict_bits
     assert row(s, "image_phash").bits > 0
-    assert row(s, "brand_asset").status is EvidenceStatus.hub_subsumed
+    # brand skin (HACK-66): ecosystem only, says nothing about the campaign
+    assert row(s, "brand_asset").bits == 0 and "says nothing" in row(s, "brand_asset").note
     # distractor has no tenant layer: a missing row, 0 bits
     assert row(s, "aio_cdn_tenant").status is EvidenceStatus.missing
     assert row(s, "aio_cdn_tenant").bits == 0

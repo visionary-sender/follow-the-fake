@@ -22,7 +22,7 @@ from ftf.linking.commands import register_index
 from ftf.linking.commands import register_link
 from ftf.linking.commands import register_score
 from ftf.linking.commands import register_sensitivity
-from ftf.linking.learn_commands import register_learn_weights
+from ftf.linking.learn_commands import register_brand_stoplist, register_learn_weights
 from ftf.pipeline.commands import register_analyze
 from ftf.pipeline.commands import register_build_base
 from ftf.pipeline.commands import register_export
@@ -32,6 +32,7 @@ from ftf.scanner.run import register as register_scan
 COMMANDS: list[Callable[[argparse._SubParsersAction], None]] = [
     register_analyze,
     register_assign,
+    register_brand_stoplist,
     register_build_base,
     register_calibrate,
     register_corpus,
