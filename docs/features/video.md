@@ -76,7 +76,8 @@ There is a test for the renamed-playlist case.
 | `Systran/faster-whisper-small` | MIT (OpenAI Whisper weights) | Hugging Face | 486 MB | speech, default |
 
 Whisper weights download on first use into `ftf.features.common.model_dir()/faster-whisper`
-(`FTF_MODEL_DIR`). ffmpeg is called as an external program, not linked, so the copyleft
+(`FTF_MODEL_DIR`). `ftf features prefetch --speech` fetches them ahead of time; with `FTF_OFFLINE=1`
+the loader reads only that cache. ffmpeg is called as an external program, not linked, so the copyleft
 of the Debian build does not reach our code. A container that wants a permissive build can
 use an LGPL-only ffmpeg.
 

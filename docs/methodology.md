@@ -116,8 +116,8 @@ subtracts the rarity term:
   `must_not_link`). The default scoring path reads that file from `$FTF_BRAND_STOPLIST`, or from
   `/data/derived/linking/brand-stoplist/brand-stoplist.json` when the variable is not set. A
   stop-listed value is `hub_subsumed` with 0 bits under every relation except ecosystem. The
-  `brand_asset` kind counts under ecosystem only, with or without the list. Without the file (for
-  example in the jury container), the engine prints a warning and scores as if no stop-list existed.
+  `brand_asset` kind counts under ecosystem only, with or without the list. Without the file (the jury
+  image ships it, HACK-75), the engine prints a warning and scores as if no stop-list existed.
   The file holds digests only.
 - A value carried by more than 500 captures never proposes a candidate pair (`HUB_POSTINGS`).
 - The priors above are the **hand table**. `ftf link --weights FILE` replaces them with a learned table
@@ -375,7 +375,10 @@ at scale. The design targets 10^5 incidents; that target is a plan, not a result
   is recorded as `unknown` and carries no bits; a stale cache entry is labelled as stale.
 - **Campaigns rotate.** Operators change pages and pixels inside a campaign. The campaign relation
   is strict for that reason, and screenshot-only variants go to review rather than to a campaign.
-- **The evaluation is a regression check, not a benchmark.** HACK-29's raw counts are in the README
-  ("Evaluation results"). They show 0 of 11 true campaign pairs recovered when platform ids are
-  hidden, and real outlet, platform-only, celebrity-only and one synthetic kit-copy page still link to
-  a campaign, operator, template or tracking account (HACK-66, open). No accuracy figure is claimed here.
+- **The evaluation is a regression check, not a benchmark.** The final report's raw counts are in the
+  README ("Evaluation results"). Its protocols are time split (E7), hidden-layer recovery (E1),
+  leave-one-out (E2), degraded inputs (E3), distractors (E4) and a ±2-bit sensitivity sweep (E6). With
+  platform ids hidden the engine recovers 0 of 11 true campaign pairs and links none, so recall there is
+  0 of 11 while precision is safe. On the distractors it passes all natural must-not-link pairs, brand
+  negatives, platform-only and celebrity-only pages, but one of three synthetic kit copies still fails.
+  No accuracy figure is claimed here.
