@@ -24,9 +24,11 @@ Rules (07 §2.2, §3 D1):
   the bits add. A conflict on a single-valued, campaign-stable field (platform / tenant / owner)
   adds `conflict_bits` once per layer (the worst one).
 - Campaign gate (HACK-53): under the campaign relation the D1 gate (≥2 positive layers or a live
-  operator-private id) also needs one positive row of campaign-level evidence
-  (`weights.is_campaign_evidence`: creative, ad account campaign or ad set, landing or own domain, aio
-  campaign, offer id). Without it `layers_positive` is capped at 1 and `live_private` is false, so
+  operator-private id) also needs one positive shared value of campaign-level evidence (`weights.CAMPAIGN_EVIDENCE_KINDS`:
+  the ad and its creative, ad account campaign or ad set, landing or own domain, aio campaign, offer id; or a
+  value the id hierarchy places at campaign or landing level; for a kind without a weight entry, its own
+  `Indicator.level` campaign or landing), read before the chain rule and the
+  within-layer max. Without it `layers_positive` is capped at 1 and `live_private` is false, so
   every consumer of the gate (verdict, grouping, assignment, link level) sees at most a review: one
   operator's pixel, CAPI gateway and kit span several of its campaigns (07 §2.2, §2.3). The bits
   are untouched.
@@ -322,6 +324,19 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
                 note="single-valued, campaign-stable field differs",
             ), w.conflict_bits))
 
+    # campaign gate (HACK-53), read before the chain rule and the within-layer max: those only decide which
+    # row carries a level's bits, so a shared aio campaign id that loses its slot to a kit value constant on
+    # that campaign still proves the campaign
+    campaign_evidence = relation is not Relation.campaign or any(
+        c.bits > 0 and (
+            is_campaign_evidence(c.key[0], c.key[1])
+            # a kind without a weight entry: its own Indicator.level decides
+            or (c.key[1] not in w.kinds and ctx.kind_level.get(c.key[:2]) in (Level.campaign, Level.landing))
+            or (ctx.hierarchy is not None and ctx.hierarchy.level(c.key) in (Level.campaign, Level.landing))
+        )
+        for c in shared_cands
+    )
+
     if ctx.hierarchy is not None and relation in CHAIN_RELATIONS:
         shared_cands, subsumed = apply_chain_rule(shared_cands, ctx.hierarchy, _platform_cap(w, relation))
         other_rows += subsumed
@@ -373,11 +388,8 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
             else:
                 chain_positive = True
     layers_positive += chain_positive
-    if relation is Relation.campaign and not any(
-        r.bits > 0 and is_campaign_evidence(r.layer, r.kind) for r in rows
-    ):
-        # campaign gate (HACK-53): operator-level evidence alone (accounts, kit, hosting) never makes a campaign
-        # link; the pair stays in review at most
+    if not campaign_evidence:
+        # operator-level evidence alone (accounts, kit, hosting) never makes a campaign link: review at most
         layers_positive = min(layers_positive, 1)
         live_private = False
     rows += other_rows

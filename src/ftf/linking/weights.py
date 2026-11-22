@@ -245,21 +245,25 @@ HAND_TABLE = WeightTable(
 # Campaign-level evidence (HACK-53): what one campaign has and another campaign of the same owner does not.
 # Under the campaign relation the D1 gate needs at least one shared row of this kind (see `ledger.score_pair`):
 # the operator's tracking accounts, tracker instances, kit, platform, tenant, owner, offer contacts and
-# shared hosting are common to all of that operator's campaigns. Campaign-level: the creative and the ad
-# (ad id, caption, title, image), the ad account's campaign and ad set, the landing (aio landing id, the
-# scam's own host or domain), and the aio campaign id or name and an affiliate offer id. Excluded from those
-# layers: URL and form shapes and the redirect-chain shape (template-like structure), and the aio traffic
-# source label (operator-level).
-CAMPAIGN_EVIDENCE_LAYERS = frozenset({Layer.creative, Layer.distribution_account, Layer.landing})
-CAMPAIGN_EVIDENCE_KINDS = frozenset({"aio_campaign", "aio_campaign_name", "offer_id"})
-NOT_CAMPAIGN_EVIDENCE_KINDS = frozenset({"aio_source", "page_url_shape", "form_action_shape", "redirect_chain_shape"})
+# shared hosting are common to all of that operator's campaigns. An explicit list of kinds, never a layer
+# fallback: the same layers also hold operator-level kinds (advertiser page or account, traffic source),
+# ecosystem or capture facts (ad platform, start date, format) and template structure (URL, form and chain
+# shapes, the cloned article's page title). Campaign-level: the ad and its creative (ad id and name,
+# caption, image pack), the ad account's campaign and ad set, the landing (aio landing id or name, the
+# scam's own host or domain), the aio campaign id or name and an affiliate offer id. A value the
+# discovered id hierarchy places at campaign or landing level also counts (`ledger.score_pair`).
+CAMPAIGN_EVIDENCE_KINDS = frozenset({
+    "meta_ad_id", "meta_ad_name", "ad_caption", "image_phash",
+    "meta_campaign_id", "meta_campaign_name", "meta_adset_id", "meta_adset_name",
+    "aio_landing", "aio_landing_name", "landing_host", "landing_domain", "ad_landing_domain", "ad_display_domain",
+    "aio_campaign", "aio_campaign_name", "offer_id",
+})
 
 
 def is_campaign_evidence(layer: Layer, kind: str) -> bool:
-    """A shared value of this (layer, kind) tells one campaign from another of the same operator."""
-    if kind in NOT_CAMPAIGN_EVIDENCE_KINDS:
-        return False
-    return kind in CAMPAIGN_EVIDENCE_KINDS or layer in CAMPAIGN_EVIDENCE_LAYERS
+    """A shared value of this kind tells one campaign from another of the same operator (`layer` unused:
+    the kind decides, so a kind filed in an unexpected layer keeps its meaning)."""
+    return kind in CAMPAIGN_EVIDENCE_KINDS
 
 
 # Values that record a failed lookup, not evidence (HACK-19 writes `unknown` when a source is down).

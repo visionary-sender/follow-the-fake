@@ -248,6 +248,62 @@ def test_same_campaign_pixel_and_landing_links():
     assert verdict(s, ctx) == "link"
 
 
+def test_operator_level_kinds_in_campaign_layers_do_not_open_the_gate():
+    """HACK-53 review: an advertiser page or a cloned page title sits in a campaign-ish layer but is shared
+    by all campaigns of the account or template; with the owner's live gateway it is still no campaign link."""
+    shared = [
+        ind(L.tracking_account, "capi_gateway", "gateway-1", live=True),
+        ind(L.distribution_account, "advertiser_page_name", "Page one"),
+        ind(L.creative, "page_title", "Title one"),
+        ind(L.kit, "asset_norm_sha256", "asset-1", live=True),
+    ]
+    fillers = [incident(f"f{i}", [ind(L.landing, "aio_landing", f"landing-f{i}")]) for i in range(10)]
+    ds = Dataset(name="page", incidents=[
+        incident("c1", shared + [ind(L.landing, "aio_landing", "landing-1")]),
+        incident("c2", shared + [ind(L.landing, "aio_landing", "landing-2")]),
+    ] + fillers)
+    ctx = ScoringContext.from_dataset(ds)
+    s = score_pair(ctx, "c1/lander", "c2/lander", Relation.campaign)
+    assert row(s, "advertiser_page_name").bits > 0
+    assert not s.live_private and s.layers_positive == 1
+    assert verdict(s, ctx) != "link"
+    assert verdict(score_pair(ctx, "c1/lander", "c2/lander", Relation.operator), ctx) == "link"
+
+
+def test_shared_aio_campaign_opens_the_gate_whatever_wins_its_slot():
+    """HACK-53 review: two landings of one aio campaign sharing the campaign id and a campaign-constant kit set:
+    the gate reads the candidates before the chain rule, so the pair links whichever row carries the level."""
+    chain = [
+        ind(L.platform, "platform_name", "stack-a"),
+        ind(L.tenant, "aio_cdn_tenant", "tenant-a"),
+        ind(L.owner, "aio_owner", "owner-a"),
+        ind(L.owner, "aio_campaign", "campaign-a"),
+        ind(L.kit, "kit_asset_set", "kitset-a", live=True),
+        ind(L.tracking_account, "meta_pixel", "pixel-a", live=True),
+    ]
+    other = [
+        ind(L.platform, "platform_name", "stack-a"),
+        ind(L.tenant, "aio_cdn_tenant", "tenant-a"),
+        ind(L.owner, "aio_owner", "owner-a"),
+        ind(L.owner, "aio_campaign", "campaign-b"),
+        ind(L.kit, "kit_asset_set", "kitset-b", live=True),
+        ind(L.tracking_account, "meta_pixel", "pixel-a", live=True),
+    ]
+    fillers = [incident(f"f{i}", [ind(L.landing, "aio_landing", f"landing-f{i}")]) for i in range(10)]
+    ds = Dataset(name="chain", incidents=[
+        incident("c1", chain + [ind(L.landing, "aio_landing", "landing-1")]),
+        incident("c2", chain + [ind(L.landing, "aio_landing", "landing-2")]),
+        incident("c3", chain + [ind(L.landing, "aio_landing", "landing-2")]),
+        incident("o1", other + [ind(L.landing, "aio_landing", "landing-3")]),
+    ] + fillers)
+    ctx = ScoringContext.from_dataset(ds)
+    same = score_pair(ctx, "c1/lander", "c2/lander", Relation.campaign)
+    assert same.live_private  # the gate keeps the live private id: a shared aio campaign is campaign evidence
+    assert verdict(same, ctx) == "link"
+    # the other campaign of the same owner: aio campaign conflict, only owner-level evidence left
+    assert verdict(score_pair(ctx, "c1/lander", "o1/lander", Relation.campaign), ctx) != "link"
+
+
 def test_owner_campaigns_grouping():
     """End to end: the two campaigns of one owner are one operator group and two campaign groups."""
     from ftf.linking import link_dataset
