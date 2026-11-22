@@ -92,6 +92,41 @@ def test_har_page_url_is_enriched_offline(tmp_path, monkeypatch):
     assert not (tmp_path / "data").exists()
 
 
+def test_enrichment_looks_up_own_domains_not_shared_hops(tmp_path, monkeypatch):
+    """Landing and tracker hop are enriched; the stop-listed platform hop that starts the chain is not."""
+    from ftf.enrich import Enricher
+
+    monkeypatch.chdir(tmp_path)  # no enrichment cache here
+    looked_up: list[str] = []
+    enrich = Enricher.enrich
+
+    def spy(self, name, *args, **kwargs):
+        looked_up.append(name)
+        return enrich(self, name, *args, **kwargs)
+
+    monkeypatch.setattr(Enricher, "enrich", spy)
+
+    def entry(url, status=200, location=None):
+        resp = {"status": status, "headers": [], "content": {"mimeType": "text/html", "text": ""}}
+        if location:
+            resp["headers"] = [{"name": "Location", "value": location}]
+        return {"pageref": "p0", "request": {"method": "GET", "url": url}, "response": resp, "_resourceType": "document"}
+
+    har = {"log": {
+        "pages": [{"id": "p0", "title": "https://l.facebook.com/l.php?u=x"}],
+        "entries": [
+            entry("https://l.facebook.com/l.php?u=x", 302, "https://trk.example.net/click?clickid=c0ffee"),
+            entry("https://trk.example.net/click?clickid=c0ffee", 302, "https://shop.example.com/p"),
+            entry("https://shop.example.com/p"),
+        ],
+    }}
+    src = tmp_path / "chain.har"
+    src.write_text(json.dumps(har))
+    res = analyze(AnalysisInput(kind="har", path=src, name="chain.har"), synthetic_base(), run_dir=tmp_path / "run", offline=True)
+    assert next(s for s in res.stages if s.name == "enrichment").status == "ok", res.stages
+    assert sorted(set(looked_up)) == ["example.com", "example.net"]
+
+
 def test_fallback_id_already_in_base_is_not_linked_again(tmp_path, monkeypatch):
     calls = []
     _stub_linking(monkeypatch, calls)
