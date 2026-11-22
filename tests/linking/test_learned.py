@@ -467,8 +467,8 @@ def test_one_term_per_level_keeps_the_stronger_of_id_and_constant():
     s = score_pair(ScoringContext.from_dataset(ds), "h1/lander", "h2/lander", Relation.operator)
     rows = {r.kind: r for r in s.rows}
     level_terms = [rows["aio_owner"].bits, rows["xid_tracker_machine"].bits]
-    assert sorted(level_terms)[0] == 0 and max(level_terms) == pytest.approx(
-        max(HAND_TABLE.kinds["aio_owner"].bits - 1, HAND_TABLE.kinds["xid_tracker_machine"].bits))
+    # one term for the owner level (the stronger row), conditioned on the shared tenant: log2(1 known + 3)
+    assert sorted(level_terms)[0] == 0 and max(level_terms) == pytest.approx(2.0)
 
 
 def test_platform_term_never_opens_the_live_gate():
@@ -617,3 +617,20 @@ def test_learning_holds_out_the_label_ancestor_layers_and_keeps_unknown_kinds_un
     assert set(rep["relations"]["operator"]["held_out_layers"]) == {"owner", "tenant"}
     assert table.kinds["aio_cdn_tenant"] == HAND_TABLE.kinds["aio_cdn_tenant"]
     assert "made_up_kind" not in table.kinds and rep["kinds"]["made_up_kind"].get("not_in_table")
+
+
+def test_level_with_a_live_private_non_top_row_is_still_conditioned():
+    from ftf.linking.hierarchy import ChainRow, apply_chain_rule
+    from ftf.contract.models import EvidenceRow
+
+    tenant_key, owner_key, kit_key = (L.tenant, "aio_cdn_tenant", "t"), (L.owner, "aio_owner", "o"), (L.kit, "kit_asset_set", "k")
+    h = Hierarchy(level_of={tenant_key: Level.tenant, owner_key: Level.operator, kit_key: Level.operator},
+                  parents={Level.operator: Level.tenant, Level.tenant: None}, n_children={"aio_cdn_tenant=t": 1})
+
+    def row(key, bits, live):
+        return ChainRow(EvidenceRow(layer=key[0], kind=key[1], status=EvidenceStatus.shared, bits=bits), bits, key,
+                        live_private=live, private=live)
+    kept, _ = apply_chain_rule([row(tenant_key, 6.0, True), row(owner_key, 4.0, True), row(kit_key, 5.0, False)], h, 1.7)
+    owner_term = [c for c in kept if c.key != tenant_key][0]
+    assert owner_term.key == kit_key and owner_term.live_private and owner_term.chain
+    assert owner_term.bits == pytest.approx(2.0)  # log2(1 known + 3 unseen), not the unconditional 5

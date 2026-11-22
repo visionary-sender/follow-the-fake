@@ -193,10 +193,10 @@ def apply_chain_rule(cands: list[ChainRow], hierarchy: Hierarchy, platform_cap: 
                 })
                 bits = round(platform_cap, 3)
             top = ChainRow(row, bits, top.key, live_private=False, private=top.private)
-        elif any(c.live_private for c in rest) and not top.live_private:
-            # a live private id of this level still opens the strict gate through the level's one term
-            top = ChainRow(top.row, top.bits, top.key, live_private=True, private=top.private)
         else:
+            if any(c.live_private for c in rest) and not top.live_private:
+                # a live private id of this level still opens the strict gate through the level's one term
+                top = ChainRow(top.row, top.bits, top.key, live_private=True, private=top.private)
             top = _conditioned(top, level, by_level, hierarchy)
         kept.append(top)
         subsumed += [_subsume(c, f"one term per {name}, counted by {top.key[1]}") for c in rest]
