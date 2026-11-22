@@ -6,6 +6,11 @@
 set -eu
 
 if [ "$#" -gt 0 ]; then
+    # Commands such as `ftf analyze` use the base in /base when one is there, as the app does.
+    if [ -z "${FTF_BASE:-}" ] && [ -f "${FTF_BASE_DIR:-/base}/dataset.json" ]; then
+        FTF_BASE="${FTF_BASE_DIR:-/base}/dataset.json"
+        export FTF_BASE
+    fi
     exec ftf "$@"
 fi
 
