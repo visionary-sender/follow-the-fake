@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import textwrap
 from itertools import combinations
 from pathlib import Path
 
@@ -100,7 +101,7 @@ def evidence_separation(dataset: Path, labels: dict, out: Path, footer: str) -> 
     }
 
     fig = plt.figure(figsize=(9, 8.2), dpi=150, facecolor="white")
-    gs = fig.add_gridspec(6, 1, height_ratios=[1, 1, 1, 1.6, 1.6, 1.6], hspace=0.12)
+    gs = fig.add_gridspec(6, 1, height_ratios=[1, 1, 1, 1.6, 1.6, 1.6], hspace=0.55)
     strips = [fig.add_subplot(gs[i]) for i in range(3)]
     hists = [fig.add_subplot(gs[i + 3], sharex=strips[0]) for i in range(3)]
     rng_jit = random.Random(SEED)
@@ -128,7 +129,7 @@ def evidence_separation(dataset: Path, labels: dict, out: Path, footer: str) -> 
         f"Evidence separation with platform ids hidden (n={len(should) + len(must) + len(random_set)} pairs)",
         fontsize=11, x=0.02, ha="left",
     )
-    fig.text(0.02, 0.012, footer, fontsize=7, color="#444444")
+    fig.text(0.02, 0.008, "\n".join(textwrap.wrap(footer, 120)), fontsize=6.5, color="#444444")
     fig.savefig(out, dpi=150, facecolor="white")
     plt.close(fig)
     print(f"evidence: tau={tau} should={len(should)} must={len(must)} random={len(random_set)} -> {out}")
@@ -176,7 +177,7 @@ def baseline_vs_model(eval_dir: Path, out: Path, footer: str) -> None:
     ax.grid(alpha=0.3)
     ax.set_title(f"Baseline vs linker: E1 campaign pairs (n=11) and E2 leave-one-item-out (n=8)",
                  fontsize=10, loc="left")
-    fig.text(0.02, 0.012, footer, fontsize=7, color="#444444")
+    fig.text(0.02, 0.008, "\n".join(textwrap.wrap(footer, 120)), fontsize=6.5, color="#444444")
     fig.tight_layout(rect=(0, 0.03, 1, 1))
     fig.savefig(out, dpi=150, facecolor="white")
     plt.close(fig)
