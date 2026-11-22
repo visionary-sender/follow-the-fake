@@ -200,6 +200,8 @@ def fetch_url(url: str, out_root: Path, config: FetchConfig | None = None, captu
     err = validate_url(url)
     if err is not None:
         return rec.finish(cl.INVALID_URL, err)
+    if rec.upstream_error is not None:
+        return rec.finish(cl.FETCHER_ERROR, rec.upstream_error)
     if config.profile not in PROFILES:
         raise ValueError(f"unknown profile {config.profile!r}; choose from {sorted(PROFILES)}")
     if config.referer is not None and not config.referer.lower().startswith(("http://", "https://")):
@@ -220,7 +222,8 @@ def fetch_url(url: str, out_root: Path, config: FetchConfig | None = None, captu
         return max(500.0, min(cap_s, deadline - time.time()) * 1000)
 
     nav_error: str | None = None
-    with GuardProxy(max_bytes=config.max_bytes, allow_networks=allow, allow_ports=config.allow_ports) as proxy, \
+    with GuardProxy(max_bytes=config.max_bytes, allow_networks=allow, allow_ports=config.allow_ports,
+                    upstream=rec.upstream) as proxy, \
             tempfile.TemporaryDirectory(prefix="ftf-browser-") as home, sync_playwright() as pw:
         browser = pw.chromium.launch(
             headless=True,
