@@ -12,6 +12,7 @@ from typing import Optional
 
 from dataclasses import asdict
 
+from ftf import egress
 from ftf.contract import CONTRACT_VERSION, Incident
 from ftf.scanner import certpl, creatives, google_atc, google_bq, meta
 from ftf.scanner.http import Client
@@ -128,7 +129,11 @@ def scan(
         client = Client(delay=delay)
         image_client = Client(delay=CREATIVE_DELAY)
         creative_budget = max(0, max_creatives) if download_creatives else 0
-        summary: dict = {"run_id": run_id, "since": since.isoformat(), "sources": {}, "new": 0}
+        egress_record = egress.current()
+        upstream = egress.upstream_proxy()  # raises on a malformed proxy file: never silently go direct
+        if upstream is not None:
+            egress_record = {**(egress_record or {}), "proxy": upstream.label}
+        summary: dict = {"run_id": run_id, "since": since.isoformat(), "sources": {}, "new": 0, "egress": egress_record}
         run_dir = store.run_dir(run_id)
         creative_errors: list[str] = []
         all_incidents: list[tuple[str, Incident]] = []
@@ -176,6 +181,8 @@ def scan(
                     "run_id": run_id,
                     "started_at": queued_at,
                     "finished_at": _utc_stamp(),
+                    # Which egress worker / proxy sent the query (collector data; never the raw IP).
+                    "egress": egress_record,
                     "incident": json.loads(inc.model_dump_json()),
                 }
                 ad = {**asdict(r), "key": r.key, "stable_id": r.incident_id, "ad_archive_id": None if r.source == "certpl" else r.ad_id,

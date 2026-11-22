@@ -227,6 +227,19 @@ def _is_search_response(response) -> bool:
     return SEARCH_QUERY_NAME in post
 
 
+def _proxy_option() -> dict:
+    """Playwright launch option for the optional upstream proxy of `ftf.egress` (none by default)."""
+    from ftf.egress import upstream_proxy
+
+    up = upstream_proxy()
+    if up is None:
+        return {}
+    proxy = {"server": f"http://{up.label}"}
+    if up.username is not None:
+        proxy.update(username=up.username, password=up.password or "")
+    return {"proxy": proxy}
+
+
 def collect(
     keywords: list[str],
     *,
@@ -261,7 +274,7 @@ def collect(
     total = 0
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(headless=True, **_proxy_option())
             try:
                 context = browser.new_context(locale="pl-PL", viewport={"width": 1366, "height": 900})
                 # Polite and lighter: no images, media or fonts are loaded by the page itself.

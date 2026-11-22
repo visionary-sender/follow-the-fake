@@ -28,6 +28,7 @@ L = Layer
 KINDS = {
     "aio_cdn_tenant": (L.tenant, ArtefactType.har),
     "aio_owner": (L.owner, ArtefactType.har),
+    "aio_campaign": (L.owner, ArtefactType.har),
     "aio_landing": (L.landing, ArtefactType.html),
     "meta_pixel": (L.tracking_account, ArtefactType.har),
     "kit_asset_set": (L.kit, ArtefactType.html),
@@ -36,11 +37,18 @@ KINDS = {
     "server_ip": (L.infrastructure, ArtefactType.har),
     "analyst_ip": (L.collector, ArtefactType.har),
 }
+# Indicator.level per kind for `corpus(chain=True)` (else every indicator is campaign level).
+LEVELS = {
+    "aio_cdn_tenant": Level.tenant, "aio_owner": Level.operator, "aio_campaign": Level.campaign,
+    "aio_landing": Level.landing, "meta_pixel": Level.operator, "kit_asset_set": Level.platform,
+    "platform_name": Level.platform,
+}
 
 
 class Builder:
-    def __init__(self) -> None:
+    def __init__(self, levels: bool = False) -> None:
         self.n = 0
+        self.levels = levels
 
     def capture(self, cid: str, stage: str, duplicate_of: Optional[str] = None) -> Capture:
         arts = ("ad_screenshot",) if stage == "ad" else ("html", "har")
@@ -60,7 +68,7 @@ class Builder:
             capture_id=cap.id,
             layer=layer,
             kind=kind,
-            level=Level.campaign,
+            level=LEVELS.get(kind, Level.campaign) if self.levels else Level.campaign,
             value=value,
             observed=Observed.live if live else Observed.static,
             provenance=Provenance(artefact_id=f"{cap.id}/{art.value}" if has else None),
@@ -68,10 +76,15 @@ class Builder:
         )
 
 
-def corpus(n_incidents: int = 60, n_operators: int = 8, seed: int = 7, prefix: str = "") -> list[Incident]:
-    """`n_incidents` random incidents over `n_operators` operators (about a fifth are noise)."""
+def corpus(n_incidents: int = 60, n_operators: int = 8, seed: int = 7, prefix: str = "", chain: bool = False) -> list[Incident]:
+    """`n_incidents` random incidents over `n_operators` operators (about a fifth are noise).
+
+    `chain=True` adds the aio campaign id (two campaigns per owner, set by the landing) and gives each
+    kind its usual Indicator.level, so the chain rule has a full tenant ⊃ owner ⊃ campaign ⊃ landing
+    chain to work on. The random draws are the same either way.
+    """
     rnd = random.Random(seed)
-    b = Builder()
+    b = Builder(levels=chain)
     ops = []
     for o in range(n_operators):
         ops.append({
@@ -111,6 +124,11 @@ def corpus(n_incidents: int = 60, n_operators: int = 8, seed: int = 7, prefix: s
                 ("server_ip", op["ip"], False),
             ]
             vals = [v for v in vals if rnd.random() < 0.8]  # dropouts
+            if chain:
+                landing = next((v[1] for v in vals if v[0] == "aio_landing"), None)
+                if landing is not None:
+                    camp = op["landings"].index(landing) % 2
+                    vals.append(("aio_campaign", f"{prefix}camp-{op['owner']}-{camp}", False))
         vals.append(("platform_name", "platform-x", False))  # a hub
         vals.append(("analyst_ip", "192.0.2.1", False))  # collector, never links
         if rnd.random() < 0.1:

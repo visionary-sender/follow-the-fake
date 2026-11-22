@@ -144,7 +144,8 @@ def test_json_round_trip(tmp_path):
     idx.save(path)
     assert len(list(tmp_path.glob("index.ad_image-*.npy"))) == 1
     back = CandidateIndex.load(path)
-    assert back.postings == idx.postings and back.counts == idx.counts
+    assert back.postings == idx.postings
+    assert {k: back._count(k) for k in back.postings} == {k: idx._count(k) for k in idx.postings}
     assert back.campaigns == idx.campaigns and back.campaign_of == idx.campaign_of
     assert back.stage == idx.stage and back.canonical == idx.canonical
     assert back.modalities == idx.modalities and back.incidents == idx.incidents
@@ -364,3 +365,148 @@ def test_an_index_for_another_base_is_refused():
     idx = CandidateIndex.build(other, cache=False)
     with pytest.raises(ValueError, match="another base"):
         link_incident(base, new[0], index=idx)
+
+
+# --- HACK-23 options: learned weights, background rarity, chain rule ---------------------------------
+
+
+def _options_case(seed: int = 7):
+    """A chain-rule corpus (tenant ⊃ owner ⊃ aio campaign ⊃ landing), learned weights, background counts
+    from another synthetic corpus that shares some values, and the base linked with those options."""
+    from ftf.linking.background import BackgroundCounts
+    from ftf.linking.backend import Backend
+    from ftf.linking.learned import learn_weights
+
+    incs = sc.corpus(70, seed=seed, chain=True)
+    k = 48
+    known = {c.id for i in incs[:k] for c in i.captures}
+    new = [i for i in incs[k:] if all(c.duplicate_of is None or c.duplicate_of in known for c in i.captures)]
+    bg = BackgroundCounts.from_dataset(sc.dataset(sc.corpus(40, seed=seed + 100, chain=True)))
+    table, _ = learn_weights(sc.dataset(incs[:k]), background=bg)
+
+    def factory(ds):
+        return Backend.from_context(ScoringContext.from_dataset(ds, table, background=bg))
+
+    raw = sc.dataset(incs[:k])
+    base = link_dataset(raw, backend=factory(raw))
+    return base, new, table, bg, factory
+
+
+@pytest.mark.parametrize("seed", [7, 8])
+def test_extended_context_equals_a_rebuild_with_options(seed):
+    base, new, table, bg, _ = _options_case(seed)
+    idx = CandidateIndex.build(base, weights=table, background=bg, cache=False)
+    assert idx._ctx.hierarchy is not None and idx._ctx.hierarchy.level_of
+    for inc in new:
+        full = ScoringContext.from_dataset(combine(base, [inc]), table, background=bg)
+        assert _ctx_view(idx.extend(inc)) == _ctx_view(full), inc.id
+
+
+@pytest.mark.parametrize("seed", [7, 8])
+def test_index_equals_linear_with_learned_weights_background_and_chain_rule(seed):
+    """Every relation, single incidents and the `ftf assign` sequence (index.add between incidents)."""
+    base, new, table, bg, factory = _options_case(seed)
+    assert table is not ledger.HAND_TABLE
+    decisions = set()
+    for relation in Relation:
+        idx = CandidateIndex.build(base, weights=table, background=bg, cache=False)
+        current = base
+        for inc in new:
+            lin = link_incident(base, inc, relation, backend=factory)
+            fast = link_incident(base, inc, relation, index=idx)
+            assert fast.assignment.model_dump() == lin.assignment.model_dump(), (relation, inc.id)
+            assert [l.model_dump() for l in fast.links] == [l.model_dump() for l in lin.links], (relation, inc.id)
+            decisions.add(lin.assignment.decision)
+            # sequence: the index after add() == the linear scan over the grown collection
+            seq_lin = link_incident(current, inc, relation, backend=factory)
+            seq_fast = link_incident(base, inc, relation, index=idx)
+            assert seq_fast.assignment.model_dump() == seq_lin.assignment.model_dump(), (relation, inc.id, "seq")
+            idx.add(inc)
+            current = combine(current, [inc])
+    assert Decision.assign in decisions
+
+
+def test_the_owner_rule_is_shared_with_the_ledger():
+    """An aio campaign id in the owner layer feeds no pre-group, in the ledger and in the extension alike."""
+    base, new, table, bg, _ = _options_case()
+    idx = CandidateIndex.build(base, weights=table, background=bg, cache=False)
+    assert all(not v.startswith("aio_campaign=") for vs in idx._extras.owners.values() for v in vs)
+    inc = next(i for i in new if any(x.kind == "aio_campaign" for x in i.indicators))
+    _, ex = extend_context(idx._ctx, idx._extras, inc)
+    assert all(not v.startswith("aio_campaign=") for vs in ex.owners.values() for v in vs)
+
+
+def test_upper_bound_uses_the_background_rarity():
+    """With background counts the rarity term is below log2(groups): a value the hand bound would drop as a
+    hub must still propose its campaigns."""
+    import math
+
+    base, new, table, bg, _ = _options_case()
+    idx = CandidateIndex.build(base, weights=table, background=bg, cache=False)
+    ctx = idx._ctx
+    lower = [key for key in idx.postings if ctx.groups(key) > 1 and ctx.rarity(key, ctx.groups(key)) < math.log2(ctx.groups(key))]
+    assert lower, "the case should have values whose background rarity is below log2(groups)"
+    for key in lower:
+        from ftf.linking.index import _prior_cap
+
+        assert idx._upper_bits(key, Relation.campaign) == pytest.approx(
+            _prior_cap(table, key[1], key[0], Relation.campaign) - ctx.rarity(key, ctx.groups(key))
+        )
+
+
+def test_loading_with_other_options_is_refused(tmp_path):
+    base, new, table, bg, factory = _options_case()
+    idx = CandidateIndex.build(base, weights=table, background=bg, cache=False)
+    idx.save(tmp_path / "i.json")
+    loaded = CandidateIndex.load(tmp_path / "i.json", base, weights=table, background=bg)
+    assert link_incident(base, new[0], index=loaded).assignment == link_incident(base, new[0], backend=factory).assignment
+    for kwargs in ({"weights": table}, {"weights": table, "background": bg, "chain_rule": False}, {"background": bg}):
+        with pytest.raises(ValueError, match="another weight table, background or chain rule"):
+            CandidateIndex.load(tmp_path / "i.json", **kwargs)
+
+
+def test_the_digest_covers_the_indicator_level():
+    from ftf.contract.models import Level
+    from ftf.linking.index import dataset_digest
+
+    base, _ = _split()
+    data = base.model_dump(mode="json")
+    data["incidents"][0]["indicators"][0]["level"] = Level.operator.value if base.incidents[0].indicators[0].level is not Level.operator else Level.tenant.value
+    assert dataset_digest(Dataset.model_validate(data)) != dataset_digest(base)
+
+
+def test_only_a_default_options_index_is_cached():
+    clear_cache()
+    base, new, table, bg, _ = _options_case()
+    CandidateIndex.build(base, weights=table, background=bg)
+    assert cached_index(base) is None  # link_incident(base, inc) must not pick up the learned table
+    clear_cache()
+
+
+def test_weights_giving_bits_to_a_dropped_kind_fall_back_to_the_linear_scan(monkeypatch):
+    """The index keeps no postings for kinds without bits; a table that gives them bits scans linearly."""
+    from dataclasses import replace as dc_replace
+
+    from ftf.linking.weights import HAND_TABLE
+
+    base, new = _split()
+    # an index whose table gives the server IP no bits under any relation
+    no_ip = dc_replace(HAND_TABLE, kinds={**HAND_TABLE.kinds, "server_ip": dc_replace(HAND_TABLE.kinds["server_ip"], bits=0.0)})
+    idx = CandidateIndex.build(base, weights=no_ip, cache=False)
+    assert (L.infrastructure, "server_ip") in idx.dropped
+    assert idx.drops_bits_of(HAND_TABLE) and not idx.drops_bits_of(no_ip)
+    for inc in new[:6]:
+        for relation in (Relation.campaign, Relation.operator):
+            lin = link_incident(base, inc, relation, weights=HAND_TABLE)
+            fast = link_incident(base, inc, relation, index=idx, weights=HAND_TABLE)
+            assert fast.assignment.model_dump() == lin.assignment.model_dump(), inc.id
+
+
+def test_candidate_note_names_the_conflicting_kind():
+    from ftf.contract.models import EvidenceRow, EvidenceStatus
+    from ftf.linking.assign import _candidate_note
+    from ftf.linking.types import PairScore
+
+    row = EvidenceRow(layer=L.owner, kind="aio_campaign", status=EvidenceStatus.conflict, value="a vs b", bits=-4.0)
+    ps = PairScore(a="x", b="y", relation=Relation.campaign, bits=-4.0, rows=[row])
+    assert "conflict: owner aio_campaign" in _candidate_note(ps)

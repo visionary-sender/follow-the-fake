@@ -38,7 +38,14 @@ class _HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-_OPENER = urllib.request.build_opener(_HttpsOnlyRedirects)
+def _opener() -> urllib.request.OpenerDirector:
+    """Direct by default (environment proxy variables are ignored); through the optional
+    upstream proxy of `ftf.egress` when one is configured."""
+    from ftf.egress import upstream_proxy
+
+    up = upstream_proxy()
+    proxies = {"https": up.url(), "http": up.url()} if up is not None else {}
+    return urllib.request.build_opener(urllib.request.ProxyHandler(proxies), _HttpsOnlyRedirects)
 
 
 class Client:
@@ -50,6 +57,7 @@ class Client:
         self.max_bytes = max_bytes
         self.requests = 0
         self._last = 0.0
+        self._opener = _opener()
 
     def _wait(self) -> None:
         gap = time.monotonic() - self._last
@@ -71,7 +79,7 @@ class Client:
         req = urllib.request.Request(url, data=data, headers={"User-Agent": USER_AGENT, **(headers or {})})
         limit = max_bytes or self.max_bytes
         try:
-            with _OPENER.open(req, timeout=self.timeout) as resp:
+            with self._opener.open(req, timeout=self.timeout) as resp:
                 body = resp.read(limit + 1)
                 if len(body) > limit:
                     raise FetchError(f"response larger than {limit} bytes: {url[:100]}")

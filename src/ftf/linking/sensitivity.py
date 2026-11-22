@@ -188,18 +188,23 @@ def assignment_flips(
     relation: Relation = Relation.campaign,
     index=None,
     delta: float = DELTA,
+    weights: Optional[WeightTable] = None,
+    backend=None,
 ) -> dict:
     """Re-run the assignment under each ±delta layer move and the worst case; record decision changes.
 
     Needs the hand-table ledger. With a `CandidateIndex` each re-run costs one candidate search.
+    `weights` is the table to perturb (default: the index's, else the hand table); `backend` a
+    factory for the linear scan (e.g. one carrying background counts), passed to `link_incident`.
     """
     from ftf.linking.assign import link_incident
 
-    weights = index.weights if index is not None else HAND_TABLE
+    if weights is None:
+        weights = index.weights if index is not None else HAND_TABLE
     state = (assignment.decision.value, assignment.campaign_id)
 
     def run(layers: tuple[Layer, ...], d: float) -> tuple[str, Optional[str]]:
-        a = link_incident(base, incident, relation, index=index, weights=perturb(weights, layers, d)).assignment
+        a = link_incident(base, incident, relation, index=index, backend=backend, weights=perturb(weights, layers, d)).assignment
         return a.decision.value, a.campaign_id
 
     flips = []

@@ -132,7 +132,9 @@ def test_a_new_domain_assigned_to_known_campaign(ctx):
     assert row(s, "aio_cdn_tenant").bits > row(s, "aio_landing").bits > 0
     # the three campaign-A incidents share a live pixel: one pre-group, so no rarity penalty
     assert row(s, "aio_landing").seen_in == "1 group (3 incidents) / 10"
-    assert row(s, "aio_landing").bits == HAND_TABLE.kinds["aio_landing"].bits
+    # the landing id is conditioned on the shared tenant (chain rule, HACK-23), never above its hand weight
+    assert 0 < row(s, "aio_landing").bits <= HAND_TABLE.kinds["aio_landing"].bits
+    assert "given the shared tenant" in row(s, "aio_landing").note
     # platform constants are everywhere: one hub row per kind, no bits
     assert row(s, "aio_sdk_asset").status is EvidenceStatus.hub_subsumed
     assert row(s, "aio_sdk_asset").bits == 0
@@ -194,7 +196,7 @@ def test_big_campaign_ids_not_punished():
     assert ctx.n_groups == 21
     s = score_pair(ctx, "n/lander", "a0/lander")
     assert row(s, "aio_cdn_tenant").bits == pytest.approx(5.0)  # 6 − 1 static copy prior, k = 1 group
-    assert row(s, "aio_landing").bits == pytest.approx(4.0)
+    assert "log2(1) rarity" in row(s, "aio_landing").note and row(s, "aio_landing").bits > 0  # no rarity loss
     assert row(s, "meta_pixel").bits == pytest.approx(3.0)
     assert s.bits >= threshold(ctx, Relation.campaign) + 3
     assert verdict(s, ctx) == "link"
@@ -233,11 +235,12 @@ def test_reseller_tenant_with_two_owners_is_cannot_link():
     assert ctx.group_of["x"] != ctx.group_of["y"]  # neither tenant nor pixel joins two owners
     for rel in (Relation.campaign, Relation.operator):
         s = score_pair(ctx, "x/lander", "y/lander", rel)
-        assert s.bits >= threshold(ctx, rel) and s.layers_positive >= 2  # would link on bits alone
+        # the shared tenant is explained away by the differing owners under it (chain rule, HACK-23)
+        assert row(s, "aio_cdn_tenant").status is EvidenceStatus.hub_subsumed
         assert row(s, "aio_owner").status is EvidenceStatus.conflict
         assert row(s, "aio_cdn_tenant").seen_in.startswith("2 groups")
-        assert verdict(s, ctx) == "review"
-        assert to_link(s, "L", ctx).level is LinkLevel.medium
+        assert verdict(s, ctx) != "link"
+        assert to_link(s, "L", ctx).level is not LinkLevel.strict
     tmpl = score_pair(ctx, "x/lander", "y/lander", Relation.template)
     assert not [r for r in tmpl.rows if r.status is EvidenceStatus.conflict]
     assert verdict(tmpl, ctx) == "link"

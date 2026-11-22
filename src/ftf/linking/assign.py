@@ -105,7 +105,9 @@ def link_incident(
     With a `CandidateIndex` of `base` (given, or built earlier for this very object and cached),
     only the campaigns reachable through the incident's informative values are scored and the
     scoring context is extended instead of rebuilt; the result is identical to the linear scan.
-    `weights` replaces the weight table (sensitivity analysis; needs the hand-table ledger).
+    `weights` replaces the weight table (sensitivity analysis; needs the hand-table ledger). An index
+    scores with the background counts and chain rule setting it was built with; after `index.add()`
+    it stands for its base plus the added incidents (`base` must still be the base it was built for).
     """
     if index is None and backend is None:
         # The cached index was built with the hand-table ledger; a custom scorer may match on
@@ -113,6 +115,11 @@ def link_incident(
         index = cached_index(base)
     if index is not None and index._base is not base and (not index.digest or dataset_digest(base) != index.digest):
         raise ValueError("the index belongs to another base dataset; build or load it for this one")
+    if index is not None and backend is None and weights is not None and index.drops_bits_of(weights):
+        # `weights` gives bits to a kind the index kept no postings for: candidate search would miss
+        # it, so score every campaign of the collection the index stands for, with its options.
+        base, backend = index.linear_view()
+        index = None
     if index is not None:
         return _decide(_indexed_setup(index, incident, relation, backend, weights), incident, relation)
     if any(i.id == incident.id for i in base.incidents):
@@ -173,7 +180,7 @@ def _indexed_setup(
         def informative(key) -> bool:
             # The most bits this value can earn in base + incident (live prior, combined rarity).
             prior = ctx.weights.weight(key[1], key[0]).bits * ctx.weights.scale(key[1], key[0], relation)
-            return prior - math.log2(max(ctx.groups(key), 1)) >= hub
+            return prior - ctx.rarity(key, ctx.groups(key)) >= hub
 
     keys = index.probe_keys(incident)
     modalities = {layer: set(mods) for layer, mods in index.modalities.items()}
@@ -488,7 +495,8 @@ def _candidate_note(ps: PairScore) -> str:
     parts = []
     strong = _strong_layers(ps)
     parts.append(f"strongest: {strong}" if strong else "no shared layer")
-    conflicts = sorted({r.layer.value for r in ps.rows if r.status is EvidenceStatus.conflict and r.layer in SINGLE_VALUED_LAYERS})
+    # name the kind too: an aio campaign id filed in the owner layer is no owner conflict (not a cannot-link)
+    conflicts = sorted({f"{r.layer.value} {r.kind}" for r in ps.rows if r.status is EvidenceStatus.conflict and r.layer in SINGLE_VALUED_LAYERS})
     if conflicts:
         parts.append("conflict: " + ", ".join(conflicts))
     parts.append(f"best pair {ps.a} ~ {ps.b}")

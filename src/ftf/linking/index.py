@@ -27,11 +27,12 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from collections import ChainMap, defaultdict
+from collections import ChainMap, Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Optional
+from types import SimpleNamespace
+from typing import Any, Callable, Optional
 
 import numpy as np
 
@@ -46,7 +47,8 @@ from ftf.contract.models import (
     Stage,
     linkable,
 )
-from ftf.linking.ledger import ScoringContext, _pre_groups, _Values, normalise
+from ftf.linking.background import BackgroundCounts
+from ftf.linking.ledger import ScoringContext, _pre_groups, _Values, is_owner_id, normalise, usual_level
 from ftf.linking.weights import HAND_TABLE, IGNORED_VALUES, WeightTable
 
 INDEX_VERSION = 1
@@ -92,7 +94,7 @@ def dataset_digest(ds: Dataset) -> str:
         for c in inc.captures:
             h.update("\x00".join((c.id, c.stage.value, c.duplicate_of or "", ",".join(sorted(a.id + "=" + a.type.value for a in c.artefacts)))).encode() + b"\x02")
         for i in inc.indicators:
-            h.update("\x00".join((i.id, i.capture_id, i.layer.value, i.kind, i.value or "", i.observed.value, i.provenance.artefact_id or "")).encode() + b"\x03")
+            h.update("\x00".join((i.id, i.capture_id, i.layer.value, i.kind, i.level.value, i.value or "", i.observed.value, i.provenance.artefact_id or "")).encode() + b"\x03")
     for camp in ds.campaigns:
         h.update(f"{camp.relation.value}\x00{camp.id}\x00{','.join(camp.capture_ids)}\x04".encode())
     return h.hexdigest()
@@ -131,6 +133,7 @@ class _Extras:
     live_private: dict[Key, set[str]] = field(default_factory=lambda: defaultdict(set))
     owners: dict[str, set[str]] = field(default_factory=lambda: defaultdict(set))
     incidents: set[str] = field(default_factory=set)  # incidents with at least one canonical capture
+    levels: dict[tuple[Layer, str], Counter] = field(default_factory=lambda: defaultdict(Counter))  # (layer, kind) → Indicator.level counts
 
 
 def _extras(ds: Dataset, ctx: ScoringContext) -> _Extras:
@@ -144,7 +147,8 @@ def _extras(ds: Dataset, ctx: ScoringContext) -> _Extras:
             if not norm or norm.casefold() in IGNORED_VALUES:
                 continue
             who = ctx.incident_of[ctx.canonical[ind.capture_id]]
-            if ind.layer is Layer.owner:
+            ex.levels[(ind.layer, ind.kind)][ind.level] += 1
+            if is_owner_id(ind):
                 ex.owners[who].add(f"{ind.kind}={norm}")
             if ind.observed is Observed.live and ctx.weights.weight(ind.kind, ind.layer).private:
                 ex.live_private[(ind.layer, ind.kind, norm)].add(who)
@@ -187,6 +191,7 @@ def extend_context(ctx: ScoringContext, extras: _Extras, incident: Incident) -> 
     index: dict[Key, set[str]] = {}
     live_private: dict[Key, set[str]] = {}
     owners: dict[str, set[str]] = {}
+    levels: dict[tuple[Layer, str], Counter] = {}
     for ind in incident.indicators:
         cap = canonical_all[ind.capture_id]
         vals_of_cap = own_values(cap)
@@ -206,7 +211,11 @@ def extend_context(ctx: ScoringContext, extras: _Extras, incident: Incident) -> 
         if key not in index:
             index[key] = set(ctx.index.get(key, ()))
         index[key].add(who)
-        if ind.layer is Layer.owner:
+        lk = (ind.layer, ind.kind)
+        if lk not in levels:
+            levels[lk] = Counter(extras.levels.get(lk, ()))
+        levels[lk][ind.level] += 1
+        if is_owner_id(ind):
             if who not in owners:
                 owners[who] = set(extras.owners.get(who, ()))
             owners[who].add(f"{ind.kind}={norm}")
@@ -237,15 +246,20 @@ def extend_context(ctx: ScoringContext, extras: _Extras, incident: Incident) -> 
         n_groups=n_groups,
         n=ctx.n + len(new_caps),
         n_incidents=len(inc_all),
+        kind_level={**ctx.kind_level, **{lk: usual_level(c) for lk, c in levels.items()}} if levels else ctx.kind_level,
     )
-    return ext, _Extras(live_private=lp_all, owners=owners_all, incidents=inc_all)
+    if ctx.hierarchy is not None:
+        # The id hierarchy is a property of the whole collection (a value's level depends on all its
+        # carriers, the level graph on every anchor id): rediscovered over base + incident, one pass.
+        ext.hierarchy = ext.build_hierarchy(ctx.hierarchy.anchors)
+    return ext, _Extras(live_private=lp_all, owners=owners_all, incidents=inc_all, levels=ChainMap(levels, extras.levels))
 
 
 @dataclass
 class CandidateIndex:
     digest: str
     postings: dict[Key, set[str]]  # informative value -> canonical captures carrying it
-    counts: dict[Key, tuple[int, int]]  # value -> (incidents, pre-groups) carrying it in the base
+    counts: dict[Key, tuple[int, int]]  # value -> (incidents, pre-groups), as saved; live from the context once attached
     campaigns: dict[Relation, list[CampaignRef]]  # per relation, sorted by id
     campaign_of: dict[Relation, dict[str, list[str]]]  # canonical capture -> campaign ids
     stage: dict[str, Stage]  # capture id -> stage
@@ -254,25 +268,33 @@ class CandidateIndex:
     incidents: set[str]
     n_captures: int
     vectors: dict[str, VectorView] = field(default_factory=dict)
+    # Scoring options; an index answers only for the options it was built with (`options_fingerprint`).
     weights: WeightTable = HAND_TABLE
+    background: Optional[BackgroundCounts] = None
+    chain_rule: bool = True
+    # (layer, kind) pairs with values in the collection that `weights` gives no bits under any relation, so
+    # they have no postings; a table passed to `link_incident` that gives them bits needs the linear scan.
+    dropped: set[tuple[Layer, str]] = field(default_factory=set)
     _ctx: Optional[ScoringContext] = field(default=None, repr=False)
     _extras: Optional[_Extras] = field(default=None, repr=False)
     _base: Optional[Dataset] = field(default=None, repr=False)
     _added: list[Incident] = field(default_factory=list, repr=False)  # incidents added since `attach`
     _artefacts: set[str] = field(default_factory=set, repr=False)  # artefact ids of base + added
     _shape: tuple = field(default=(), repr=False)  # cheap fingerprint of the cached base object
+    _last_ext: Optional[tuple[Incident, ScoringContext]] = field(default=None, repr=False)  # memo of `extend`
 
     # --- build / persist --------------------------------------------------------------------
 
     @classmethod
-    def build(cls, base: Dataset, weights: WeightTable = HAND_TABLE, cache: bool = True) -> "CandidateIndex":
-        """Index a linked base. One pass over its indicators plus one scoring-context build."""
+    def build(
+        cls, base: Dataset, weights: WeightTable = HAND_TABLE, cache: bool = True,
+        background: Optional[BackgroundCounts] = None, chain_rule: bool = True,
+    ) -> "CandidateIndex":
+        """Index a linked base. One pass over its indicators plus one scoring-context build. `weights`,
+        `background` and `chain_rule` are those of `ScoringContext.from_dataset`."""
         idx = cls._skeleton(base, weights)
+        idx.background, idx.chain_rule = background, chain_rule
         idx.attach(base)
-        ctx = idx._ctx
-        assert ctx is not None
-        for key in list(idx.postings):
-            idx.counts[key] = (len(ctx.index.get(key, ())), ctx.groups(key))
         if cache:
             _remember(base, idx)
         return idx
@@ -281,8 +303,12 @@ class CandidateIndex:
     def _skeleton(cls, base: Dataset, weights: WeightTable) -> "CandidateIndex":
         canonical = {c.id: (c.duplicate_of or c.id) for i in base.incidents for c in i.captures}
         postings: dict[Key, set[str]] = defaultdict(set)
+        dropped: set[tuple[Layer, str]] = set()
         for ind in base.indicators():
-            if ind.value is None or not _informative_kind(weights, ind.kind, ind.layer):
+            if ind.value is None:
+                continue
+            if not _informative_kind(weights, ind.kind, ind.layer):
+                dropped.add((ind.layer, ind.kind))
                 continue
             norm = normalise(ind.value, ind.layer)
             if not norm or norm.casefold() in IGNORED_VALUES:
@@ -306,21 +332,29 @@ class CandidateIndex:
             incidents={i.id for i in base.incidents},
             n_captures=len(set(canonical.values())),
             weights=weights,
+            dropped=dropped,
         )
 
     def attach(self, base: Dataset) -> None:
         """Build the scoring context of `base` (needed for exact assignment). Checks the digest."""
         if dataset_digest(base) != self.digest:
             raise ValueError("the index was built from another base (digest differs); rebuild it with `ftf index`")
-        ctx = ScoringContext.from_dataset(base, self.weights)
+        ctx = ScoringContext.from_dataset(base, self.weights, background=self.background, chain_rule=self.chain_rule)
         self._ctx, self._extras = ctx, _extras(base, ctx)
         self._base = base
         self._added = []
+        self._last_ext = None
         self._artefacts = {a.id for i in base.incidents for c in i.captures for a in c.artefacts}
 
     @property
     def ready(self) -> bool:
         return self._ctx is not None
+
+    @property
+    def default_options(self) -> bool:
+        """Built with the options `ScoringContext.from_dataset` uses by default (hand table, no background,
+        chain rule on): what `link_incident` scores with when it is given no index, backend or weights."""
+        return self.background is None and self.chain_rule and weights_fingerprint(self.weights) == weights_fingerprint(HAND_TABLE)
 
     def save(self, path: Path) -> None:
         path = Path(path)
@@ -333,7 +367,8 @@ class CandidateIndex:
         data = {
             "version": INDEX_VERSION,
             "digest": self.digest,
-            "weights": weights_fingerprint(self.weights),
+            "options": options_fingerprint(self.weights, self.background, self.chain_rule),
+            "dropped": sorted([l.value, k] for l, k in self.dropped),
             "n_captures": self.n_captures,
             "incidents": sorted(self.incidents),
             "postings": [[k[0].value, k[1], k[2], sorted(v), *self._count(k)] for k, v in sorted(self.postings.items(), key=lambda kv: (kv[0][0].value, kv[0][1], kv[0][2]))],
@@ -346,14 +381,21 @@ class CandidateIndex:
         path.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
 
     @classmethod
-    def load(cls, path: Path, base: Optional[Dataset] = None, weights: WeightTable = HAND_TABLE) -> "CandidateIndex":
-        """Read an index written by `save`. With `base`, the scoring context is rebuilt (digest-checked)."""
+    def load(
+        cls, path: Path, base: Optional[Dataset] = None, weights: WeightTable = HAND_TABLE,
+        background: Optional[BackgroundCounts] = None, chain_rule: bool = True,
+    ) -> "CandidateIndex":
+        """Read an index written by `save`. With `base`, the scoring context is rebuilt (digest-checked).
+        The scoring options must be those the index was built with, else it is refused."""
         path = Path(path)
         data = json.loads(path.read_text(encoding="utf-8"))
         if data.get("version") != INDEX_VERSION:
             raise ValueError(f"index version {data.get('version')} != {INDEX_VERSION}; rebuild it")
-        if data.get("weights") != weights_fingerprint(weights):
-            raise ValueError("the index was built with another weight table; rebuild it with `ftf index`")
+        if data.get("options") != options_fingerprint(weights, background, chain_rule):
+            raise ValueError(
+                "the index was built with another weight table, background or chain rule setting; "
+                "rebuild it with `ftf index` and the same --weights"
+            )
         postings, counts = {}, {}
         for layer, kind, value, caps, n_inc, n_grp in data["postings"]:
             key = (Layer(layer), kind, value)
@@ -386,6 +428,9 @@ class CandidateIndex:
             n_captures=data["n_captures"],
             vectors=vectors,
             weights=weights,
+            background=background,
+            chain_rule=chain_rule,
+            dropped={(Layer(l), k) for l, k in data.get("dropped", [])},
         )
         if base is not None:
             idx.attach(base)
@@ -437,8 +482,13 @@ class CandidateIndex:
         return {cid for c in caps for cid in of.get(self.canonical.get(c, c), ())}
 
     def _upper_bits(self, key: Key, relation: Relation) -> float:
+        """Most bits `key` can earn under `relation` in the base: live prior minus the ledger's rarity term."""
         prior = _prior_cap(self.weights, key[1], key[0], relation)
-        return prior - math.log2(max(self._count(key)[1], 1))
+        groups = self._count(key)[1]
+        if self._ctx is not None:
+            return prior - self._ctx.rarity(key, groups)
+        # loaded without a base: the same rarity term, which reads only the background counts
+        return prior - ScoringContext.rarity(SimpleNamespace(background=self.background), key, groups)  # type: ignore[arg-type]
 
     def _count(self, key: Key) -> tuple[int, int]:
         """(incidents, pre-groups) carrying `key`: live from the scoring context when attached
@@ -503,14 +553,36 @@ class CandidateIndex:
             if t is not None and t not in own and self._ctx.canonical.get(t) != t:
                 raise ValueError(f"capture {c.id}: duplicate_of {t} is not a canonical capture of the collection")
 
+    def drops_bits_of(self, weights: WeightTable) -> bool:
+        """True if `weights` gives bits to a kind this index kept no postings for (see `dropped`)."""
+        return any(_informative_kind(weights, kind, layer) for layer, kind in self.dropped)
+
+    def linear_view(self) -> tuple[Dataset, Callable[[Dataset], Any]]:
+        """(collection, backend factory) for the linear scan over what this index stands for: its base
+        plus the incidents added since, scored with the index's own options."""
+        if self._base is None:
+            raise ValueError("the index has no base dataset; load it with one (or call attach)")
+        from ftf.linking.assign import combine  # local: assign imports this module
+        from ftf.linking.backend import Backend
+
+        ds = combine(self._base, self._added) if self._added else self._base
+        weights, background, chain_rule = self.weights, self.background, self.chain_rule
+        return ds, lambda d: Backend.from_context(
+            ScoringContext.from_dataset(d, weights, background=background, chain_rule=chain_rule)
+        )
+
     def extend(self, incident: Incident) -> ScoringContext:
         """Scoring context of the base plus `incident` (the index itself is not changed).
 
         The result shares the index's dicts underneath: use it before the next `add()`.
         """
+        if self._last_ext is not None and self._last_ext[0] is incident:
+            return self._last_ext[1]  # sensitivity re-runs one incident many times; the hierarchy pass is the cost
         self._check_new(incident)
         assert self._ctx is not None and self._extras is not None
-        return extend_context(self._ctx, self._extras, incident)[0]
+        ext = extend_context(self._ctx, self._extras, incident)[0]
+        self._last_ext = (incident, ext)
+        return ext
 
     def add(self, incident: Incident) -> None:
         """Add an assigned incident to the base (rarity, τ, duplicates); campaigns stay as they are.
@@ -521,6 +593,7 @@ class CandidateIndex:
         leaves the cache.
         """
         self._check_new(incident)
+        self._last_ext = None
         ctx, ex = self._ctx, self._extras
         assert ctx is not None and ex is not None
         ext, ext_ex = extend_context(ctx, ex, incident)
@@ -533,12 +606,13 @@ class CandidateIndex:
             else:
                 flat[name] = dict(new)  # recomputed (pre-groups)
         self._ctx = replace(ext, **flat)
-        for name in ("live_private", "owners"):
+        for name in ("live_private", "owners", "levels"):
             new, old = getattr(ext_ex, name), getattr(ex, name)
             old.update(new.maps[0])
         ex.incidents = ext_ex.incidents
         self._added.append(incident)
         self._artefacts |= {a.id for c in incident.captures for a in c.artefacts}
+        self.dropped |= {(i.layer, i.kind) for i in incident.indicators if i.value is not None and not _informative_kind(self.weights, i.kind, i.layer)}
         for cap in incident.captures:
             self.canonical[cap.id] = cap.duplicate_of or cap.id
             self.stage[cap.id] = cap.stage
@@ -577,6 +651,14 @@ def weights_fingerprint(weights: WeightTable) -> str:
     return hashlib.sha256(json.dumps(canon).encode()).hexdigest()[:16]
 
 
+def options_fingerprint(weights: WeightTable, background: Optional[BackgroundCounts] = None, chain_rule: bool = True) -> str:
+    """Every scoring option an index depends on: the weight table, the background counts (rarity) and
+    the chain rule. Stable across processes."""
+    bg = None if background is None else hashlib.sha256(json.dumps(background.to_json(), sort_keys=True).encode()).hexdigest()
+    canon = [weights_fingerprint(weights), bg, bool(chain_rule)]
+    return hashlib.sha256(json.dumps(canon).encode()).hexdigest()[:16]
+
+
 def _safe(view: str) -> str:
     return "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in view) or "view"
 
@@ -586,6 +668,8 @@ def _shape(ds: Dataset) -> tuple:
 
 
 def _remember(base: Dataset, idx: CandidateIndex) -> None:
+    if not idx.default_options:
+        return  # `link_incident` picks a cached index up without options: only the default ones may be found
     idx._shape = _shape(base)
     _CACHE[id(base)] = (base, idx)
     while len(_CACHE) > _CACHE_SIZE:

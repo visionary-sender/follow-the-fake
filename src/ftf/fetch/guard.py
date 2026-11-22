@@ -112,8 +112,12 @@ class GuardProxy:
         allow_networks: Iterable[IPNetwork] = (),
         allow_ports: Iterable[int] | None = None,
         resolver=None,
+        upstream=None,
     ) -> None:
         self.max_bytes = max_bytes
+        # Optional ftf.egress.Upstream: after the address checks, connect through this HTTP proxy
+        # (CONNECT to the checked IP, so the proxy cannot be steered to another address).
+        self.upstream = upstream
         self.dns_timeout = dns_timeout
         self.connect_timeout = connect_timeout
         self.idle_timeout = idle_timeout
@@ -307,11 +311,42 @@ class GuardProxy:
         if ip is None:
             return event
         try:
-            conn = await asyncio.wait_for(asyncio.open_connection(str(ip), port), self.connect_timeout)
-        except (OSError, asyncio.TimeoutError) as e:
+            if self.upstream is None:
+                conn = await asyncio.wait_for(asyncio.open_connection(str(ip), port), self.connect_timeout)
+            else:
+                conn = await asyncio.wait_for(self._via_upstream(ip, port), self.connect_timeout)
+        except (OSError, asyncio.TimeoutError, _UpstreamRefused) as e:
             return self._record(GuardEvent(event.host, port, "connect_failed", str(e) or type(e).__name__, str(ip)))
         self._record(event)
         return conn
+
+    async def _via_upstream(self, ip: IPAddress, port: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+        up = self.upstream
+        r, w = await asyncio.open_connection(up.host, up.port)
+        try:
+            return await self._connect_handshake(r, w, ip, port)
+        except BaseException:  # refusal, reset or the caller's timeout: never leak the socket
+            w.close()
+            raise
+
+    async def _connect_handshake(self, r, w, ip: IPAddress, port: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+        up = self.upstream
+        target = f"[{ip}]:{port}" if ip.version == 6 else f"{ip}:{port}"
+        lines = [f"CONNECT {target} HTTP/1.1", f"Host: {target}"]
+        auth = up.authorization()
+        if auth:
+            lines.append(f"Proxy-Authorization: {auth}")
+        w.write(("\r\n".join(lines) + "\r\n\r\n").encode("latin-1"))
+        await w.drain()
+        try:
+            head = await r.readuntil(b"\r\n\r\n")
+        except (asyncio.IncompleteReadError, asyncio.LimitOverrunError):
+            raise _UpstreamRefused(f"upstream proxy {up.label}: no valid reply to CONNECT") from None
+        status = head.split(b"\r\n", 1)[0].decode("latin-1", "replace")
+        parts = status.split()
+        if len(parts) < 2 or not parts[0].startswith("HTTP/1.") or parts[1] != "200":
+            raise _UpstreamRefused(f"upstream proxy {up.label} refused CONNECT: {status[:80]}")
+        return r, w
 
     async def _tunnel(self, host: str, port: int, reader, writer) -> None:
         opened = await self._open(host, port)
@@ -455,6 +490,10 @@ class GuardProxy:
                 t.cancel()
             await asyncio.gather(up, down, return_exceptions=True)
             u_w.close()
+
+
+class _UpstreamRefused(Exception):
+    pass
 
 
 def _split_hostport(s: str, default_port: int) -> tuple[str | None, int]:
