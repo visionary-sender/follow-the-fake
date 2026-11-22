@@ -516,11 +516,17 @@ gcloud compute ssh ftf-workbench --project follow-the-fake --zone europe-central
   --tunnel-through-iap -- -N -L 8501:127.0.0.1:8501
 ```
 
-The same analysis without the UI: `ftf analyze INPUT [--kind K] [--base PATH] [--online] [--out result.json]`
+The same analysis without the UI: `ftf analyze INPUT [--kind K] [--base PATH] [--offline] [--out result.json]`
 prints a stage summary and writes a contract dataset (exit 0 for assign, new and review).
 Inputs are copied to a per-run directory (`$FTF_RUN_DIR`, else the system temp dir) and
 hashed, never executed; captured HTML is never rendered, and URLs are shown defanged.
-Enrichment and fetching are offline unless `--online` is given.
+
+Enrichment is online by default. A start probe (one DNS-over-HTTPS query) and a 5-second timeout
+on each lookup (one retry) fall back to the enrichment cache and the precomputed base, so a dead
+network never stalls a run. The JSON summary's `enrichment` field and the enrichment stage note
+say `online`, `offline cache` or `mixed`; the app shows the same label. `--offline` or
+`FTF_OFFLINE=1` forces the cache. `--online` is a no-op. Live page fetching stays opt-in:
+`--fetch` or `FTF_FETCH=1`, and only when online.
 
 ### Cloud spend
 

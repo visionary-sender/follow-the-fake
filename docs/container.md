@@ -114,17 +114,19 @@ travels only inside a privately handed-over base bundle.
 | `FTF_BASE_DIR` | `/base` | where the entry point looks for and builds the base |
 | `FTF_RAW_ROOT` | `/data/raw` | organiser folder; artefact paths in the base are relative to it |
 | `FTF_OFFLINE` | unset | `1` forces every network lookup off (enrichment, build-base) |
-| `FTF_FETCH` | unset | `1` lets the app fetch a submitted URL live with the safe fetcher, only while "Online enrichment" is ticked and `FTF_OFFLINE` is not set |
+| `FTF_FETCH` | `1` in the image | `1` lets the app and `ftf analyze` fetch a submitted URL live with the safe fetcher, only when online and `FTF_OFFLINE` is not set |
 | `FTF_ENRICH_CACHE` | `/base/enrichment/cache.json` if present | enrichment cache file |
 | `FTF_PORT` | `8501` | app port inside the container |
 | `FTF_BRAND_STOPLIST` | `/opt/ftf-brand/brand-stoplist.json` | brand stop-list (hashed values of real outlet pages, from the build's `docker/brand-stoplist/` folder); `off` switches it off, a missing file warns and scores without it |
 
 ## Offline and online
 
-The jury's machine has internet access. In the app, "Online enrichment" (off by default) allows
-registry and DNS lookups for submitted domains. Live page fetching is additionally off unless the
-container gets `-e FTF_FETCH=1` and "Online enrichment" is ticked (`FTF_OFFLINE=1` overrides both).
-It then runs only under the hardened flags above; the fetcher refuses to run as root and keeps
+The jury's machine has internet access. Enrichment is online by default: the app's "Online enrichment"
+box (ticked by default) allows registry and DNS lookups for submitted domains. A start probe and a
+5-second timeout per lookup fall back to the enrichment cache and the precomputed base when the
+network is down; the app shows `enrichment: online`, `offline cache` or `mixed`. Live page fetching
+is opt-in: the image sets `FTF_FETCH=1`, and it runs only when online (`FTF_OFFLINE=1` overrides
+both). It then runs only under the hardened flags above; the fetcher refuses to run as root and keeps
 Chromium's sandbox on. A dead or cloaked page is a normal result, not an error. Building the base
 makes no network requests.
 
