@@ -104,13 +104,14 @@ def jaccard_similarity(a: str, b: str) -> Optional[float]:
 
 
 _HEX_WORD = re.compile(r"^[0-9a-fA-F]+$")
+TEMPLATE_WORDS = 128  # ftf.features.text.template.NUM_PERM
 
 
 def hex_minhash_tokens(value: str) -> Optional[str]:
     """Visual's `text_template` value (one hex string of 128 big-endian uint32 words) as the
-    space-separated tokens `minhash_similarity` reads; None if it is not whole 8-digit words."""
+    space-separated tokens `minhash_similarity` reads; None unless it is exactly that format."""
     v = value.strip().lower()
-    if not v or len(v) % 8 or not _HEX_WORD.match(v):
+    if len(v) != 8 * TEMPLATE_WORDS or not _HEX_WORD.match(v):
         return None
     return " ".join(v[i:i + 8] for i in range(0, len(v), 8))
 

@@ -102,7 +102,9 @@ def test_text_template_is_a_minhash_view():
     assert view_for_kind("text_template").similarity is text_template_similarity
     assert text_template_similarity(a, a) == 1.0
     assert text_template_similarity(a, b) == pytest.approx(estimate(a, b)) == 0.5
-    assert text_template_similarity(a, a[:-8]) is None  # not the same 128-word length
+    assert text_template_similarity(a, a.upper()) == 1.0
+    assert text_template_similarity(a, a[:-8]) is None  # 127 words
+    assert text_template_similarity(a[:512], a[:512]) is None  # 64 words
     assert text_template_similarity(a, "zz" * 512) is None
     assert view_for_kind("text_minhash").similarity is minhash_similarity  # alias kept
 
