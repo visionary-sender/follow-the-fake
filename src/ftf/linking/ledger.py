@@ -318,10 +318,16 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
     if ctx.hierarchy is not None and relation in CHAIN_RELATIONS:
         shared_cands, subsumed = apply_chain_rule(shared_cands, ctx.hierarchy, _platform_cap(w, relation))
         other_rows += subsumed
+        shared_cands, explained = _explain_away(shared_cands, conflict_rows, ctx.hierarchy)
+        other_rows += explained
     for c in shared_cands:
         shared_rows[c.key[0]].append(_Candidate(c.row, c.bits))
     # a live operator-private id counts for the strict gate only if it still carries bits after the chain rule
     live_private = any(c.live_private and c.bits > 0 for c in shared_cands)
+    # the terms of one id chain (tenant ⊃ owner ⊃ aio campaign ⊃ landing) are one positive layer for the D1
+    # gate and `level_of`: implied ancestor levels are not independent layers of evidence
+    chain_kinds = {(c.key[0], c.key[1]) for c in shared_cands if c.chain}
+    chain_positive = False
 
     slots = _chain_slots(ctx) if relation in CHAIN_RELATIONS else {}
     rows: list[EvidenceRow] = []
@@ -333,7 +339,9 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
         # landing) the best kind per chain level counts, so a shared owner and a shared aio campaign are two
         # terms, while an alias of the campaign id or a page shape next to the landing id is not (`_slot`)
         tops: dict[Level | None, _Candidate] = {}
-        for c in sorted(shared_rows.get(layer, []), key=lambda c: -c.bits):
+        # a chain level's term owns its slot: an alias in the same slot (the campaign name next to the campaign
+        # id) must not escape the conditioning by outscoring it
+        for c in sorted(shared_rows.get(layer, []), key=lambda c: ((layer, c.row.kind) not in chain_kinds, -c.bits)):
             slot = _slot(ctx, slots, layer, c.row.kind)
             top = tops.get(slot)
             if top is None:
@@ -352,7 +360,12 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
                 rows.append(c.row.model_copy(update={"bits": 0.0, "note": f"{c.row.note}; counted once per layer"}))
         total += layer_bits
         if layer_bits > 0:
-            layers_positive += 1
+            own = [c for c in tops.values() if c.bits > 0 and (layer, c.row.kind) not in chain_kinds]
+            if own or not any(c.bits > 0 for c in tops.values()):
+                layers_positive += 1
+            else:
+                chain_positive = True
+    layers_positive += chain_positive
     rows += other_rows
     order = list(Layer)
     rows.sort(key=lambda r: (order.index(r.layer), r.kind))
@@ -514,3 +527,26 @@ def _slot(ctx: ScoringContext, slots: dict[Layer, set[Level]], layer: Layer, kin
         return level
     own = _LAYER_LEVEL.get(layer)
     return own if own in present else min(present, key=lambda lv: list(Level).index(lv))
+
+
+def _explain_away(cands: list, conflict_rows: dict, h) -> tuple[list, list[EvidenceRow]]:
+    """A differing chain id (e.g. another aio campaign) under shared coarser ids (the same owner and tenant):
+    "same owner, other campaign" predicts the shared ancestors as well as "same campaign" does, so the
+    ancestors' chain terms carry no evidence for the relation and become `hub_subsumed`."""
+    from ftf.linking.hierarchy import CHAIN, LEVEL_NAMES
+
+    levels = [h.anchors[c.row.kind] for cs in conflict_rows.values() for c in cs if c.row.kind in h.anchors]
+    if not levels:
+        return cands, []
+    finest = min(levels, key=CHAIN.index)
+    kept, out = [], []
+    for c in cands:
+        level = h.level(c.key)
+        if c.chain and level in CHAIN and CHAIN.index(level) > CHAIN.index(finest) and c.bits > 0:
+            out.append(c.row.model_copy(update={
+                "status": EvidenceStatus.hub_subsumed, "bits": 0.0,
+                "note": f"{c.row.note}; chain rule: explained by the differing {LEVEL_NAMES[finest]} under it",
+            }))
+        else:
+            kept.append(c)
+    return kept, out

@@ -43,6 +43,10 @@ def run_learn_weights(args: argparse.Namespace) -> int:
         ds = Dataset.from_json(args.dataset.read_bytes())
         bg = None
         if args.background:
+            for path in (args.background, args.must_not_link):
+                if path is not None and read_corpus_kinds(path) is None:
+                    print(f"ftf learn-weights: warning: no corpus_kind.jsonl beside {path}: every incident with "
+                          "indicators is taken as it is (bare domains or real pages would enter the counts)", file=sys.stderr)
             mnl = Dataset.from_json(args.must_not_link.read_bytes()) if args.must_not_link else None
             bg = BackgroundCounts.from_dataset(
                 Dataset.from_json(args.background.read_bytes()), must_not_link=mnl,

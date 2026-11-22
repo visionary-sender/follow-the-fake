@@ -213,10 +213,10 @@ def learning_ds(extra_pairs: int = 0) -> Dataset:
 def test_label_layer_is_held_out():
     _, rep = learn_weights(learning_ds())
     camp = rep["relations"]["campaign"]
-    assert camp["label_kind"] == "aio_campaign" and camp["held_out_layers"] == ["owner"]
+    assert camp["label_kind"] == "aio_campaign" and camp["held_out_layers"] == ["owner", "tenant"]
     assert camp["layers"]["owner"] == {"held_out": True}
     assert not {"aio_campaign", "aio_campaign_name", "aio_owner"} & set(camp["kinds"])
-    assert rep["relations"]["operator"]["held_out_layers"] == ["owner"]
+    assert rep["relations"]["operator"]["held_out_layers"] == ["owner", "tenant"]
     assert "operator" not in rep["kinds"].get("aio_campaign_name", {}).get("learned_relations", [])
     assert "aio_campaign" not in rep["relations"]["operator"]["kinds"]
 
@@ -503,18 +503,18 @@ def test_corpus_kinds_keep_only_rarity_kinds_and_must_not_link_needs_background(
 def test_shared_domain_or_common_redirector_alone_does_not_link():
     from ftf.linking.ledger import verdict
 
-    filler = [incident(f"f{i}", [ind(L.infrastructure, "landing_domain", f"other-{i}.example")]) for i in range(6)]
+    filler = [incident(f"f{i}", [ind(L.landing, "landing_domain", f"other-{i}.example")]) for i in range(6)]
     two_domains = Dataset(name="synthetic", incidents=[
-        incident("c1", [ind(L.infrastructure, "certpl_listing_domain", "same.example")]),
-        incident("c2", [ind(L.infrastructure, "certpl_listing_domain", "same.example")]),
+        incident("c1", [ind(L.landing, "landing_domain", "same.example")]),
+        incident("c2", [ind(L.landing, "landing_domain", "same.example")]),
     ] + filler)
     ctx = ScoringContext.from_dataset(two_domains)
     assert verdict(score_pair(ctx, "c1/lander", "c2/lander"), ctx) != "link"
     redirector = [ind(L.tracker_instance, "chain_host", "redir.example", live=True),
-                  ind(L.tracker_instance, "redirect_chain_shape", "a>b>c")]
+                  ind(L.landing, "redirect_chain_shape", "a>b>c")]
     pages = Dataset(name="synthetic", incidents=[
-        incident("r1", redirector + [ind(L.infrastructure, "landing_host", "one.example")]),
-        incident("r2", redirector + [ind(L.infrastructure, "landing_host", "two.example")]),
+        incident("r1", redirector + [ind(L.landing, "landing_host", "one.example")]),
+        incident("r2", redirector + [ind(L.landing, "landing_host", "two.example")]),
     ] + filler)
     ctx = ScoringContext.from_dataset(pages)
     s = score_pair(ctx, "r1/lander", "r2/lander")
@@ -575,7 +575,45 @@ def test_live_private_id_beaten_within_its_level_keeps_the_gate():
 
 
 def test_site_kinds_say_nothing_about_template_and_display_domain_is_weak():
-    for kind in ("landing_host", "landing_domain", "ad_landing_domain", "ad_display_domain", "certpl_listing_domain"):
+    for kind in ("landing_host", "landing_domain", "ad_landing_domain", "ad_display_domain", "redirect_chain_shape"):
         assert HAND_TABLE.scale(kind, HAND_TABLE.kinds[kind].layer, Relation.template) == 0
         assert not HAND_TABLE.kinds[kind].single_valued
     assert HAND_TABLE.kinds["ad_display_domain"].bits <= 1.0
+
+
+# ---- coordinator review (PR #25) ----
+
+
+def test_two_aio_campaigns_of_one_owner_link_under_operator_not_campaign():
+    from ftf.linking.ledger import verdict
+
+    ctx = ScoringContext.from_dataset(owner_campaign_ds())
+    camp = score_pair(ctx, "m1/lander", "m3/lander", Relation.campaign)
+    op = score_pair(ctx, "m1/lander", "m3/lander", Relation.operator)
+    assert verdict(camp, ctx) != "link"
+    assert verdict(op, ctx) == "link"
+
+
+def test_one_shared_chain_is_one_positive_layer():
+    ds = Dataset(name="synthetic", incidents=[
+        incident("s1", chain("tenant-1", "owner-1", "camp-1", "landing-1")),
+        incident("s2", chain("tenant-1", "owner-1", "camp-1", "landing-1")),
+        incident("s3", chain("tenant-2", "owner-2", "camp-2", "landing-2")),
+    ])
+    s = score_pair(ScoringContext.from_dataset(ds), "s1/lander", "s2/lander")
+    assert s.layers_positive == 1
+    # finer levels are conditioned on the shared coarser one: one known child plus 3 unseen leaves log2(4) = 2 bits each
+    owner = [r for r in s.rows if r.kind == "aio_owner"][0]
+    assert owner.bits == pytest.approx(2.0) and "given the shared tenant" in owner.note
+
+
+def test_learning_holds_out_the_label_ancestor_layers_and_keeps_unknown_kinds_unknown():
+    ds = learning_ds()
+    extra = [incident(f"z{i}", PLATFORM + chain("tenant-1", "owner-1", "camp-1", "landing-1") +
+                      [ind(L.kit, "made_up_kind", "v-1")]) for i in range(2)]
+    other = incident("z9", PLATFORM + chain("tenant-3", "owner-3", "camp-5", "landing-5") + [ind(L.kit, "made_up_kind", "v-9")])
+    table, rep = learn_weights(ds.model_copy(update={"incidents": ds.incidents + extra + [other]}))
+    assert set(rep["relations"]["campaign"]["held_out_layers"]) == {"owner", "tenant"}
+    assert set(rep["relations"]["operator"]["held_out_layers"]) == {"owner", "tenant"}
+    assert table.kinds["aio_cdn_tenant"] == HAND_TABLE.kinds["aio_cdn_tenant"]
+    assert "made_up_kind" not in table.kinds and rep["kinds"]["made_up_kind"].get("not_in_table")

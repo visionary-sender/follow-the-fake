@@ -189,20 +189,20 @@ HAND_TABLE = WeightTable(
         # infrastructure (HACK-19 enrichment and prototype signals); shared hosting is weak
         "third_party_host": _K(L.infrastructure, 1.5),  # HACK-11: foreign host a page loads; CDNs are hubs
         "third_party_domain": _K(L.infrastructure, 1.5),  # HACK-11: its registered domain, coarser
-        # site identity (HACK-48 names): not single-valued (domains rotate daily: a differing domain carries
-        # nothing, no conflict penalty) and nothing about the template. The scanner puts landing_domain in the
-        # landing layer (one slot with the landing id) and ad_display_domain in the creative layer, where it
-        # only restates the landing domain, so it is kept weak; the rest share the infrastructure layer.
-        "landing_host": _K(L.infrastructure, 3.0, relations=_row(0.0, 0.0, 1.0, 1.0, 1.0)),
+        # site identity (HACK-48, final names on HACK-10): in the landing layer, so the within-layer max keeps
+        # "same site" from stacking with the landing id; not single-valued (domains rotate daily: a differing
+        # domain carries nothing, no conflict penalty) and nothing about the template. landing_domain also
+        # carries the CERT listing domain. ad_display_domain (creative layer) only restates it: kept weak.
+        "landing_host": _K(L.landing, 3.0, relations=_row(0.0, 0.0, 1.0, 1.0, 1.0)),
         "landing_domain": _K(L.landing, 2.5, relations=_row(0.0, 0.0, 1.0, 1.0, 1.0)),
-        "ad_landing_domain": _K(L.infrastructure, 2.5, relations=_row(0.0, 0.0, 1.0, 1.0, 1.0)),
+        "ad_landing_domain": _K(L.landing, 2.5, relations=_row(0.0, 0.0, 1.0, 1.0, 1.0)),
         "ad_display_domain": _K(L.creative, 1.0, relations=_row(0.0, 0.0, 1.0, 1.0, 1.0)),
-        "certpl_listing_domain": _K(L.infrastructure, 2.5, relations=_row(0.0, 0.0, 1.0, 1.0, 1.0)),
-        # redirectors and trackers on the way: can be a hub shared by unrelated operators, so not private;
-        # pre-group rarity does the rest
+        # redirectors and trackers on the way (tracker_instance when the URL looks like a click tracker, else
+        # infrastructure; scoring uses the indicator's own layer): can be a hub shared by unrelated operators,
+        # so not private; pre-group rarity does the rest. The chain shape sits in the landing layer.
         "chain_host": _K(L.tracker_instance, 2.0),
         "chain_domain": _K(L.tracker_instance, 2.0),
-        "redirect_chain_shape": _K(L.tracker_instance, 1.0),
+        "redirect_chain_shape": _K(L.landing, 1.0, relations=_row(0.0, 0.0, 1.0, 1.0, 1.0)),
         "server_ip": _K(L.infrastructure, 1.5),
         "a_record_ip": _K(L.infrastructure, 1.5),
         "nameserver": _K(L.infrastructure, 1.5),

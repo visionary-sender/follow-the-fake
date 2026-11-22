@@ -36,6 +36,7 @@ from pathlib import Path
 
 from ftf.contract.models import Dataset, Layer, Relation
 from ftf.linking.background import ALPHA, TYPE_PRIOR_SHARE, BackgroundCounts, unique_by_construction
+from ftf.linking.hierarchy import ANCHOR_KINDS, CHAIN
 from ftf.linking.weights import HAND_TABLE, PRIVATE_LAYERS, KindWeight, WeightTable
 
 KAPPA = 4.0  # Beta prior strength (pseudo-observations) toward the prior / layer estimate
@@ -133,9 +134,7 @@ def learn_weights(
 
     # negatives: capture pairs of two different owners
     owners = labels_of(NEGATIVE_LABEL)
-    neg_pairs = [(a, b) for a, b in combinations(sorted(owners), 2) if not owners[a] & owners[b]]
-    if len(neg_pairs) > MAX_NEG_PAIRS:  # report-only counts: a deterministic subsample bounds the cost
-        neg_pairs = neg_pairs[:: -(-len(neg_pairs) // MAX_NEG_PAIRS)]
+    neg_pairs = _negative_pairs(owners)
 
     learned_s: dict[Relation, dict[str, float]] = {}
     learned_n: dict[Relation, dict[str, float]] = {}
@@ -144,7 +143,11 @@ def learn_weights(
         if not lab:
             report["relations"][relation.value] = {"label_kind": label, "status": "no labels in dataset"}
             continue
-        held_layers = {kind_layer[label]}
+        # the label's layer and the layers of its ancestor chain ids (an aio campaign sits under one owner and
+        # one tenant, so every positive pair shares them by construction: they cannot be learned here)
+        label_level = ANCHOR_KINDS[label]
+        coarser = CHAIN[CHAIN.index(label_level):]
+        held_layers = {kind_layer[label]} | {kind_layer[k] for k, lv in ANCHOR_KINDS.items() if lv in coarser and k in kind_layer}
         held_kinds = {k for k, ly in kind_layer.items() if ly in held_layers} | {label}
         members: dict[str, list[str]] = defaultdict(list)
         for cap, vals in lab.items():
@@ -229,7 +232,10 @@ def learn_weights(
         top = max(absolute.values())
         info["bits"] = {r.value: round(b, 3) for r, b in absolute.items()}
         report["kinds"][kind] = info
-        if not learned_rel:
+        if not learned_rel or kind not in prior.kinds:
+            # a kind the prior does not know stays unknown (reported, and warned about by `ftf score`/`link`)
+            if learned_rel:
+                info["not_in_table"] = "kind has no prior entry; learned bits reported only"
             continue
         kinds[kind] = KindWeight(
             layer=base.layer if kind in prior.kinds else layer, bits=round(top, 3),
@@ -345,3 +351,17 @@ def load_weights(path: Path) -> tuple[WeightTable, BackgroundCounts | None, dict
         raise ValueError(f"{path}: not an {FORMAT} v{VERSION} document")
     bg = BackgroundCounts.from_json(doc["background"]) if doc.get("background") else None
     return table_from_json(doc["table"]), bg, doc.get("report", {})
+
+
+def _negative_pairs(owners: dict[str, set[str]]) -> list[tuple[str, str]]:
+    """Capture pairs of two different owners, at most `MAX_NEG_PAIRS` (an even stride over all pairs, built
+    lazily: report-only counts must not cost O(n²) memory)."""
+    caps = sorted(owners)
+    n = len(caps)
+    total = n * (n - 1) // 2
+    stride = max(1, -(-total // MAX_NEG_PAIRS))
+    out: list[tuple[str, str]] = []
+    for idx, (a, b) in enumerate(combinations(caps, 2)):
+        if idx % stride == 0 and not owners[a] & owners[b]:
+            out.append((a, b))
+    return out

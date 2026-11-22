@@ -103,7 +103,8 @@ def test_differing_aio_campaign_under_one_owner_is_a_campaign_conflict_but_no_ca
     assert not has_private_conflict(s)  # same owner: a different campaign, never a cannot-link
     op = score_pair(ctx, "x/lander", "y/lander", Relation.operator)
     assert not [r for r in op.rows if r.status is EvidenceStatus.conflict]
-    assert row(s, "aio_owner").bits == pytest.approx(4.0)  # 6 − 1 static copy prior − log2(2 groups)
+    # under campaign the shared owner is explained away by the differing campaign under it (HACK-23)
+    assert row(s, "aio_owner").status is EvidenceStatus.hub_subsumed and "differing aio campaign" in row(s, "aio_owner").note
 
 
 @pytest.mark.parametrize("kind", ["meta_pixel", "capi_gateway", "xid_tracker_machine"])

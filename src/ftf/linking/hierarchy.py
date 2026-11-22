@@ -24,6 +24,7 @@ determine (every id has exactly one parent id): it is reported, and documents wh
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -39,6 +40,8 @@ ANCHOR_KINDS: dict[str, Level] = {
 }
 # Finest first: the order in which a value's carriers are checked for one shared anchor id.
 CHAIN: tuple[Level, ...] = (Level.landing, Level.campaign, Level.operator, Level.tenant)
+# Pseudo-count of a parent id's children not seen in the sample (type prior of the conditional chain term).
+K_UNSEEN = 3
 LEVEL_NAMES = {Level.platform: "platform", Level.tenant: "tenant", Level.operator: "owner",
                Level.campaign: "aio campaign", Level.landing: "landing"}
 
@@ -50,6 +53,8 @@ class Hierarchy:
     level_of: dict[ValueKey, Level] = field(default_factory=dict)
     parents: dict[Level, Level | None] = field(default_factory=dict)  # level graph over anchor levels
     anchors: Mapping[str, Level] = field(default_factory=lambda: dict(ANCHOR_KINDS))
+    # anchor id ("kind=value") → distinct ids of its child level (the finer level whose parent it is)
+    n_children: dict[str, int] = field(default_factory=dict)
 
     @classmethod
     def from_captures(
@@ -75,7 +80,8 @@ class Hierarchy:
             level = _level(key, caps, anchor_ids)
             if level is not None:
                 level_of[key] = level
-        return cls(level_of=level_of, parents=_parents(anchor_ids), anchors=dict(anchors))
+        parents = _parents(anchor_ids)
+        return cls(level_of=level_of, parents=parents, anchors=dict(anchors), n_children=_children(anchor_ids, parents))
 
     @classmethod
     def from_dataset(cls, ds, anchors: Mapping[str, Level] = ANCHOR_KINDS) -> "Hierarchy":
@@ -151,6 +157,7 @@ class ChainRow:
     key: ValueKey
     live_private: bool = False  # a live operator-private id (feeds the strict gate while it keeps bits)
     private: bool = False  # an operator-private kind (never demoted to a platform constant)
+    chain: bool = False  # the term of a chain level (tenant, owner, aio campaign, landing): one positive layer in all
 
 
 def apply_chain_rule(cands: list[ChainRow], hierarchy: Hierarchy, platform_cap: float) -> tuple[list[ChainRow], list[EvidenceRow]]:
@@ -189,12 +196,53 @@ def apply_chain_rule(cands: list[ChainRow], hierarchy: Hierarchy, platform_cap: 
         elif any(c.live_private for c in rest) and not top.live_private:
             # a live private id of this level still opens the strict gate through the level's one term
             top = ChainRow(top.row, top.bits, top.key, live_private=True, private=top.private)
+        else:
+            top = _conditioned(top, level, by_level, hierarchy)
         kept.append(top)
         subsumed += [_subsume(c, f"one term per {name}, counted by {top.key[1]}") for c in rest]
     return kept, subsumed
+
+
+def _conditioned(top: ChainRow, level: Level, by_level: Mapping[Level, list[ChainRow]], h: Hierarchy) -> ChainRow:
+    """The level's term given the coarser level the pair already shares: log2(1/u_level|parent), with
+    u_level|parent = 1/(k + K_UNSEEN), k the distinct child ids known under the shared parent id. K_UNSEEN
+    is a type prior for children not seen yet, so a parent with a single known child is not 0 bits
+    forever (log2 4 = 2 bits). Never above the unconditional weight."""
+    parent = h.parents.get(level)
+    while parent is not None:
+        shared = [c for c in by_level.get(parent, ()) if h.anchors.get(c.key[1]) == parent]
+        if shared:
+            k = h.n_children.get(anchor_id(shared[0].key), 1)
+            cap = round(math.log2(k + K_UNSEEN), 3)
+            if top.bits > cap:
+                pname = LEVEL_NAMES.get(parent, parent.value)
+                row = top.row.model_copy(update={
+                    "bits": cap,
+                    "note": f"{top.row.note}; chain rule: given the shared {pname}, log2({k} known + {K_UNSEEN} unseen) = {cap:g}",
+                })
+                return ChainRow(row, cap, top.key, top.live_private, top.private, chain=True)
+            break
+        parent = h.parents.get(parent)
+    return ChainRow(top.row, top.bits, top.key, top.live_private, top.private, chain=True)
 
 
 def _subsume(c: ChainRow, why: str) -> EvidenceRow:
     return c.row.model_copy(update={
         "status": EvidenceStatus.hub_subsumed, "bits": 0.0, "note": f"{c.row.note}; chain rule: {why}",
     })
+
+
+def _children(anchor_ids: Mapping[str, Mapping[Level, set[str]]], parents: Mapping[Level, Level | None]) -> dict[str, int]:
+    """For each parent-level id, how many distinct ids of its child level co-occur with it (sample)."""
+    kids: dict[str, set[str]] = defaultdict(set)
+    for fine, coarse in parents.items():
+        if coarse is None:
+            continue
+        for ids in anchor_ids.values():
+            for p in ids.get(coarse, ()):
+                kids[p] |= set(ids.get(fine, ()))
+    return {p: len(c) for p, c in kids.items()}
+
+
+def anchor_id(key: ValueKey) -> str:
+    return f"{key[1]}={key[2]}"
