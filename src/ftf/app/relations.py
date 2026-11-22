@@ -23,8 +23,7 @@ import math
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
-
-import networkx as nx
+from typing import TYPE_CHECKING
 
 from ftf.contract import (
     Dataset,
@@ -36,6 +35,9 @@ from ftf.contract import (
     Relation,
     linkable,
 )
+
+if TYPE_CHECKING:  # networkx is an `app` extra; `ftf export` imports this module without it
+    import networkx as nx
 
 RELATIONS: tuple[Relation, ...] = tuple(Relation)
 
@@ -277,6 +279,8 @@ def relation_graph(ds: Dataset, relation: Relation, threshold: float | None = No
     for c in camps:
         for cid in c.capture_ids:
             member[cid].append(c.id)
+    import networkx as nx
+
     g = nx.Graph(relation=rel)
 
     def add_node(cid: str) -> None:
@@ -309,6 +313,8 @@ def clusters(ds: Dataset, relation: Relation, threshold: float | None = None) ->
     ]
     covered = [set(c.capture_ids) for c in out]
     n = 0
+    import networkx as nx
+
     for comp in sorted(nx.connected_components(g), key=lambda s: (-len(s), sorted(s))):
         if len(comp) < 2 or any(comp <= cov for cov in covered):
             continue
@@ -390,6 +396,8 @@ def indicator_view(ds: Dataset, campaign_id: str, min_captures: int = 2) -> nx.G
     for ind in ds.indicators():
         if ind.capture_id in caps and linkable(ind) and ind.value is not None:
             holders[("ind", ind.layer.value, ind.kind, ind.value)].add(ind.capture_id)
+    import networkx as nx
+
     g = nx.Graph(campaign_id=campaign_id)
     for cid in sorted(caps):
         g.add_node(cid, side="capture", **meta[cid])
@@ -464,6 +472,8 @@ def _strongest_path(g: nx.Graph, a: str, b: str) -> list[str] | None:
     """Fewest hops between `a` and `b`, ties broken towards stronger links."""
     if a not in g or b not in g:
         return None
+    import networkx as nx
+
     try:
         return nx.shortest_path(g, a, b, weight=lambda u, v, d: 1.0 + 1.0 / (1.0 + max(d["bits"], 0.0)))
     except nx.NetworkXNoPath:
