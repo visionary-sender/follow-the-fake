@@ -409,7 +409,8 @@ def test_index_equals_linear_with_learned_weights_background_and_chain_rule(seed
     assert table is not ledger.HAND_TABLE
     decisions = set()
     for relation in Relation:
-        idx = CandidateIndex.build(base, weights=table, background=bg, cache=False)
+        idx = CandidateIndex.build(base, weights=table, background=bg, cache=False)  # never grown
+        seq = CandidateIndex.build(base, weights=table, background=bg, cache=False)  # grown with add()
         current = base
         for inc in new:
             lin = link_incident(base, inc, relation, backend=factory)
@@ -419,9 +420,9 @@ def test_index_equals_linear_with_learned_weights_background_and_chain_rule(seed
             decisions.add(lin.assignment.decision)
             # sequence: the index after add() == the linear scan over the grown collection
             seq_lin = link_incident(current, inc, relation, backend=factory)
-            seq_fast = link_incident(base, inc, relation, index=idx)
+            seq_fast = link_incident(base, inc, relation, index=seq)
             assert seq_fast.assignment.model_dump() == seq_lin.assignment.model_dump(), (relation, inc.id, "seq")
-            idx.add(inc)
+            seq.add(inc)
             current = combine(current, [inc])
     assert Decision.assign in decisions
 
