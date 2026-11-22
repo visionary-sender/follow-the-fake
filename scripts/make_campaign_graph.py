@@ -71,7 +71,7 @@ def campaign_graph(ds: Dataset, camp: Campaign, threshold: float) -> nx.Graph:
     inc = incident_of(ds)
     labels = case_label(ds)
     g = nx.Graph(campaign=camp.id, relation=camp.relation.value)
-    for cid in members:
+    for cid in sorted(members):  # sorted: the ring order must not depend on hash seeds
         g.add_node(inc[cid], label=labels[inc[cid]])
     for u, v, data in rel_graph.edges(data=True):
         if u not in members or v not in members or inc[u] == inc[v]:
