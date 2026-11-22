@@ -21,7 +21,7 @@ from urllib.parse import unquote_plus, urlsplit
 
 from ftf import __version__
 from ftf.contract import Artefact, ArtefactType, Capture, Incident, Indicator, Layer, Level, Observed, Provenance
-from ftf.indicators import _har, _html
+from ftf.indicators import _har, _html, _pages
 from ftf.indicators._ids import CONTACT_KINDS, KINDS, Hit, clean, norm_path, scan
 
 EXTRACTOR = f"platform@{__version__}"
@@ -214,11 +214,21 @@ def _from_artefact(sink: _Sink, artefact: Artefact, path: Path) -> None:
             sink.page(text, artefact, "file", html=True)
     elif t is ArtefactType.asset:
         _from_asset(sink, artefact, path)
-    elif t in (ArtefactType.url, ArtefactType.text, ArtefactType.other):
+    elif t in (ArtefactType.text, ArtefactType.other):
         if not _BINARY_EXT.search(artefact.path or ""):
             text = _read_text(path)
             if text is not None:
                 sink.page(text, artefact, "file", html=False)
+
+
+def _from_url(sink: _Sink, artefact: Artefact, root: Path) -> None:
+    """A URL-list member: only its own line of the shared list file is scanned (see `_pages.url_text`)."""
+    if _BINARY_EXT.search(artefact.path or ""):
+        return
+    data = _pages.url_text(root, artefact)
+    if data is None or len(data) > MAX_TEXT_BYTES or b"\x00" in data[:4096]:
+        return
+    sink.page(data.decode("utf-8", "replace"), artefact, "file", html=False)
 
 
 def extract(incident: Incident, capture: Capture, root: Path) -> Iterable[Indicator]:
@@ -228,7 +238,10 @@ def extract(incident: Incident, capture: Capture, root: Path) -> Iterable[Indica
         if not artefact.path:
             continue
         try:
-            _from_artefact(sink, artefact, root / artefact.path)
+            if artefact.type is ArtefactType.url:
+                _from_url(sink, artefact, root)
+            else:
+                _from_artefact(sink, artefact, root / artefact.path)
         except Exception as exc:  # a hostile or broken file must not stop the dataset
             log.warning("platform: skipped artefact %s (%s)", artefact.id, type(exc).__name__)
     return sink.indicators()

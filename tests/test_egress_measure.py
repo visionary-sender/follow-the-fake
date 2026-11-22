@@ -47,7 +47,7 @@ def test_probe_row_reads_query_status():
         {"keyword": "invest", "status": "blocked", "ads": 0, "error": "HTTP 429 for https://x"}]}}}
     r = em.probe_row("google_atc", "invest", summary, 1, 2.0, "")
     assert r["status"] == "blocked" and r["ads"] == 0 and "429" in r["error"]
-    assert em.probe_row("meta", "Brzoska", None, -1, 1.0, "boom")["status"] == "no_summary"
+    assert em.probe_row("meta", "placeholder term", None, -1, 1.0, "boom")["status"] == "no_summary"
 
 
 def test_last_json_takes_the_final_line():

@@ -48,9 +48,9 @@ def test_meta_ssr_reads_only_json_script_blocks():
 
 
 def test_meta_search_url_has_country_keyword_and_date():
-    url = meta.search_url("pasywny dochód", since="2026-11-14")
+    url = meta.search_url("placeholder offer", since="2026-11-14")
     assert url.startswith("https://www.facebook.com/ads/library/?")
-    assert "country=PL" in url and "q=pasywny+doch%C3%B3d" in url
+    assert "country=PL" in url and "q=placeholder+offer" in url
     assert "start_date%5Bmin%5D=2026-11-14" in url
 
 
@@ -137,13 +137,13 @@ def test_google_collect_reports_block(monkeypatch):
 def test_certpl_filters_since_deleted_and_keywords():
     doc = json.loads((FX / "certpl_domains.json").read_text())
     recs = certpl.parse_list(doc, since=date(2026, 11, 19))
-    assert [r.landing_domain for r in recs] == ["olx-example.test", "invest-example.test", "pasywny-dochod.example"]
+    assert [r.landing_domain for r in recs] == ["olx-example.test", "invest-example.test", "placeholder-offer.example"]
     assert recs[0].start_date == "2026-11-21" and recs[0].register_id == "5000003"
     assert recs[0].ad_id == "olx-example.test" and recs[0].incident_id == "certpl:olx-example.test"
-    kw = certpl.parse_list(doc, since=date(2026, 11, 1), keywords=["Pasywny Dochód", "invest"])
+    kw = certpl.parse_list(doc, since=date(2026, 11, 1), keywords=["Placeholder Offer", "invest"])
     assert [(r.landing_domain, r.keyword) for r in kw] == [
         ("invest-example.test", "invest"),
-        ("pasywny-dochod.example", "Pasywny Dochód"),
+        ("placeholder-offer.example", "Placeholder Offer"),
     ]
     with pytest.raises(ValueError):
         certpl.parse_list({"not": "a list"}, since=None)

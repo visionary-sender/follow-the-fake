@@ -14,7 +14,7 @@ Challenge data lives in a private bucket and never in this repository.
 
 ## Quick start
 
-- **Jury:** build and run the container image, see [Container](#container).
+- **Jury:** build and run the container image, see [Container](#container) and the full run instructions in [docs/container.md](docs/container.md).
 - **One item:** `ftf analyze INPUT --base dataset.json --out result.json` runs ingestion, enrichment and linking on one ad, page, URL or keyword against a campaign base, and prints the decision (assign, new or review).
 - **Campaign tables:** `ftf export --base dataset.json --out DIR` writes the linked dataset as CSV tables, a validated copy of the dataset and `campaign_patterns.md`.
 - **Demo app:** `ftf serve --base dataset.json` (needs the `app` extra), see [Run the demo app on the VM](#run-the-demo-app-on-the-vm).
@@ -49,6 +49,10 @@ gcloud compute ssh ftf-workbench --project follow-the-fake --zone europe-central
 Docker on the VM is a one-time setup: `sudo apt-get install -y docker.io`.
 Remove dangling images afterwards with `sudo docker image prune -f`.
 
+The jury run in full (first start with the organiser's folder, a prebuilt base bundle, the
+environment variables, offline and online modes, and the image leak check) is in
+[docs/container.md](docs/container.md).
+
 ## Demo walkthrough
 
 The walkthrough uses the hour-4 slice: a linked campaign base built from the challenge cases on the workbench VM, with one case held out. It runs three items through `ftf analyze`. Cases are named by their folder number.
@@ -61,7 +65,7 @@ The numbers are the method's output from hand-set weights, not a measured accura
 
 ## Methodology
 
-The full description is in [docs/methodology.md](docs/methodology.md). Its weights and thresholds are read from the code (`src/ftf/linking/`). In short:
+The full description is in [docs/methodology.md](docs/methodology.md); decisions that need explaining (such as "review" when the platform layer is hidden) are in [docs/linking-decisions.md](docs/linking-decisions.md). Its weights and thresholds are read from the code (`src/ftf/linking/`). In short:
 
 1. **Captures.** A visit or a saved item (ad, pre-lander, lander, decoy) is one capture, with the modalities it has and the ones it lacks. Exact duplicates collapse onto one capture first.
 2. **Indicators per layer.** Identifiers and features come from saved files and recorded traffic: tracking accounts, operator and tenant configuration, page-kit fingerprints, landing ids, infrastructure facts and ad text. Each indicator sits in one layer and is marked live (seen in traffic) or static (seen in saved files).
@@ -139,7 +143,7 @@ The hour-4 slice result, with case numbers only: held-out case `do_udostepnienia
 | `src/ftf/pipeline/` | end-to-end analysis (`ftf analyze`) and the export (`ftf export`); stage adapters in `stages.py` |
 | `src/ftf/app/` | Streamlit demo app (`ftf serve`); evidence ledger in `ledger.py`, campaign views in `relations.py` |
 | `src/ftf/contract/` | the data contract (pydantic models); see `docs/contract.md` |
-| `docs/` | `contract.md`, `methodology.md`, and the details of the fetcher, scanner and enrichment |
+| `docs/` | `contract.md`, `methodology.md`, `container.md` (the jury run), and the details of the fetcher, scanner and enrichment |
 | `tests/` | pytest suite, run on the workbench VM |
 | `scripts/vm.sh` | cloud dev loop: sync to the workbench VM, run tests or commands there |
 | `scripts/check_no_organiser_values.py` | fails if organiser values reach tracked files or commit messages |
@@ -225,6 +229,11 @@ The licence rule applies to what ships in the jury's container; tools used only 
 during the build are not a licensing concern. Playwright, its Chromium (with Chromium's bundled,
 unmodified LGPL-2.1 FFmpeg) and its Node.js driver are a named exception (owner, 2026-11-21); they
 come only with the optional `fetch` extra and are listed separately in `LICENSES-THIRD-PARTY.md`.
+
+System packages in the image, models (`FTF_WITH_MODELS`, off by default) and outside services, with
+their licences and usage limits: [docs/licences.md](docs/licences.md). Some system libraries that
+Chromium needs are LGPL or MPL; they are not covered by a named exception yet and await an owner
+decision (listed in that document).
 
 ## Operations
 

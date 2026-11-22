@@ -8,7 +8,7 @@ import sys
 import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 from dataclasses import asdict
 
@@ -19,13 +19,9 @@ from ftf.scanner.http import Client
 from ftf.scanner.records import EXTRACTOR, SOURCES, AdRecord, to_incident
 from ftf.scanner.store import MANIFEST_VERSION, Locked, Store, update_dataset, write_capture
 
-# A few generic Polish investment-scam terms and names of public figures often abused in such
-# ads (public knowledge, chosen by us; edit freely).
-DEFAULT_KEYWORDS = {
-    "meta": ["platforma inwestycyjna", "pasywny dochód", "Brzoska", "Glapiński"],
-    # Google searches advertiser names and domains, not ad copy: use generic finance terms.
-    "google_atc": ["invest", "trading", "crypto"],
-}
+# Sources that search by keyword. They need terms from `--keywords` or `--keywords-file`; none are
+# built in. The list in use is private (see docs/scanner.md), so nothing here names a term.
+KEYWORD_SOURCES = ("meta", "google_atc")
 CREATIVES_PER_AD = 2
 CREATIVE_DELAY = 1.0  # image CDNs, not the libraries' search endpoints
 
@@ -39,6 +35,42 @@ def _date(value: str) -> date:
 
 def _keywords(value: str) -> list[str]:
     return [k.strip() for k in value.split(",") if k.strip()]
+
+
+KeywordArg = Union[list[str], dict[str, list[str]], None]
+
+
+def keywords_for(keywords: KeywordArg, source: str) -> list[str]:
+    """Search terms of one source: a list applies to every keyword source, a dict is per source."""
+    if not keywords or source not in KEYWORD_SOURCES:
+        return []
+    if isinstance(keywords, dict):
+        return list(keywords.get(source, []))
+    return list(keywords)
+
+
+def load_keywords(path: Path) -> dict[str, list[str]]:
+    """Read a keyword file: a `[source]` heading, then one search term per line; `#` lines are comments.
+
+    Errors name the file and the line number only, never the terms.
+    """
+    out: dict[str, list[str]] = {}
+    section = None
+    for number, raw in enumerate(Path(path).read_text(encoding="utf-8-sig").splitlines(), start=1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            section = line[1:-1].strip()
+            if section not in KEYWORD_SOURCES:
+                raise ValueError(f"{path}:{number}: unknown heading; use {' or '.join(f'[{s}]' for s in KEYWORD_SOURCES)}")
+            out.setdefault(section, [])
+            continue
+        if section is None:
+            raise ValueError(f"{path}:{number}: a search term must come after a [source] heading")
+        if line not in out[section]:
+            out[section].append(line)
+    return out
 
 
 def _positive(value: str) -> int:
@@ -73,7 +105,9 @@ def register(subparsers) -> None:
         ),
     )
     p.add_argument("--source", action="append", choices=SOURCES, help="source to scan (repeatable; default: all)")
-    p.add_argument("--keywords", type=_keywords, help="comma-separated search terms for meta and google_atc (default: built-in list)")
+    keyword_src = p.add_mutually_exclusive_group()
+    keyword_src.add_argument("--keywords", type=_keywords, help="comma-separated search terms for meta and google_atc")
+    keyword_src.add_argument("--keywords-file", type=Path, help="keyword file with [meta] and [google_atc] headings, one term per line; required for meta and google_atc unless --keywords is given")
     p.add_argument("--cert-filter", type=_keywords, help="comma-separated substrings a CERT domain must contain (default: none)")
     p.add_argument("--since", type=_date, help="only ads shown / domains listed on or after this date (default: 7 days ago)")
     p.add_argument("--out", type=Path, default=Path("scan"), help="output directory with state and queue (default: ./scan)")
@@ -98,7 +132,7 @@ def scan(
     out: Path,
     sources: list[str],
     *,
-    keywords: Optional[list[str]] = None,
+    keywords: KeywordArg = None,
     cert_filter: Optional[list[str]] = None,
     since: Optional[date] = None,
     max_ads: int = 150,
@@ -123,6 +157,9 @@ def scan(
     max_per_keyword = max(1, min(max_per_keyword, max_ads))
     collectors = collectors or {}
     queued_at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    missing = [s for s in sources if s in KEYWORD_SOURCES and s not in collectors and not keywords_for(keywords, s)]
+    if missing:  # checked before the store is touched
+        raise ValueError(f"no search terms for {', '.join(missing)}: pass keywords or a keyword file")
 
     with Store(out) as store:
         seen = store.load_seen()
@@ -140,7 +177,7 @@ def scan(
 
         for source in sources:
             t0 = time.monotonic()
-            kws = keywords or DEFAULT_KEYWORDS.get(source, [])
+            kws = keywords_for(keywords, source)
             skip = set(seen)
             if source in collectors:
                 results = collectors[source](kws, since, max_ads, max_per_keyword, skip)
@@ -239,11 +276,22 @@ def scan(
 
 def cmd_scan(args: argparse.Namespace) -> int:
     sources = list(dict.fromkeys(args.source or SOURCES))
+    keywords: KeywordArg = args.keywords
+    if args.keywords_file is not None:
+        try:
+            keywords = load_keywords(args.keywords_file)
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            print(f"ftf scan: cannot read keyword file: {exc}", file=sys.stderr)
+            return 2
+    missing = [s for s in sources if s in KEYWORD_SOURCES and not keywords_for(keywords, s)]
+    if missing:
+        print(f"ftf scan: {', '.join(missing)} need search terms: pass --keywords or --keywords-file", file=sys.stderr)
+        return 2
     try:
         summary = scan(
             args.out,
             sources,
-            keywords=args.keywords,
+            keywords=keywords,
             cert_filter=args.cert_filter,
             since=args.since,
             max_ads=args.max_ads,

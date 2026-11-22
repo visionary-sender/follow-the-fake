@@ -1,5 +1,5 @@
 [{"RegisterPositionId":5000001,"DomainAddress":"invest-example.test","InsertDate":"2026-11-20T18:59:00","DeleteDate":null},
-{"RegisterPositionId":5000002,"DomainAddress":"WWW.Pasywny-Dochod.example","InsertDate":"2026-11-19T10:00:00","DeleteDate":null},
+{"RegisterPositionId":5000002,"DomainAddress":"WWW.Placeholder-Offer.example","InsertDate":"2026-11-19T10:00:00","DeleteDate":null},
 {"RegisterPositionId":5000003,"DomainAddress":"olx-example.test","InsertDate":"2026-11-21T08:00:00","DeleteDate":null},
 {"RegisterPositionId":5000004,"DomainAddress":"old-example.test","InsertDate":"2026-05-21T10:00:00","DeleteDate":null},
 {"RegisterPositionId":5000005,"DomainAddress":"deleted-invest.test","InsertDate":"2026-11-20T10:00:00","DeleteDate":"2026-11-21T10:00:00"},

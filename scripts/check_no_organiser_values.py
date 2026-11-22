@@ -52,6 +52,11 @@ PUBLIC_HOSTS = frozenset({
     "yandex.ru", "yandex.net", "vuejs.org", "npmjs.com", "fpjs.dev", "npms.io", "python.org",
     "pypi.org", "linear.app", "anthropic.com", "docker.com", "debian.org", "ubuntu.com", "apache.org",
     "gnu.org", "mozilla.org",
+    "ads-twitter.com",
+    "bing.com",
+    "clarity.ms",
+    "quora.com",
+    "taboola.com",
 })
 # Not organiser infrastructure: file names that look like domains, reserved test names.
 FILE_EXTENSIONS = frozenset({
@@ -68,13 +73,13 @@ VERSION_RE = re.compile(r"^v?\d+(\.\d+)+$")
 URL_RE = re.compile(r"https?://[^\s\"'<>)\]]+", re.I)
 DOMAIN_RE = re.compile(r"(?<![\w@/])((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63})(?![\w])", re.I)
 TITLE_KIND_RE = re.compile(r"(title|name|caption|text|label)$|^page_title$")
+TOKEN_SPLIT_RE = re.compile(r"[^A-Za-z0-9_.:\-]+")
 
 
 def _public(host: str) -> bool:
-    """Exact host match (a leading `www.` is ignored). Subdomains are never exempt: a user-hosted
-    or brand subdomain can carry an organiser value."""
-    host = host.lower()
-    return (host[4:] if host.startswith("www.") else host) in PUBLIC_HOSTS
+    """True if the host, or one of its parent domains, is in PUBLIC_HOSTS (subdomains match)."""
+    labels = host.lower().split(".")
+    return any(".".join(labels[i:]) in PUBLIC_HOSTS for i in range(len(labels)))
 
 
 def _real_domain(name: str) -> bool:
@@ -112,6 +117,13 @@ def extract(dataset: dict) -> dict[str, set[str]]:
             host = (urlsplit(url).hostname or "").lower()
             if host and _real_domain(host):
                 found["host"].add(host)
+            if host and _public(host):
+                # Only the host is exempt: an id-like token in the path or query is still checked.
+                parts = urlsplit(url)
+                for token in TOKEN_SPLIT_RE.split(f"{parts.path} {parts.query}"):
+                    stem = token.rsplit(".", 1)[0] if token.rsplit(".", 1)[-1] in FILE_EXTENSIONS else token
+                    if _id_like(stem, layer):
+                        found["id"].add(stem.lower())
         for dom in DOMAIN_RE.findall(value):
             if _real_domain(dom.lower()):
                 found["host"].add(dom.lower())
@@ -123,7 +135,7 @@ def extract(dataset: dict) -> dict[str, set[str]]:
         found[cat] = {v for v in found[cat] if len(v) >= MIN_LENGTH}
     found["host"] = {h for h in found["host"] if not _public(h)}
     found["url"] = {u for u in found["url"] if not _public((urlsplit(u).hostname or "").lower())}
-    found["id"] = {v for v in found["id"] if not _public(v)}
+    found["id"] = {v for v in found["id"] if v not in PUBLIC_HOSTS}
     return found
 
 

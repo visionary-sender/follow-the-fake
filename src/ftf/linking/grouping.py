@@ -18,8 +18,16 @@ Method (07 §1.8, D2 "Linking / clustering"):
   mean is non-negative, they are joined by at least one qualifying edge, and no cross pair is
   cannot-linked. Unlike connected components, one false private-id match between two groups
   is outvoted by all the other cross pairs, so it does not chain them.
-* Non-decoy captures of one incident are one ad's redirect chain: they start in one unit
-  (must-link), unless two of them conflict. Between units the best capture pair counts
+* Must-link only where an incident's redirect chain is unambiguous (HACK-57). The chain's
+  end points are its non-decoy lander-stage captures. With at most one end point,
+  all non-decoy captures of the incident (ad, pre-lander, lander) start in one unit, unless two
+  of them conflict. With several end points the incident is not one chain: a case folder can
+  hold unrelated sites, so its landers join only through their own evidence, like any other
+  pair. Its ad / pre-lander captures are then attached to the lander they share the most
+  evidence with (the highest-bit pair with bits > 0 and, under operator / campaign, no
+  tenant/owner conflict; ties by id); without any such evidence they stay their own unit.
+  Ingestion marks every saved page of a case folder as a lander, so a folder with two saved
+  pages (even a cloaker page and its offer page) is split unless the pages share evidence. Between units the best capture pair counts
   (D1: max over members). A decoy capture is what the cloaker shows non-targets, so it is
   never must-linked to its incident. Under operator / campaign it clusters only with other
   decoys (cannot-link to non-decoys), so it cannot pull its incident into a second campaign;
@@ -43,6 +51,7 @@ from ftf.contract.models import (
     Campaign,
     Dataset,
     EvidenceStatus,
+    Incident,
     Layer,
     Link,
     Relation,
@@ -58,6 +67,10 @@ ALL_RELATIONS: tuple[Relation, ...] = tuple(Relation)
 SINGLE_VALUED_LAYERS = frozenset({Layer.platform, Layer.tenant, Layer.owner})  # conflicts shown in notes
 PRIVATE_SINGLE_LAYERS = frozenset({Layer.tenant, Layer.owner})  # conflicts that are cannot-link
 CANNOT_LINK_RELATIONS = frozenset({Relation.operator, Relation.campaign})
+# Stages that end a redirect chain: an incident with several of them is not one ad's chain.
+# Unknown-stage captures (fetcher re-fetches of one URL, scanner listings) do not count, so an
+# incident of them alone stays must-linked; next to several landers they attach like an ad.
+END_STAGES = frozenset({Stage.lander})
 MIN_LAYERS: dict[Relation, int] = {
     Relation.template: 1,
     Relation.tracking_account: 2,
@@ -212,6 +225,45 @@ def canonical_map(ds: Dataset) -> dict[str, str]:
     return {c.id: (c.duplicate_of or c.id) for i in ds.incidents for c in i.captures}
 
 
+def incident_chain(incident: Incident, canon: dict[str, str], stage: dict[str, Stage]) -> tuple[list[str], list[str]]:
+    """(end points, the rest) among an incident's canonical non-decoy captures, in capture order.
+
+    End points are the captures whose own or canonical stage is lander (a lander duplicating
+    another incident's capture is still a lander here); the rest are ad, pre-lander and
+    unknown-stage captures.
+    The chain is unambiguous, and may be must-linked whole, only with at most one end point.
+    A capture counts as a decoy if it or its canonical capture is one.
+    """
+    live = [c for c in incident.captures if c.stage is not Stage.decoy and stage[canon[c.id]] is not Stage.decoy]
+    caps = list(dict.fromkeys(canon[c.id] for c in live))
+    end_set = {canon[c.id] for c in live if c.stage in END_STAGES or stage[canon[c.id]] in END_STAGES}
+    ends = [c for c in caps if c in end_set]
+    return ends, [c for c in caps if c not in end_set]
+
+
+def must_link_groups(ds: Dataset, by_pair: dict[frozenset[str], PairScore]) -> list[list[str]]:
+    """Must-link groups of canonical capture ids, one or more per incident (see module doc)."""
+    canon = canonical_map(ds)
+    stage = {c.id: c.stage for i in ds.incidents for c in i.captures}
+    groups: list[list[str]] = []
+    for inc in ds.incidents:
+        ends, rest = incident_chain(inc, canon, stage)
+        if len(ends) <= 1:
+            groups.append(ends + rest)
+            continue
+        for x in rest:
+            best: Optional[tuple[float, str]] = None
+            for e in ends:
+                ps = by_pair.get(_pair(x, e))
+                if ps is None or ps.bits <= 0 or (ps.relation in CANNOT_LINK_RELATIONS and has_conflict(ps)):
+                    continue
+                if best is None or (-ps.bits, e) < (-best[0], best[1]):
+                    best = (ps.bits, e)
+            if best is not None:
+                groups.append([best[1], x])
+    return groups
+
+
 def candidate_pairs(ds: Dataset, relation: Relation, nodes: Optional[set[str]] = None) -> set[tuple[str, str]]:
     """Pairs of canonical captures that share at least one linkable value (plus single-valued buckets).
 
@@ -276,15 +328,12 @@ def group(ctx: Any, relation: Relation = Relation.campaign) -> tuple[list[Campai
         # about who runs the campaign, and must not pull its incident into a second one.
         decoys = {n for n in nodes if captures[n].stage is Stage.decoy}
         cannot |= {_pair(ps.a, ps.b) for ps in scores if (ps.a in decoys) != (ps.b in decoys)}
-    must = [
-        [canon[c.id] for c in i.captures if c.stage is not Stage.decoy and captures[canon[c.id]].stage is not Stage.decoy]
-        for i in ds.incidents
-    ]
+    by_pair = {_pair(ps.a, ps.b): ps for ps in scores}
+    must = must_link_groups(ds, by_pair)
 
     min_layers = MIN_LAYERS[relation]
     clusters = cluster(nodes, scores, tau, cannot, must, min_layers)
 
-    by_pair = {_pair(ps.a, ps.b): ps for ps in scores}
     dups: dict[str, list[str]] = defaultdict(list)
     for cid, can in canon.items():
         if cid != can:

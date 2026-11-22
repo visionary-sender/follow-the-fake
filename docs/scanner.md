@@ -13,12 +13,21 @@ sandboxed URL fetcher.
 | `certpl` | CERT Polska warning list (`hole.cert.pl/domains/v2/domains.json`), public and keyless | Register id, newly listed domain, listing date |
 
 ```bash
-ftf scan                                              # all sources, built-in keywords, last 7 days
-ftf scan --source meta --keywords "Brzoska,pasywny dochód" --since 2026-11-14
+ftf scan --keywords-file keywords.txt                 # all sources, last 7 days
+ftf scan --source meta --keywords "term one,term two" --since 2026-11-14
 ftf scan --source certpl --cert-filter invest,inwest  # only CERT domains containing a filter word
-ftf scan --source google_atc --max-ads 50 --delay 3 --out scan
+ftf scan --source google_atc --keywords-file keywords.txt --max-ads 50 --delay 3 --out scan
 ftf scan --source google_bq --bq-project my-gcp-project --since 2026-10-22   # run on the workbench
 ```
+
+- **Search terms.** `meta` and `google_atc` need terms: `--keywords` gives one comma-separated
+  list to both, `--keywords-file` one list per source (the two are exclusive). Without terms the
+  run stops with exit 2; `certpl` and `google_bq` need none. There are no built-in terms.
+  The file has a `[meta]` and/or `[google_atc]` heading, then one term per line; `#` starts a
+  comment line. `config/scanner-keywords.example.txt` shows the format with invented terms.
+  The list in use is private: it lives in `gs://follow-the-fake-data/config/scanner-keywords.txt`
+  and the sandbox reads a copy at `/opt/hack-20/config/scanner-keywords.txt`. Real terms never go
+  into git, a PR, a tracker or a doc.
 
 - **Output** (`--out`, default `./scan`), in the same per-capture folder layout as the URL
   fetcher, so one ingestion adapter reads both. One folder per new ad,
@@ -80,17 +89,23 @@ directory for its output:
 docker run --rm -v "$PWD/scan:/home/ftf/scan" ftf scan --source google_atc --source certpl --out scan
 ```
 
-The `meta` source needs the optional `playwright` package and Chromium, which the image does
-not include. Without them it reports `unavailable` and the other sources still run. To use
-it anyway: `pip install '.[fetch]' && playwright install --with-deps chromium`.
+The `meta` source needs the optional `playwright` package and Chromium. The image includes both
+(the `fetch` extra and the Chromium headless shell, see the Dockerfile). Outside the image, without
+them it reports `unavailable` and the other sources still run; to install them:
+`pip install '.[fetch]' && playwright install --with-deps chromium`.
 
 **Scheduled runs (team setup).** The scanner runs only on the sandbox VM `ftf-sandbox`, never
 on the laptop or the workbench. `scripts/scanner-sandbox.sh install` copies the code to
 `/opt/hack-20` there (tracked files only), builds a venv with Chromium and installs a systemd
-timer (`deploy/scanner/`) that runs `ftf scan --download-creatives` as the unprivileged user
+timer (`deploy/scanner/`) that runs `ftf scan --download-creatives --keywords-file /opt/hack-20/config/scanner-keywords.txt` as the unprivileged user
 `hack20` 2 minutes after it starts and then every 6 hours while the VM is up. Each source is
 saved as soon as it finishes, so a run stopped half-way keeps what it found.
 `scripts/scanner-sandbox.sh status` shows the timer, the runs and the queue.
+`scripts/scanner-sandbox.sh keywords` copies the keyword file from the bucket to the sandbox: it
+runs on the workbench, which streams `gs://follow-the-fake-data/config/scanner-keywords.txt` to
+the sandbox over the internal network with a key that can only write that file, so the laptop
+just issues the command. Until the file exists the timer skips its runs (`ConditionPathExists`),
+and `status` says whether it is there.
 `scripts/scanner-sandbox.sh authorize-workbench` (once) and `scripts/scanner-sandbox.sh pull`
 (a read-only mirror: queue statuses are changed with `ftf.scanner.mark` on the sandbox copy,
 which a pull overwrites on the workbench) copy the output from the sandbox to the workbench (`/data/derived/scanner/`) over the internal

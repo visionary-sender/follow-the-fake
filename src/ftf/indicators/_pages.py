@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import email
 import email.policy
+import hashlib
 import json
 import logging
 from dataclasses import dataclass
@@ -43,6 +44,7 @@ from urllib.parse import urljoin
 from ftf.contract import Artefact, ArtefactType, Capture, Observed
 from ftf.enrich.normalise import hostname, registrable_domain
 from ftf.indicators import _kitnorm as kn
+from ftf.ingest import urllist
 
 log = logging.getLogger(__name__)
 
@@ -96,6 +98,37 @@ def read(root: Path, art: Artefact) -> bytes | None:
         return path.read_bytes()
     except OSError:
         return None
+
+
+@lru_cache(maxsize=8)
+def _list_index(path: str, mtime_ns: int, size: int) -> tuple[str, dict[str, str]]:
+    """(sha256 of the whole file, {digest of each URL line: the URL}) for one list file version."""
+    data = Path(path).read_bytes()
+    return hashlib.sha256(data).hexdigest(), {urllist.digest(u): u for u in urllist.urls(data)}
+
+
+def url_text(root: Path, art: Artefact) -> bytes | None:
+    """The text a ``url`` artefact stands for.
+
+    A plain url file (fetcher ``url.txt``, organiser link file) has the digest of the whole file and
+    is read whole. A member of a URL list (see :mod:`ftf.ingest.urllist`) names the shared list
+    file and carries its URL's digest: only that line counts, so each incident sees its own URL.
+    A member whose line is gone (the list was edited after ingest) gives None, never its neighbours.
+    """
+    if not art.path or not art.sha256:
+        return read(root, art)
+    path = root / art.path
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    if not path.is_file() or st.st_size > MAX_FILE_BYTES:
+        return None
+    file_digest, index = _list_index(str(path), st.st_mtime_ns, st.st_size)
+    if art.sha256 == file_digest:
+        return read(root, art)
+    url = index.get(art.sha256)
+    return None if url is None else url.encode("utf-8")
 
 
 # --------------------------------------------------------------------------- HAR
@@ -246,7 +279,7 @@ def page_chain(capture: Capture, root: Path, *, fetched: bool = False) -> list[P
                 role = LANDING if n == len(flat) - 1 else CHAIN
                 found.append(PageUrl(h.url, role, Observed.live, art.id, h.locator, "har", h.via))
         elif art.type is ArtefactType.url:
-            data = read(root, art)
+            data = url_text(root, art)
             if data is None:
                 continue
             urls = [m.group(0) for m in kn.URL_IN_TEXT.finditer(data[:65536].decode("utf-8", "replace"))]

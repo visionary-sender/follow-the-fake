@@ -7,7 +7,7 @@ from ftf.contract.models import Dataset, Decision, Layer, Relation
 from ftf.linking import assign, link_dataset, link_incident
 from ftf.linking.assign import combine
 
-from linking_support import TAU, WEIGHTS, dataset, simple, stub_backend
+from linking_support import TAU, WEIGHTS, cap, dataset, incident, simple, stub_backend
 
 L = Layer
 
@@ -108,12 +108,14 @@ def test_cli_link_and_assign(tmp_path, monkeypatch):
     from ftf import cli
     from ftf.linking import backend as backend_mod
 
+    # The stub replaces Backend.from_dataset, which only the linear scan (--linear) calls; the
+    # indexed path extends the real ledger context (covered in test_index.py).
     monkeypatch.setattr(backend_mod.Backend, "from_dataset", classmethod(lambda cls, ds: stub_backend(ds)))
     a = [simple(f"a{i}", (L.tenant, "T1"), (L.landing, "LA"), (L.kit, "K1")) for i in range(2)]
     (tmp_path / "in.json").write_text(dataset(*a).to_json())
     (tmp_path / "new.json").write_text(dataset(simple("n", (L.tenant, "T1"), (L.landing, "LA"), (L.kit, "K1")), simple("m", (L.kit, "K-other"), (L.tenant, "T8"), (L.landing, "L8"))).to_json())
     assert cli.main(["link", str(tmp_path / "in.json"), "-o", str(tmp_path / "linked.json")]) == 0
-    assert cli.main(["assign", str(tmp_path / "linked.json"), str(tmp_path / "new.json"), "-o", str(tmp_path / "out.json")]) == 0
+    assert cli.main(["assign", str(tmp_path / "linked.json"), str(tmp_path / "new.json"), "-o", str(tmp_path / "out.json"), "--linear"]) == 0
     out = Dataset.from_json((tmp_path / "out.json").read_bytes())
     decisions = {a.incident_id: a.decision for a in out.assignments}
     assert decisions == {"n": Decision.assign, "m": Decision.new}
@@ -221,7 +223,134 @@ def test_cli_assign_handles_new_incidents_duplicating_each_other(tmp_path, monke
     second = simple("n1", (L.tenant, "T8"), (L.landing, "L8"), (L.kit, "K8"))
     (tmp_path / "new.json").write_text(Dataset.model_construct(contract_version="0.1.0", name="n", description=None, incidents=[first, second], links=[], campaigns=[], assignments=[]).model_dump_json())
     assert cli.main(["link", str(tmp_path / "in.json"), "-o", str(tmp_path / "linked.json")]) == 0
-    assert cli.main(["assign", str(tmp_path / "linked.json"), str(tmp_path / "new.json"), "-o", str(tmp_path / "out.json")]) == 0
+    assert cli.main(["assign", str(tmp_path / "linked.json"), str(tmp_path / "new.json"), "-o", str(tmp_path / "out.json"), "--linear"]) == 0
     out = Dataset.from_json((tmp_path / "out.json").read_bytes())
     decisions = {a.incident_id: a.decision for a in out.assignments}
     assert decisions == {"n1": Decision.new, "n2": Decision.review}  # a duplicate of a capture in no campaign
+
+
+# --- incidents with several landers (HACK-57) -------------------------------------------------
+
+
+def _two_landers(y_vals):
+    vals = {
+        "n-x": [(L.platform, "P1"), (L.landing, "LA"), (L.kit, "K1"), (L.tracking_account, "PXA", True)],
+        "n-y": y_vals,
+    }
+    return incident("n", [cap("n-ad", "ad"), cap("n-x"), cap("n-y")], {"n-ad": [(L.creative, "CR-n")], **vals})
+
+
+def test_landers_pointing_to_different_campaigns_go_to_review():
+    col = _collection()
+    new = _two_landers([(L.platform, "P1"), (L.landing, "LB"), (L.kit, "K2")])
+    a = assign(col, new, backend=stub_backend)
+    assert a.decision is Decision.review
+    assert a.campaign_id is None
+    camp_a = next(c.id for c in col.campaigns if c.relation is Relation.campaign and "a0-c1" in c.capture_ids)
+    camp_b = next(c.id for c in col.campaigns if c.relation is Relation.campaign and "b0-c1" in c.capture_ids)
+    assert "landers disagree" in a.note
+    assert f"n-x -> {camp_a}" in a.note and f"n-y -> {camp_b}" in a.note
+
+
+def test_landers_agreeing_or_one_pointing_nowhere_still_assign():
+    col = _collection()
+    camp_a = next(c.id for c in col.campaigns if c.relation is Relation.campaign and "a0-c1" in c.capture_ids)
+    for y_vals in ([(L.platform, "P1"), (L.landing, "LA"), (L.kit, "K1")], [(L.offer, "O-unrelated")]):
+        a = assign(col, _two_landers(y_vals), backend=stub_backend)
+        assert a.decision is Decision.assign, y_vals
+        assert a.campaign_id == camp_a
+        assert "landers disagree" not in a.note
+
+
+def test_ad_match_elsewhere_than_the_landers_point_goes_to_review():
+    col = _collection()
+    camp_a = next(c.id for c in col.campaigns if c.relation is Relation.campaign and "a0-c1" in c.capture_ids)
+    vals = {
+        "n-ad": [(L.platform, "P1"), (L.tenant, "T2"), (L.landing, "LB"), (L.kit, "K2")],  # 13.5 bits against B
+        "n-x": [(L.platform, "P1"), (L.landing, "LA"), (L.kit, "K1"), (L.tracking_account, "PXA", True)],  # 12.5 against A
+        "n-y": [(L.offer, "O-unrelated")],
+    }
+    new = incident("n", [cap("n-ad", "ad"), cap("n-x"), cap("n-y")], vals)
+    a = assign(col, new, backend=stub_backend)
+    assert a.decision is Decision.review
+    assert f"n-x -> {camp_a}" in a.note
+
+
+# --- tie at the top (HACK-64) ---------------------------------------------------------
+
+
+def _two_campaigns() -> Dataset:
+    # Two campaigns that share nothing with each other; stub bits: landing 4, kit 3, offer 2,
+    # platform 1.5, infrastructure 1. K = 2, so the assign bar is TAU + 1 = 7 bits.
+    a = [simple(f"a{i}", (L.platform, "P1"), (L.landing, "LA"), (L.kit, "KA"), (L.offer, "OA"), (L.infrastructure, "IA")) for i in range(3)]
+    b = [simple(f"b{i}", (L.landing, "LB"), (L.kit, "KB"), (L.offer, "OB"), (L.infrastructure, "IB")) for i in range(2)]
+    ds = dataset(*a, *b)
+    return link_dataset(ds, backend=stub_backend(ds))
+
+
+def _camp(col: Dataset, member: str) -> str:
+    return next(c.id for c in col.campaigns if c.relation is Relation.campaign and member in c.capture_ids)
+
+
+TIE_CASES = {
+    # equal scores: 9 bits against each campaign
+    "tie": simple("n", (L.landing, "LA"), (L.kit, "KA"), (L.offer, "OA"), (L.landing, "LB"), (L.kit, "KB"), (L.offer, "OB")),
+    # near tie: a 8.5 (landing, kit, platform) vs b 8 (landing, kit, infrastructure), lead 0.5 bit
+    "near": simple("n", (L.platform, "P1"), (L.landing, "LA"), (L.kit, "KA"), (L.landing, "LB"), (L.kit, "KB"), (L.infrastructure, "IB")),
+    # clear winner: a 9 vs b 7 (both clear the bar), lead 2 bits
+    "clear": simple("n", (L.landing, "LA"), (L.kit, "KA"), (L.offer, "OA"), (L.landing, "LB"), (L.kit, "KB")),
+    # lead exactly the margin: a 10 vs b 9, lead 1 bit, still assign
+    "margin": simple("n", (L.landing, "LA"), (L.kit, "KA"), (L.offer, "OA"), (L.infrastructure, "IA"), (L.landing, "LB"), (L.kit, "KB"), (L.offer, "OB")),
+}
+
+
+def test_tie_at_the_top_goes_to_review_naming_both():
+    col = _two_campaigns()
+    ca, cb = _camp(col, "a0-c1"), _camp(col, "b0-c1")
+    assert _k(col) == 2
+    for case in ("tie", "near"):
+        a = assign(col, TIE_CASES[case], backend=stub_backend)
+        assert a.decision is Decision.review, case
+        assert a.campaign_id is None
+        assert "tie at the top" in a.note and ca in a.note and cb in a.note, case
+        assert {ca, cb} <= {c.campaign_id for c in a.candidates}
+        top = sorted((c.score_bits for c in a.candidates), reverse=True)[:2]
+        assert top[0] - top[1] < 1.0 and top[1] >= TAU + 1
+
+
+def test_clear_winner_is_still_assigned():
+    col = _two_campaigns()
+    ca = _camp(col, "a0-c1")
+    for case in ("clear", "margin"):
+        a = assign(col, TIE_CASES[case], backend=stub_backend)
+        assert a.decision is Decision.assign, case
+        assert a.campaign_id == ca
+        assert "tie at the top" not in a.note
+
+
+def test_tie_rule_is_the_same_on_the_indexed_path():
+    from ftf.linking.index import CandidateIndex
+
+    col = _two_campaigns()
+    idx = CandidateIndex.build(col, cache=False)
+    for case, inc in TIE_CASES.items():
+        lin = link_incident(col, inc, backend=stub_backend)
+        fast = link_incident(col, inc, backend=stub_backend, index=idx)
+        assert fast.assignment.model_dump() == lin.assignment.model_dump(), case
+        assert [l.model_dump() for l in fast.links] == [l.model_dump() for l in lin.links], case
+
+
+def test_tie_rule_is_relation_agnostic_template():
+    # The template relation (kit, landing, creative, offer) applies the same margin.
+    a = [simple(f"a{i}", (L.landing, "LA"), (L.kit, "KA"), (L.offer, "OA")) for i in range(2)]
+    b = [simple(f"b{i}", (L.landing, "LB"), (L.kit, "KB")) for i in range(2)]
+    ds = dataset(*a, *b)
+    col = link_dataset(ds, [Relation.template], backend=stub_backend(ds))
+    assert _k(col, Relation.template) == 2  # bar = TAU + 1 = 7
+    tie = simple("n", (L.landing, "LA"), (L.kit, "KA"), (L.landing, "LB"), (L.kit, "KB"))
+    t = assign(col, tie, relation=Relation.template, backend=stub_backend)
+    assert t.decision is Decision.review and "tie at the top" in t.note
+    # a 9 vs b 7: the rival also clears the bar, but trails by 2 bits
+    win = simple("n", (L.landing, "LA"), (L.kit, "KA"), (L.offer, "OA"), (L.landing, "LB"), (L.kit, "KB"))
+    w = assign(col, win, relation=Relation.template, backend=stub_backend)
+    assert w.decision is Decision.assign
