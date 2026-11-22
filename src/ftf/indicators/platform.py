@@ -1,4 +1,4 @@
-"""Platform, account and tracker identifiers (HACK-10).
+"""Platform, account and tracker identifiers.
 
 Reads a capture's HTML, MHTML, HAR, saved assets and URL/text artefacts as inert text and emits
 the identifiers that name actors: platform and tenant config (aio), owners, landings, Meta

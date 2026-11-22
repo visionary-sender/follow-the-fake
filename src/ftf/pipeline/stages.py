@@ -6,10 +6,10 @@ landed. Owners: edit your adapter here when your public call changes; keep it on
 
 | stage | owner | call |
 |---|---|---|
-| ingest | Ingestion (HACK-9), fetch (HACK-17) | `ftf.ingest.ingest(inputs, root=..., name=..., indicators=True) -> Dataset`; URLs first `ftf.fetch.fetch_url(url, out_dir)` (online only) |
-| content features | Features (HACK-13/14/15) | `ftf.features.pipeline.extract(incident, raw_root, out_dir) -> Incident` |
-| enrichment | Enrichment (HACK-19) | `ftf.enrich.Enricher(Cache(path), offline=...).enrich(domain)` |
-| link/assign | Linking (HACK-21/22) | `ftf.linking.link_incident(base, incident, base_dir=..., incident_dir=...)` |
+| ingest | Ingestion, fetch | `ftf.ingest.ingest(inputs, root=..., name=..., indicators=True) -> Dataset`; URLs first `ftf.fetch.fetch_url(url, out_dir)` (online only) |
+| content features | Features | `ftf.features.pipeline.extract(incident, raw_root, out_dir) -> Incident` |
+| enrichment | Enrichment | `ftf.enrich.Enricher(Cache(path), offline=...).enrich(domain)` |
+| link/assign | Linking | `ftf.linking.link_incident(base, incident, base_dir=..., incident_dir=...)` |
 
 Without a library the fallback keeps the result valid: the input becomes one capture of a new
 incident (ad-hoc ids from `ftf.ingest.ids`, see `adhoc_ids`), the modalities it lacks are listed as
@@ -79,7 +79,7 @@ class RunContext:
     base: Dataset
     offline: bool
     run_dir: Path
-    fetch: bool = False  # live page fetching: only when online (the jury image sets FTF_FETCH=1); never on the workbench
+    fetch: bool = False  # live page fetching: only when online (the container image sets FTF_FETCH=1); never on a VM
     input_root: Optional[Path] = None  # artefact paths of the incident are relative to this
     base_dir: Optional[Path] = None  # folder of the base dataset.json: the base's vector stores
     incident: Optional[Incident] = None
@@ -87,7 +87,7 @@ class RunContext:
     assignment: Optional[Assignment] = None
     from_base: bool = False
     notes: list[str] = field(default_factory=list)
-    enrichment: Optional[str] = None  # "online", "offline cache" or "mixed" (HACK-91)
+    enrichment: Optional[str] = None  # "online", "offline cache" or "mixed"
 
     def __post_init__(self) -> None:
         if self.input_root is None:
@@ -126,7 +126,7 @@ def _safe_name(name: str) -> str:
     return stem[:120]
 
 
-# -- ids (Ingestion, HACK-9, owns the scheme; see HACK-41) -----------------------------------
+# -- ids (Ingestion owns the scheme) -----------------------------------
 
 
 def adhoc_ids(digests_or_url: list[str] | str) -> tuple[str, str]:
@@ -197,8 +197,8 @@ def _copy_upload(ctx: RunContext) -> Path:
 def _missing_reason(ctx: RunContext, modality: ArtefactType) -> str:
     if modality in (ArtefactType.html, ArtefactType.har) and ctx.inp.kind == "url":
         if ctx.offline or not ctx.fetch:
-            return "not fetched: live pages are fetched only from the sandbox (HACK-17)"
-        return "not fetched: the fetcher (HACK-17) is not available here"
+            return "not fetched: live pages are fetched only from the sandbox"
+        return "not fetched: the fetcher is not available here"
     if modality is ArtefactType.ad_library:
         return "no Ad Library entry was submitted"
     return "not submitted"
@@ -262,10 +262,10 @@ def ingest(ctx: RunContext) -> tuple[str, str]:
             if not ctx.fetch or ctx.offline:
                 why = "page fetching is off; live pages are fetched only from the sandbox"
             else:
-                why = "the fetcher (HACK-17) is not available"
+                why = "the fetcher is not available"
             return "skipped", f"URL not fetched ({why}); stored as a URL artefact"
         fetch_dir = ctx.run_dir / "fetch"
-        fetch_url(refang(inp.text), fetch_dir)  # HACK-17: writes a capture directory; ingestion builds the Incident
+        fetch_url(refang(inp.text), fetch_dir)  # writes a capture directory; ingestion builds the Incident
         sources, root = [fetch_dir], fetch_dir
     elif inp.kind == "dataset_item":
         sources = [inp.path]
@@ -275,8 +275,8 @@ def ingest(ctx: RunContext) -> tuple[str, str]:
     ingest_fn = _optional("ftf.ingest", "ingest")
     if ingest_fn is None:
         ctx.incident = _fallback_incident(ctx)
-        return "not_available", "ingestion (HACK-9) not available: the input is stored as one capture (hashed, not parsed)"
-    # Ingestion (HACK-9): ingest(inputs, *, root=None, name, indicators=True) -> Dataset
+        return "not_available", "ingestion not available: the input is stored as one capture (hashed, not parsed)"
+    # Ingestion: ingest(inputs, *, root=None, name, indicators=True) -> Dataset
     incidents = list(ingest_fn(sources, root=root, name="analyze", indicators=True).incidents)
     if not incidents:
         ctx.incident = _fallback_incident(ctx)
@@ -305,11 +305,11 @@ def _shas(incident: Incident) -> list[str]:
 def content_features(ctx: RunContext) -> tuple[str, str]:
     if ctx.from_base:
         return "skipped", "precomputed indicators from the base"
-    # Content features (HACK-13/14/15): extract(incident, raw_root, out_dir) -> Incident.
+    # Content features: extract(incident, raw_root, out_dir) -> Incident.
     try:
         from ftf.features.pipeline import extract
     except ImportError:
-        return "not_available", "content features (HACK-13/14/15) not available yet"
+        return "not_available", "content features not available yet"
     before = len(ctx.incident.indicators)
     ctx.incident = extract(ctx.incident, ctx.input_root, ctx.run_dir / "features")
     return "ok", f"{len(ctx.incident.indicators) - before} indicator(s) added"
@@ -355,7 +355,7 @@ def _domains(ctx: RunContext) -> list[tuple[str, str]]:
 
 
 def enrichment_mode(origins: Counter, offline: bool) -> str:
-    """The HACK-91 label. "online": no answer needed the fallback. "offline cache": an offline run, or
+    """The label. "online": no answer needed the fallback. "offline cache": an offline run, or
     every answer fell back to a stale cache entry. "no answer": nothing came from the network or the cache.
     "mixed": some of each."""
     if offline:
@@ -380,7 +380,7 @@ def enrichment(ctx: RunContext) -> tuple[str, str]:
         from ftf.enrich.commands import DEFAULT_CACHE
         from ftf.enrich.probe import ShortTimeoutClient
     except ImportError:
-        return "not_available", "domain enrichment (HACK-19) not installed"
+        return "not_available", "domain enrichment not installed"
     cache_path = Path(DEFAULT_CACHE)
     cache = Cache(cache_path if cache_path.is_file() else None)  # never create a cache file as a side effect
     enricher = Enricher(cache, offline=ctx.offline, client=ShortTimeoutClient())
@@ -429,12 +429,12 @@ def link_assign(ctx: RunContext) -> tuple[str, str]:
         if ctx.assignment is None:
             ctx.assignment = _review(inc, "the base holds no assignment for this incident")
         return "ok", f"precomputed in the base: {len(ctx.links)} link(s), decision {ctx.assignment.decision.value}"
-    # Linking (HACK-21/22); Evaluation's baseline uses the same call shape.
+    # Linking; Evaluation's baseline uses the same call shape.
     # link_incident(base, incident, relation=campaign, backend=None, base_dir, incident_dir) -> IncidentResult
     link_incident = _optional("ftf.linking", "link_incident")
     if link_incident is None:
-        ctx.assignment = _review(inc, "linking engine (HACK-21/22) not available: no link was scored, so this item needs review")
-        return "not_available", "linking engine (HACK-21/22) not available yet; decision set to review"
+        ctx.assignment = _review(inc, "linking engine not available: no link was scored, so this item needs review")
+        return "not_available", "linking engine not available yet; decision set to review"
     result = link_incident(ctx.base, inc, base_dir=ctx.base_dir, incident_dir=ctx.run_dir / "features")
     ctx.links = list(result.links)
     ctx.assignment = result.assignment

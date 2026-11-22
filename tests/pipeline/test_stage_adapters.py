@@ -1,4 +1,4 @@
-"""Stage adapters against injected fakes with the published signatures (HACK-41)."""
+"""Stage adapters against injected fakes with the published signatures."""
 
 import sys
 import types

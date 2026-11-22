@@ -1,4 +1,4 @@
-"""Online by default with automatic offline fallback (HACK-91). No network: see the conftest fixture."""
+"""Online by default with automatic offline fallback. No network: see the conftest fixture."""
 
 from collections import Counter
 

@@ -294,7 +294,7 @@ def _register_distractors(sub: argparse._SubParsersAction) -> None:
     p.set_defaults(func=_run_distractors)
 
 
-# HACK-27/28/29 subcommands; append one register function per sibling issue.
+# Subcommands; append one register function per experiment group.
 SUBCOMMANDS: list[Callable[[argparse._SubParsersAction], None]] = [
     _register_labels,
     _register_leak,

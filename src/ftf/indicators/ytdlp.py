@@ -1,4 +1,4 @@
-"""Technical indicators from a yt-dlp record of a video ad (HACK-79).
+"""Technical indicators from a yt-dlp record of a video ad.
 
 A video saved with yt-dlp comes with its ``<name>.info.json`` record, stored as an ``ad_library``
 artefact. The record names the page or channel that published the video and the platform's media

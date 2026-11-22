@@ -7,7 +7,7 @@ from ftf.contract.fixture import fixture_dir, load_fixture
 
 pytestmark = pytest.mark.skipif(
     not (fixture_dir() / "dataset.json").is_file(),
-    reason="fixture not present; pull it: gcloud storage rsync gs://follow-the-fake-data/outputs/fixture/v0 data/fixture/v0",
+    reason="fixture not present; pull it: gcloud storage rsync gs://$FTF_BUCKET/outputs/fixture/v0 data/fixture/v0",
 )
 
 

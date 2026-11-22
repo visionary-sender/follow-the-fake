@@ -1,7 +1,7 @@
 """`ftf features`: add visual and content indicators to a contract dataset.
 
 `ftf features prefetch` downloads the models the families load into ``FTF_MODEL_DIR``, for runs
-with ``FTF_OFFLINE=1`` (the jury image bakes them in at build time).
+with ``FTF_OFFLINE=1`` (the container image bakes them in at build time).
 """
 
 from __future__ import annotations

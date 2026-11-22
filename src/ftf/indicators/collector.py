@@ -21,7 +21,7 @@ Kinds and where they come from:
   `viewport`), screen size in Meta pixel (`sw`/`sh`) and Google ads (`u_w`/`u_h`) requests.
 - `fbclid_session`: the browser-session part of Meta click ids. A current fbclid is a two-character
   prefix plus base64url of a tag-length-value record (`igrd`/`bocl`, `extn`, `aem`, `pdof`, `adid`,
-  `srtc`, `app_id`, ...). The ad fields belong to HACK-10 (`platform.py`); the opaque bytes after the
+  `srtc`, `app_id`, ...). The ad fields belong to `platform.py`; the opaque bytes after the
   `app_id` tag carry the browser session and repeat across unrelated ads clicked in one browser.
   Only that tail is emitted. Click ids that do not decode this way are skipped.
 - `local_path`, `os_username`: `file://` URIs and Windows drive paths in saved pages and HAR request

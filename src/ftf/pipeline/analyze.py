@@ -247,7 +247,7 @@ def analyze(
 
     `offline=False` allows network enrichment (registries, DNS over HTTPS); it never contacts the
     page itself. `fetch=True` (and online) lets a URL be fetched live with `ftf.fetch`: only on the
-    only when online and enabled (the jury image sets FTF_FETCH=1), never on the workbench.
+    only when online and enabled (the container image sets FTF_FETCH=1), never on a VM.
     Input bytes are copied into a per-run directory (`run_dir`, else a fresh temp dir under
     $FTF_RUN_DIR or the system temp dir), hashed with sha256 and never executed or rendered.
     `base_dir` is the folder of the base's dataset.json (its vector stores), passed to linking.
@@ -255,7 +255,7 @@ def analyze(
     from ftf.pipeline import stages  # late import: stages imports this module's types
 
     notes: list[str] = []
-    if not offline:  # HACK-91: one short probe at the start; no network means the offline package
+    if not offline:  # one short probe at the start; no network means the offline package
         from ftf.enrich.probe import network_up
 
         if not network_up():

@@ -11,7 +11,7 @@
     ftf corpus build --root DIR [--scanner SUB] [--fetch SUB ...] [--picked LIST --picked-fetch SUB]
         read what sits under DIR, write DIR/dataset.json, DIR/manifest.jsonl, DIR/summary.json
 
-Nothing here touches the network: fetching is `ftf fetch` (HACK-17) on the sandbox.
+Nothing here touches the network: fetching is `ftf fetch` on the sandbox.
 """
 
 from __future__ import annotations

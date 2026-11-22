@@ -1,6 +1,6 @@
 """`ftf enrich-domain`: keyless registry, DNS and certificate facts for domains, as contract Indicators.
 
-The domains come from `ftf.indicators.domains.registered_domains` (HACK-52): from a contract
+The domains come from `ftf.indicators.domains.registered_domains`: from a contract
 Dataset (`--from-dataset`), or from a folder run through ingest first (`--from-raw`, a thin
 wrapper). Shared platforms, CDNs and SDK hosts are left out.
 """

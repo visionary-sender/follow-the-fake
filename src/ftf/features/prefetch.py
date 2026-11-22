@@ -7,7 +7,7 @@ Parts (each is one file, shown with its size):
 * faces: YuNet and SFace weights (``faces.models``);
 * video (optional): the faster-whisper speech model, only with ``--speech`` or ``FTF_VIDEO_SPEECH=1``.
 
-The face reference set is not part of prefetch (it lives in its own bucket, HACK-83). With
+The face reference set is not part of prefetch (it lives in its own bucket). With
 ``FTF_OFFLINE=1`` and no reference directory the faces family still emits ``face_embedding``
 and ``brand``, just no ``person_face``.
 
@@ -29,7 +29,7 @@ from ftf.features.common import model_dir
 from ftf.features.offline import hub_file, offline
 
 IMAGE_REPO = "google/siglip2-base-patch16-224"
-# Files AutoImageProcessor and AutoModel read for this repo; checked on the workbench VM.
+# Files AutoImageProcessor and AutoModel read for this repo; checked on a VM.
 IMAGE_FILES = ("config.json", "preprocessor_config.json", "model.safetensors")
 
 

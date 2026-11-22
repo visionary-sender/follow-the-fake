@@ -10,7 +10,7 @@ every IP rotation:
 hash cannot be turned back into the IP once the VM is gone, but two captures made from the same IP
 in one rollout share a hash. The raw IP is never written.
 
-On any other machine (the sandbox, the jury's container) the file is absent and `current()`
+On any other machine (the sandbox, the container) the file is absent and `current()`
 returns None, so default behaviour is unchanged.
 """
 

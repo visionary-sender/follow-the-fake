@@ -9,9 +9,9 @@ the deduplication key with the scraped `google_atc` source, so one creative is q
 
 The query runs through the BigQuery REST API with an OAuth access token from `FTF_BQ_TOKEN`
 or `gcloud auth print-access-token`, billed to `--bq-project` (env `FTF_BQ_PROJECT`), with the
-job label `ftf-issue=hack-20` and `maximumBytesBilled` as a hard cost cap. A dry run scanned
-about 3.5 GB (≈0.02 USD on demand, inside the free monthly terabyte). Without a token or
-project the source reports `unavailable`, so the jury container degrades cleanly.
+job label and `maximumBytesBilled` as a hard cap per query. A dry run scanned
+about 3.5 GB, inside the free monthly tier. Without a token or
+project the source reports `unavailable`, so the container degrades cleanly.
 """
 
 from __future__ import annotations
@@ -127,7 +127,7 @@ def collect(*, since: date, client: Client, project: Optional[str], max_total: i
             {"name": "limit", "parameterType": {"type": "INT64"}, "parameterValue": {"value": str(max_total + len(skip))}},
         ],
         "maximumBytesBilled": str(MAX_BYTES_BILLED),
-        "labels": {"ftf-issue": "hack-20"},
+        "labels": {"ftf-component": "scanner"},
         "timeoutMs": 60000,
     }
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
