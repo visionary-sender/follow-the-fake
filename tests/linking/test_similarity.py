@@ -1,4 +1,4 @@
-"""HACK-24: calibrated continuous similarity. Synthetic data only, built in the tests."""
+"""calibrated continuous similarity. Synthetic data only, built in the tests."""
 
 import json
 import math

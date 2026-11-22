@@ -1,4 +1,4 @@
-"""Background rarity: how many distinct operators of a reference corpus carry a value (07 §1.2, §2.2 item 2).
+"""Background rarity: how many distinct operators of a reference corpus carry a value.
 
 `BackgroundCounts.from_dataset(corpus)` counts, per (layer, kind, normalised value), the distinct
 *operators* carrying it. An operator is a ledger pre-group (incidents joined by a shared live
@@ -11,7 +11,7 @@ Smoothed background frequency (Dirichlet / add-α over the kind's vocabulary):
 
 with N_kind the operators carrying any value of the kind and V_kind its distinct values. Ids that
 are unique by construction (UUIDs, 15–16-digit pixel ids, xid machine ids) get a type prior
-u ≈ 1/N_kind instead (07 §2.2 item 2): their observed frequency says only which level they name.
+u ≈ 1/N_kind instead: their observed frequency says only which level they name.
 
 Values are stored as truncated, unkeyed SHA-256 digests of (layer, kind, value): the counts file
 carries no raw indicator values (tracker ids, tokens in URLs) in plain text. Unkeyed hashes of
@@ -36,14 +36,14 @@ ALPHA = 0.5
 FORMAT = "ftf-background"
 VERSION = 1
 
-# Unique-by-construction id shapes (07 §2.2 item 2): UUIDs, 15–16-digit pixel/account ids, xid ids.
+# Unique-by-construction id shapes: UUIDs, 15–16-digit pixel/account ids, xid ids.
 UNIQUE_ID = re.compile(
     r"^(?:[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}|[0-9]{15,16}|[0-9a-v]{20})$",
     re.IGNORECASE,
 )
 # Corpus sources without page indicators (CERT domain listings): left out, they would dilute the denominator.
 SKIP_SOURCES = ("certpl",)
-# corpus_kind.jsonl tags (HACK-18): which corpus incidents are rarity evidence, which are real outlet pages.
+# corpus_kind.jsonl tags: which corpus incidents are rarity evidence, which are real outlet pages.
 RARITY_KINDS = frozenset({"fetched_landing", "ad_record", "ad_library", "scanned_ad"})
 MUST_NOT_LINK_KINDS = frozenset({"must_not_link", "must_not_link_blocked"})
 
@@ -214,7 +214,7 @@ def _detach(incidents: list) -> list:
     return out
 
 
-# Brand stop-list (HACK-66): hashed values seen on real outlet pages (corpus batch 1, tagged
+# Brand stop-list: hashed values seen on real outlet pages (corpus batch 1, tagged
 # must_not_link). Such a value is the impersonated outlet's skin (logo, fonts, favicon, the outlet's
 # own analytics or CDN), so the ledger counts it under the ecosystem relation only. The file holds
 # digests only and lives in the private bucket; the default scoring path loads it from
