@@ -60,10 +60,20 @@ EXCEPTIONS = {
         "licence": "MPL-2.0 AND MIT",
         "shown_as": "MPL-2.0 AND MIT (named exception, unmodified, pending owner review, HACK-74)",
     },
+    # HACK-80 (owner decision, 2026-11-22): BSL-1.0 is one part of torch's bundled code, and
+    # CNRI-Python is the regex package's own licence. Each is accepted only as torch's or regex's
+    # exact licence string, so no other package can use either licence ID.
+    "torch": {
+        "licence": ("Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause "
+                    "AND BSL-1.0 AND ISC AND MIT AND Zlib"),
+        "shown_as": "Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause "
+                    "AND BSL-1.0 AND ISC AND MIT AND Zlib (named exception: BSL-1.0 part of bundled code, HACK-80)",
+    },
+    "regex": {
+        "licence": "Apache-2.0 AND CNRI-Python",
+        "shown_as": "Apache-2.0 AND CNRI-Python (named exception: CNRI-Python, HACK-80)",
+    },
 }
-
-
-ALLOWED_LICENCE_IDS = {"BSL-1.0", "CNRI-Python"}
 
 # HACK-68 named exception (owner decision, 2026-11-22): the Debian system libraries that Chromium
 # needs, installed in the image by `playwright install --with-deps` (Dockerfile). They are used
@@ -126,10 +136,6 @@ def is_permissive(licence: str) -> bool:
 
 
 def _part_permissive(part: str) -> bool:
-    # Exact licence IDs accepted for every package (owner decision, HACK-80, 2026-11-22). A package
-    # is not passed as a whole. BSL-1.0: a part of torch's bundled code; CNRI-Python: the regex package.
-    if part.strip().upper() in {i.upper() for i in ALLOWED_LICENCE_IDS}:
-        return True
     words = re.split(r"[\s,\-]+", part.upper())
     if any(w in DENIED_WORDS or (w.startswith(DENIED_PREFIXES) and w not in PUBLIC_DOMAIN_WORDS) for w in words):
         return False
@@ -167,6 +173,22 @@ def audit_image(rows: dict[str, str], chromium: dict[str, str]) -> list[str]:
     errors += [f"listed in {CHROMIUM_TSV.name} but absent from the image: {name}"
                for name in sorted(set(chromium) - set(rows))]
     return errors
+
+
+def features_installed() -> bool:
+    """True when every requirement of the `features` extra is installed. The default VM venv has none,
+    so `scripts/vm.sh licences` installs the extra (HACK-80) and the licence test skips without it."""
+    for raw in metadata.requires("ftf") or []:
+        req = Requirement(raw)
+        in_features = req.marker is not None and req.marker.evaluate({"extra": "features"}) \
+            and not req.marker.evaluate({"extra": ""})
+        if not in_features:
+            continue
+        try:
+            metadata.distribution(req.name)
+        except metadata.PackageNotFoundError:
+            return False
+    return True
 
 
 def dependencies() -> dict[str, metadata.Distribution]:

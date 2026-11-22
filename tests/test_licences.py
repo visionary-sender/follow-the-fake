@@ -12,8 +12,22 @@ _spec.loader.exec_module(licences)
 
 
 def test_licence_table_is_current_and_permissive():
+    if not licences.features_installed():
+        # The table covers the `features` extra; `scripts/vm.sh licences` installs it and regenerates the table.
+        pytest.skip("features extra not installed here: the table check needs it (scripts/vm.sh licences)")
     out = subprocess.run([sys.executable, str(SCRIPT), "--check"], capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
+
+
+def test_bsl_and_cnri_only_for_torch_and_regex():
+    # HACK-80: BSL-1.0 and CNRI-Python are accepted for torch and regex and nothing else.
+    assert not licences.is_permissive("BSL-1.0")
+    assert not licences.is_permissive("CNRI-Python")
+    assert licences.is_allowed("torch", licences.EXCEPTIONS["torch"]["licence"])
+    assert licences.is_allowed("regex", licences.EXCEPTIONS["regex"]["licence"])
+    assert not licences.is_allowed("some-other-package", "BSL-1.0")
+    assert not licences.is_allowed("some-other-package", "CNRI-Python")
+    assert not licences.is_allowed("torch", "BSL-1.0")  # exact licence string only
 
 
 @pytest.mark.parametrize(

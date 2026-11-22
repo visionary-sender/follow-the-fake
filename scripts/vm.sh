@@ -3,7 +3,7 @@
 #
 #   scripts/vm.sh test [pytest args...]   run the test suite on the VM, return pytest's exit code
 #   scripts/vm.sh run -- <cmd...>         run a command in the synced checkout, venv active
-#   scripts/vm.sh licences                regenerate LICENSES-THIRD-PARTY.md (written locally)
+#   scripts/vm.sh licences                regenerate LICENSES-THIRD-PARTY.md (written locally; installs the features extra)
 #
 # Every call syncs the worktree's tracked and untracked-but-not-ignored files (never data/ or
 # anything gitignored) to /work/<slug>/src on the VM, replacing the previous copy so files
@@ -93,7 +93,10 @@ ssh_vm() {
     --ssh-flag=-T --command "$1"
 }
 
-remote_cmd="FTF_VM_EXTRAS=$(printf '%q' "${FTF_VM_EXTRAS:-app,dev,fetch}") bash -c $(printf '%q' "$remote") ftf-vm $(printf '%q ' "$slug" "$mode" "$@")"
+# The licence table covers the `features` extra too (HACK-80), so `licences` installs it by default.
+extras=${FTF_VM_EXTRAS:-app,dev,fetch}
+if [ "$mode" = licences ]; then extras=${FTF_VM_EXTRAS:-app,dev,fetch,features}; fi
+remote_cmd="FTF_VM_EXTRAS=$(printf '%q' "$extras") bash -c $(printf '%q' "$remote") ftf-vm $(printf '%q ' "$slug" "$mode" "$@")"
 echo "vm.sh: $VM:/work/$slug ($mode)" >&2
 
 if [ "$mode" = licences ]; then
