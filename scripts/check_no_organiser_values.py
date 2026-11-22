@@ -52,6 +52,11 @@ PUBLIC_HOSTS = frozenset({
     "yandex.ru", "yandex.net", "vuejs.org", "npmjs.com", "fpjs.dev", "npms.io", "python.org",
     "pypi.org", "linear.app", "anthropic.com", "docker.com", "debian.org", "ubuntu.com", "apache.org",
     "gnu.org", "mozilla.org",
+    "ads-twitter.com",
+    "bing.com",
+    "clarity.ms",
+    "quora.com",
+    "taboola.com",
 })
 # Not organiser infrastructure: file names that look like domains, reserved test names.
 FILE_EXTENSIONS = frozenset({
