@@ -113,8 +113,10 @@ def _brand_features(found) -> list[Feature]:
     ]
 
 
-def ocr_text(path: Path, timeout: int = 120) -> Optional[str]:
+def ocr_text(path: Path, timeout: int | None = None) -> Optional[str]:
     """Fallback OCR with the tesseract binary (pol+eng) when the text family gave none."""
+    from ftf.features.text.ocr import ocr_timeout
+
     exe = shutil.which("tesseract")
     if not exe:
         return None
@@ -122,7 +124,7 @@ def ocr_text(path: Path, timeout: int = 120) -> Optional[str]:
         r = subprocess.run(
             [exe, str(path), "stdout", "-l", "pol+eng"],
             capture_output=True,
-            timeout=timeout,
+            timeout=ocr_timeout() if timeout is None else timeout,
             env={"OMP_THREAD_LIMIT": "1", "PATH": "/usr/bin:/bin"},
         )
     except subprocess.TimeoutExpired:

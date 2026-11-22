@@ -18,10 +18,11 @@ from __future__ import annotations
 
 import json
 import logging
+import subprocess
 import time
 from pathlib import Path
 
-from ftf.contract.models import ArtefactType, Dataset, Observed
+from ftf.contract.models import ArtefactType, Dataset, Layer, Level, Observed
 from ftf.features.common import IMAGE_SUFFIXES, Feature, IndicatorWriter, resolve
 from ftf.features.text import keywords as kw
 from ftf.features.text import template as tpl
@@ -115,6 +116,9 @@ def features_for_image(path: Path) -> list[Feature]:
 
     try:
         lines = ocr_lines(Path(path))
+    except subprocess.TimeoutExpired:  # keyframe: logged only, no capture to attach an indicator to
+        log.warning("OCR timed out on %s (FTF_OCR_TIMEOUT); keyframe skipped", Path(path).name)
+        return []
     except Exception as e:  # no tesseract, or an unreadable / hostile image
         log.warning("OCR failed on %s: %s: %s", Path(path).name, type(e).__name__, e)
         return []
@@ -134,13 +138,13 @@ def _page_artefacts(cap) -> list:
 
 
 def apply(ds: Dataset, raw_root: Path, out_dir: Path) -> Dataset:
-    from ftf.features.text.ocr import OcrUnavailable, content_lines, ocr_lines
+    from ftf.features.text.ocr import OcrUnavailable, content_lines, ocr_lines, ocr_timeout
     from ftf.features.text.page import page_text
 
     writer = IndicatorWriter(ds, out_dir, EXTRACTOR)
     embed = _Embeddings()
     masked: dict[str, dict] = {}
-    stats = {"ocr_s": [], "page_s": [], "errors": [], "ocr_unavailable": False}
+    stats = {"ocr_s": [], "page_s": [], "errors": [], "ocr_unavailable": False, "ocr_timeouts": 0}
 
     for inc in ds.incidents:
         for cap in inc.captures:
@@ -148,6 +152,7 @@ def apply(ds: Dataset, raw_root: Path, out_dir: Path) -> Dataset:
                 continue
             seen: set[tuple[str, str]] = set()
             sources = []  # (artefact, kind, full text, content text, observed)
+            timed_out = None  # first image of this capture whose OCR hit the timeout
             for art in cap.artefacts:
                 if art.type not in OCR_TYPES or not art.path or stats["ocr_unavailable"]:
                     continue
@@ -160,6 +165,15 @@ def apply(ds: Dataset, raw_root: Path, out_dir: Path) -> Dataset:
                     log.warning("OCR disabled: %s", e)
                     stats["ocr_unavailable"] = True
                     continue
+                except subprocess.TimeoutExpired:  # slow image: skip its OCR, keep the other families
+                    stats["ocr_timeouts"] += 1
+                    timed_out = timed_out or art
+                    if stats["ocr_timeouts"] == 1:
+                        log.warning(
+                            "OCR timed out after %ss on %s; skipping OCR of such images (FTF_OCR_TIMEOUT)",
+                            ocr_timeout(), art.id,
+                        )
+                    continue
                 except Exception as e:  # unreadable or hostile image: skip this artefact
                     stats["errors"].append(f"{art.id}: {type(e).__name__}: {e}"[:300])
                     continue
@@ -167,6 +181,13 @@ def apply(ds: Dataset, raw_root: Path, out_dir: Path) -> Dataset:
                     stats["ocr_s"].append(cpu_seconds() - t0)
                 if lines:
                     sources.append((art, "ocr_text", "\n".join(lines), "\n".join(content_lines(lines)), Observed.static))
+            if timed_out is not None:
+                writer.add(
+                    inc, cap, timed_out,
+                    Feature(kind="ocr_skipped", value="timeout", layer=Layer.collector, level=Level.capture,
+                            note="OCR of this capture timed out (FTF_OCR_TIMEOUT); text of other images kept"),
+                    Observed.static,
+                )
             for art in _page_artefacts(cap):
                 t0 = cpu_seconds()
                 try:
@@ -206,6 +227,8 @@ def apply(ds: Dataset, raw_root: Path, out_dir: Path) -> Dataset:
 
 
 def _summary(stats: dict, embed: _Embeddings) -> dict:
+    from ftf.features.text.ocr import ocr_timeout
+
     def mean(xs):
         return round(sum(xs) / len(xs), 4) if xs else None
 
@@ -219,6 +242,8 @@ def _summary(stats: dict, embed: _Embeddings) -> dict:
         "embed_items": len(embed.seconds),
         "embed_cpu_s_mean": mean(embed.seconds),
         "ocr_unavailable": stats["ocr_unavailable"],
+        "ocr_timeouts": stats["ocr_timeouts"],
+        "ocr_timeout_s": ocr_timeout(),
         "embeddings_disabled": embed.failed,
         "errors": stats["errors"] + embed.errors,
     }
