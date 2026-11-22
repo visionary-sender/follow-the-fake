@@ -1,4 +1,4 @@
-"""Normalisers behind the kit fingerprints (HACK-11): pure functions over bytes and text.
+"""Normalisers behind the kit fingerprints: pure functions over bytes and text.
 
 Scam kits randomise asset file names, CSS class names, ids and per-deployment strings, so every
 fingerprint here is computed from content or structure and never from a name. Nothing is

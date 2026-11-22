@@ -1,10 +1,9 @@
 """Hand table of indicator weights for the tiered evidence ledger (design D1).
 
 Every number here is an explicit, auditable prior in bits (log2 likelihood ratio), taken from the
-method report (07 §2.5 and §3 D1): tenant id ~6, landing id ~4, live pixel ~3, kit asset set ~4,
-caption ~2, platform constant 1.7, conflict on a single-valued field −4. HACK-23 replaces the table
-with learned values; it is plain data on purpose, so a learned table only has to build a
-`WeightTable` with the same fields.
+method report: tenant id ~6, landing id ~4, live pixel ~3, kit asset set ~4,
+caption ~2, platform constant 1.7, conflict on a single-valued field −4. The table is plain data on purpose, so a learned
+replacement only has to build a `WeightTable` with the same fields.
 
 Fields of one entry (`KindWeight`):
 
@@ -41,11 +40,11 @@ def _row(template: float, tracking: float, operator: float, campaign: float, eco
 # establishes the tracking account; platform, tenant and owner say nothing about the template
 # (kits are copied across platforms).
 #
-# Tracking accounts and tracker instances stay at 1.0 for campaign (HACK-53), although one pixel or
-# CAPI gateway spans several campaigns of one owner (07 §2.2, §2.3). Separating those campaigns is the
+# Tracking accounts and tracker instances stay at 1.0 for campaign, although one pixel or
+# CAPI gateway spans several campaigns of one owner. Separating those campaigns is the
 # job of the campaign gate (`CAMPAIGN_EVIDENCE_*` below, applied in `ledger.score_pair`), not of the
-# scale: on the organiser set E1, E7 and the campaign/operator P/R counts were identical at 0.5, 0.8
-# and 1.0 once the gate was on, while any scale below ~0.94 drops the static pixel of 07 §2.5 (c)
+# scale: on the organiser set and the campaign/operator P/R counts were identical at 0.5, 0.8
+# and 1.0 once the gate was on, while any scale below ~0.94 drops the static pixel
 # (a copied kit) under hub_bits and turns that worked example from campaign review into no link.
 RELATION_SCALE: dict[Layer, dict[Relation, float]] = {
     Layer.creative: _row(0.5, 0.0, 0.5, 1.0, 1.0),
@@ -105,9 +104,9 @@ L = Layer
 
 HAND_TABLE = WeightTable(
     kinds={
-        # Ingestion kinds (HACK-10, `ftf.indicators`). Hierarchy: platform ⊃ tenant ⊃ owner ⊃
+        # Ingestion kinds (`ftf.indicators`). Hierarchy: platform ⊃ tenant ⊃ owner ⊃
         # aio campaign ⊃ landing. Layers are Ingestion's; within a layer only the best kind counts.
-        # tracking account / tracker instance (07 §2.5 a: live pixel ~3; multi-valued, a page fires several)
+        # tracking account / tracker instance (live pixel ~3; multi-valued, a page fires several)
         "meta_pixel": _K(L.tracking_account, 3.0, private=True),  # ad account's pixel
         "capi_gateway": _K(L.tracking_account, 3.0, private=True),  # server-side pixel gateway of one account
         "google_ads_id": _K(L.tracking_account, 3.0, private=True),  # ads conversion account
@@ -117,11 +116,11 @@ HAND_TABLE = WeightTable(
         # analytics, so a shared one must not alone make a strict link (not private)
         "google_analytics_id": _K(L.tracking_account, 3.0),  # analytics property
         "gtm_container": _K(L.tracking_account, 3.0),  # tag-manager container
-        "clarity_id": _K(L.tracking_account, 3.0),  # session-recording project
+        "clarity_id": _K(L.tracking_account, 3.0),  # session-recording tool instance
         "yandex_metrica_id": _K(L.tracking_account, 3.0),  # analytics counter
         "xid_tracker_machine": _K(L.tracker_instance, 3.0, private=True),  # self-hosted tracker machine id
         "tracker_postback": _K(L.tracker_instance, 3.0, private=True),  # conversion postback of one tracker
-        # platform chain: tenant → owner → aio campaign → landing (07 §2.2 item 5)
+        # platform chain: tenant → owner → aio campaign → landing
         "aio_cdn_tenant": _K(L.tenant, 6.0, single_valued=True, private=True),  # one tenant per page
         "aio_handle_key": _K(L.tenant, 5.0, private=True),  # account handle key; multi-valued until proven stable
         # flow: template-level config (sold/copied with the kit): full template, weak campaign
@@ -161,15 +160,15 @@ HAND_TABLE = WeightTable(
         # private, since a copied article can hotlink the real outlet's video zone
         "video_cdn_tenant": _K(L.infrastructure, 4.0),
         # kit
-        # A whole identical asset set (07 §2.5 c: s 0.9, u 0.02 → template +5.5 after one bit of
-        # rarity). Deliberate deviation from 07, which counts it fully toward campaign: here it
+        # A whole identical asset set (s 0.9, u 0.02 → template +5.5 after one bit of
+        # rarity). Deliberate deviation from the method, which counts it fully toward campaign: here it
         # counts at 0.8, so a copied kit on another platform (−4 conflict) lands in campaign
         # review, never in link, and a same-platform copy still needs a second layer.
         "kit_asset_set": _K(L.kit, 6.5, relations=_row(1.0, 0.0, 0.25, 0.8, 1.0)),
         # lander template: a template-level id, counts fully for template, weakly for campaign
         "aio_lander_template": _K(L.kit, 4.0, relations=_row(1.0, 0.0, 0.25, 0.25, 1.0)),
         "aio_macros_file": _K(L.kit, 2.0),
-        # HACK-11 kit fingerprints: template evidence (kit scale: template 1, campaign 0.5). One asset
+        # kit fingerprints: template evidence (kit scale: template 1, campaign 0.5). One asset
         # hash can be a landing build or a whole platform's SDK; rarity over pre-groups demotes the
         # platform-wide ones. Priors are set so a pair-only value (k = 2) still clears hub_bits.
         "asset_sha256": _K(L.kit, 2.5),  # one identical asset file
@@ -180,30 +179,30 @@ HAND_TABLE = WeightTable(
         # URL parameter shapes (values dropped): structure of the kit or tracker, template-ish, weak
         "page_url_shape": _K(L.landing, 2.0, relations=_row(1.0, 0.0, 0.25, 0.5, 1.0)),
         "form_action_shape": _K(L.landing, 2.0, relations=_row(1.0, 0.0, 0.25, 0.5, 1.0)),
-        # impersonated outlet's logo / fonts / favicon: brand skin, ecosystem only (HACK-66), never campaign,
+        # impersonated outlet's logo / fonts / favicon: brand skin, ecosystem only, never campaign,
         # operator or template evidence; the stop-list makes it a hub besides
         "brand_asset": _K(L.kit, 0.3, relations=_row(0.0, 0.0, 0.0, 0.0, 1.0)),
         # creative
         "ad_caption": _K(L.creative, 2.0),
         "page_title": _K(L.creative, 2.0),
-        "image_phash": _K(L.creative, 3.0),  # creative pack (07 §2.5 b: s 0.3, u 0.05)
+        "image_phash": _K(L.creative, 3.0),  # creative pack (s 0.3, u 0.05)
         "meta_ad_id": _K(L.creative, 4.0),  # one ad; rarely shared, but a shared one is the same ad
         "meta_ad_name": _K(L.creative, 2.0),  # free text like a caption
-        # Visual (HACK-15), ecosystem only (HACK-66): an impersonated brand found in the creative or page is
+        # Visual-features stage, ecosystem only: an impersonated brand found in the creative or page is
         # brand-level, a recognised public figure says only "same celebrity"; never campaign, operator or
         # template evidence (face_embedding is a calibrated content view with its own face cap, `similarity`)
         "brand": _K(L.creative, 0.3, relations=_row(0.0, 0.0, 0.0, 0.0, 1.0)),
         "person_face": _K(L.creative, 1.0, relations=_row(0.0, 0.0, 0.0, 0.0, 1.0)),
-        # distribution account (pages rotate inside campaigns; 07 §(e) item 10)
+        # distribution account (pages rotate inside campaigns; pixel rotation)
         "advertiser_page_name": _K(L.distribution_account, 2.0),
         "meta_campaign_id": _K(L.distribution_account, 4.0),  # ad-manager campaign of one account
         "meta_adset_id": _K(L.distribution_account, 4.0),  # ad set inside that campaign
         "meta_campaign_name": _K(L.distribution_account, 2.0),  # account-chosen label
         "meta_adset_name": _K(L.distribution_account, 2.0),  # account-chosen label
-        # infrastructure (HACK-19 enrichment and prototype signals); shared hosting is weak
-        "third_party_host": _K(L.infrastructure, 1.5),  # HACK-11: foreign host a page loads; CDNs are hubs
-        "third_party_domain": _K(L.infrastructure, 1.5),  # HACK-11: its registered domain, coarser
-        # site identity (HACK-48, final names on HACK-10): in the landing layer, so the within-layer max keeps
+        # infrastructure (enrichment and prototype signals); shared hosting is weak
+        "third_party_host": _K(L.infrastructure, 1.5),  # foreign host a page loads; CDNs are hubs
+        "third_party_domain": _K(L.infrastructure, 1.5),  # its registered domain, coarser
+        # site identity (final names on): in the landing layer, so the within-layer max keeps
         # "same site" from stacking with the landing id; not single-valued (domains rotate daily: a differing
         # domain carries nothing, no conflict penalty) and nothing about the template. landing_domain also
         # carries the CERT listing domain. ad_display_domain (creative layer) only restates it: kept weak.
@@ -249,7 +248,7 @@ HAND_TABLE = WeightTable(
     },
 )
 
-# Campaign-level evidence (HACK-53): what one campaign has and another campaign of the same owner does not.
+# Campaign-level evidence: what one campaign has and another campaign of the same owner does not.
 # Under the campaign relation the D1 gate needs at least one shared row of this kind (see `ledger.score_pair`):
 # the operator's tracking accounts, tracker instances, kit, platform, tenant, owner, offer contacts and
 # shared hosting are common to all of that operator's campaigns. An explicit list of kinds, never a layer
@@ -267,7 +266,7 @@ CAMPAIGN_EVIDENCE_KINDS = frozenset({
 })
 
 
-# Which artefact types can yield a kind, for evidence capacity (HACK-67). Read off the extractors
+# Which artefact types can yield a kind, for evidence capacity. Read off the extractors
 # and checked against the indicator provenance of the challenge data. Kinds not listed come from
 # any modality (HTML yields almost every kind), so an unlisted kind never makes a missing input
 # look useful. Shared by every weight table: it describes the extractors, not the weights.
@@ -300,8 +299,8 @@ def is_campaign_evidence(layer: Layer, kind: str) -> bool:
     return kind in CAMPAIGN_EVIDENCE_KINDS
 
 
-# Corroborated landing build (HACK-84, applied in `ledger.kit_build`). With the platform ids hidden, one
-# campaign's captures usually share one landing build. A copied kit alone stays template-level (HACK-77), and on
+# Corroborated landing build (applied in `ledger.kit_build`). With the platform ids hidden, one
+# campaign's captures usually share one landing build. A copied kit alone stays template-level, and on
 # the organiser set one operator reuses its build (skeleton, inline scripts, assets) across its campaigns, so even
 # two rare structure kinds do not tell campaigns apart. A build counts for the campaign only when a page-level
 # structure value (whole-page skeleton or normalised inline script) carried by at most KIT_BUILD_MAX_GROUPS
@@ -310,7 +309,7 @@ def is_campaign_evidence(layer: Layer, kind: str) -> bool:
 # at KIT_BUILD_SCALE and open the campaign gate, and the page and the script take one kit-layer term each.
 KIT_BUILD_ANCHORS = frozenset({"dom_skeleton_sha256", "inline_script_sha256"})
 KIT_BUILD_STRUCTURE = KIT_BUILD_ANCHORS | {"asset_norm_sha256"}
-# masked text templates are left out: one operator reuses its article text across campaigns (review, HACK-84)
+# masked text templates are left out: one operator reuses its article text across campaigns (review)
 KIT_BUILD_CORROBORATION = frozenset({"image_phash", "image_pdq"})
 KIT_BUILD_MAX_GROUPS = 2
 KIT_BUILD_SCALE = 1.0
@@ -320,7 +319,7 @@ KIT_BUILD_SLOTS = {"inline_script_sha256": "build:script"}
 KIT_BUILD_PAGE_SLOT = "build:page"
 
 
-# Values that record a failed lookup, not evidence (HACK-19 writes `unknown` when a source is down).
+# Values that record a failed lookup, not evidence (writes `unknown` when a source is down).
 IGNORED_VALUES = frozenset({"unknown"})
 
 # Layers whose unknown kinds are treated as operator-private ids (fallback in `WeightTable.weight`).

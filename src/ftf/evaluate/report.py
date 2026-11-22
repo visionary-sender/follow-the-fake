@@ -1,4 +1,4 @@
-"""`ftf eval report`: the README-ready evaluation report, regenerated on the workbench.
+"""`ftf eval report`: the README-ready evaluation report, regenerated on a VM.
 
 Runs labels, leak, hidden and timesplit (each for both engines), sensitivity (E6), and openset (E2),
 degrade (E3) and distractors (E4) for both engines. Writes `report.md` and `report.json` to
@@ -291,7 +291,7 @@ def limitations(report: dict[str, Any]) -> list[str]:
     camp_text = ""
     if campaign and campaign["linking"] and campaign["baseline"]:
         lk, bl = campaign["linking"], campaign["baseline"]
-        gate = (" Linking's campaign gate (HACK-53) means that with platform ids hidden it links "
+        gate = (" Linking's campaign gate means that with platform ids hidden it links "
                 f"{lk['pairwise']['predicted_pairs']} campaign pairs."
                 if lk["pairwise"]["predicted_pairs"] == 0 else "")
         camp_text = (

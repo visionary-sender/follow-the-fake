@@ -1,4 +1,4 @@
-"""Engine adapter: the harness calls engines only through this shape (Linking's API, HACK-21).
+"""Engine adapter: the harness calls engines only through this shape (Linking's API).
 
 - `link_dataset(ds) -> Dataset`: the input with `links` and `campaigns` filled in, per relation.
 - `link_incident(base, incident, relation=Relation.campaign) -> IncidentResult`: open-set
@@ -6,7 +6,7 @@
 
 `BaselineEngine` is the naive "loose" linker: connected components over any shared linkable
 (non-collector) value. It is expected to blob; it exists so the harness runs end to end and so
-real engines have a floor to beat. `get_engine("linking")` wraps `ftf.linking` (HACK-22).
+real engines have a floor to beat. `get_engine("linking")` wraps `ftf.linking`.
 """
 
 from __future__ import annotations

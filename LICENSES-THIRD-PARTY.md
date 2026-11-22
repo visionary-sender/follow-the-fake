@@ -63,7 +63,7 @@ Covers the runtime dependencies and the `app`, `dev` and `fetch` extras of `ftf`
 | pywavelets | MIT AND BSD-3-Clause |
 | pyyaml | MIT License |
 | referencing | MIT |
-| regex | Apache-2.0 AND CNRI-Python (named exception: CNRI-Python, HACK-80) |
+| regex | Apache-2.0 AND CNRI-Python (named exception: CNRI-Python) |
 | requests | Apache Software License |
 | requests-file | Apache Software License |
 | rich | MIT License |
@@ -78,8 +78,8 @@ Covers the runtime dependencies and the `app`, `dev` and `fetch` extras of `ftf`
 | sympy | BSD License |
 | tldextract | BSD-3-Clause |
 | tokenizers | Apache Software License |
-| torch | Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND ISC AND MIT AND Zlib (named exception: BSL-1.0 part of bundled code, HACK-80) |
-| tqdm | MPL-2.0 AND MIT (named exception, unmodified, pending owner review, HACK-74) |
+| torch | Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND ISC AND MIT AND Zlib (named exception: BSL-1.0 part of bundled code) |
+| tqdm | MPL-2.0 AND MIT (named exception, unmodified) |
 | transformers | Apache 2.0 License |
 | typer | MIT |
 | typing-extensions | PSF-2.0 |
@@ -93,7 +93,7 @@ Covers the runtime dependencies and the `app`, `dev` and `fetch` extras of `ftf`
 ## Browser binaries of the `fetch` extra (`playwright==1.64.1`)
 
 Downloaded into the container image by `playwright install` for `ftf fetch` (live page capture).
-Named exception, owner decision 2026-11-21: Playwright and its browser binaries are allowed,
+Named exception, Playwright and its browser binaries are allowed,
 including Chromium's bundled unmodified LGPL-2.1 FFmpeg.
 
 | Component | Licence |
@@ -101,10 +101,10 @@ including Chromium's bundled unmodified LGPL-2.1 FFmpeg.
 | Playwright driver (Node.js, inside the playwright wheel) | Apache-2.0; bundled Node.js runtime MIT |
 | Chromium headless shell (`playwright install --only-shell chromium`) | BSD-3-Clause; bundles unmodified FFmpeg (LGPL-2.1) and other components under their own licences |
 
-## Debian system libraries of Chromium (HACK-68 named exception)
+## Debian system libraries of Chromium
 
 Installed in the image by `playwright install --with-deps` (Dockerfile), unmodified, as
-Debian packages. Some are LGPL, MPL or GPL in part; owner decision 2026-11-22 accepts them
+Debian packages. Some are LGPL, MPL or GPL in part; they are accepted
 as the only exception to the permissive allowlist. Licence per the package's copyright file.
 
 | Package | Licence |

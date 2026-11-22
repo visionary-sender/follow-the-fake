@@ -1,4 +1,4 @@
-"""Calibrated similarity for continuous content views (HACK-24).
+"""Calibrated similarity for continuous content views.
 
 A *view* compares one kind of continuous indicator between two captures: cosine for embedding
 vectors (`vector_ref` indicators), normalised Hamming similarity for perceptual-hash hex strings
@@ -7,7 +7,7 @@ similarities of unrelated pairs (the null) and, when there are enough, of same-c
 turns a similarity into bounded evidence in bits. `view_evidence` wraps both into a contract
 `EvidenceRow`; it is what the ledger calls.
 
-Calibration (plans/knowledge/07 §1.6, §3 D2 item 5):
+Calibration:
 
 * With at least `MIN_POSITIVES` positive pairs: a 2-parameter logistic regression of
   same-campaign on the standardised similarity, with classes weighted equally so the training
@@ -22,7 +22,7 @@ Calibration (plans/knowledge/07 §1.6, §3 D2 item 5):
 Bits are always clipped to [0, cap]: a low similarity is weak evidence of nothing, never
 evidence against a link, because creatives are routinely swapped inside a campaign.
 
-Vectors (Visual project, HACK-13/HACK-40): `VectorRef.store` is used exactly as written in the
+Vectors (visual-features stage): `VectorRef.store` is used exactly as written in the
 dataset, relative to that dataset's output directory, and read through
 `ftf.features.common.load_vectors`. Vectors are L2-normalised; cosine is computed anyway, so an
 unnormalised store is still compared correctly. A missing store or key reads as missing (0 bits).
@@ -141,9 +141,9 @@ class View:
 
 
 # Indicator kind -> view. Extend by adding a row (or `register_view`). Kinds follow the contract
-# pattern ^[a-z][a-z0-9_]*$; embedding and perceptual-hash kinds are the Visual project's (HACK-13).
+# pattern ^[a-z][a-z0-9_]*$; embedding and perceptual-hash kinds come from the visual-features stage.
 # Face embeddings get a view here, but a face match only says "same celebrity", which the scams
-# share widely; its calibration null must include other scams with the same face (07 §4 E4f).
+# share widely; its calibration null must include other scams with the same face.
 VIEWS: dict[str, View] = {}
 
 
@@ -375,7 +375,7 @@ class Calibration:
     z_scale: Optional[float] = None
     quality: dict[str, Any] = field(default_factory=dict)
     # face views only: True when the null was drawn from other scams showing the same face, so a
-    # match beyond it means more than "same celebrity" (07 §4 E4f); otherwise the ledger caps it low
+    # match beyond it means more than "same celebrity"; otherwise the ledger caps it low
     null_same_face: bool = False
 
     # ----------------------------------------------------------------- fitting

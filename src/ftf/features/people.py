@@ -1,6 +1,6 @@
 """Gazetteer of public figures whose likeness or name is frequently abused in scam ads.
 
-Shared by the text family (name masking, ``person_mention``) and the faces family (HACK-15).
+Shared by the text family (name masking, ``person_mention``) and the faces family.
 
 Sources: public knowledge, chiefly figures repeatedly named in public CERT Polska / NASK warnings
 and press reports about fake investment and health ads that use a celebrity's likeness.

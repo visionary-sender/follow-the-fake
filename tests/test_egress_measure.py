@@ -63,7 +63,7 @@ def test_report_joins_egress_and_baseline(tmp_path):
     def cap(d, url, outcome, egress=None, profile="victim-pl-mobile"):
         p = d / url.split("//")[1].replace("/", "_")
         p.mkdir(parents=True)
-        (p / "capture.json").write_text(json.dumps({"requested_url": url, "outcome": outcome, "started_at": "2026-11-22T00:00:00Z",
+        (p / "capture.json").write_text(json.dumps({"requested_url": url, "outcome": outcome, "started_at": "2000-01-01T00:00:00Z",
                                                     "profile": {"name": profile}, "egress": egress}))
 
     eg = {"zone": "europe-central2-a", "ip_hash": "sha256:" + "ab" * 16}

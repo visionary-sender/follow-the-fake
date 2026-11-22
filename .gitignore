@@ -1,5 +1,5 @@
-# Data never goes into git: it lives in gs://follow-the-fake-data (private bucket).
-# Pull it with: gcloud storage rsync -r gs://follow-the-fake-data/raw/2026-11-21/ .
+# Data never goes into git: it lives in gs://$FTF_BUCKET (private bucket).
+# Pull it with: gcloud storage rsync -r gs://$FTF_BUCKET/raw/ .
 /BACKUP/
 /do_udostępnienia/
 /data/
@@ -38,7 +38,7 @@ __pycache__/
 .env
 .playwright-mcp/
 
-# brand stop-list (HACK-75): fetched from the bucket on the build host, never in git
+# brand stop-list: fetched from the bucket on the build host, never in git
 docker/brand-stoplist/*
 !docker/brand-stoplist/.gitkeep
 
@@ -49,8 +49,7 @@ docker/brand-stoplist/*
 *.safetensors
 *.ckpt
 
-# Agent/Claude material stays local: only human-facing README.md goes into the repo.
-# (worktrees get CLAUDE.md and .claude/settings.json symlinked by scripts/orca-setup.sh)
+# Assistant and editor material stays local: only human-facing README.md goes into the repo.
 CLAUDE.md
 CLAUDE.local.md
 AGENTS.md
@@ -69,5 +68,5 @@ notes/
 # Build-context folders filled on the workbench VM only (never in git; see scripts/fetch_face_reference.sh).
 docker/build-context/faces-reference/*
 !docker/build-context/faces-reference/.gitkeep
-# Face reference images (HACK-83): built on a VM, live in the bucket, never in git
+# Face reference images: built on a VM, live in the bucket, never in git
 **/face-reference/

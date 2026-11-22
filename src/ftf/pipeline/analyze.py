@@ -113,6 +113,7 @@ class AnalysisResult:
     input_root: Optional[Path] = None  # artefact paths of `incident` are relative to this
     from_base: bool = False  # the incident is a base item; links/assignment are precomputed
     notes: list[str] = field(default_factory=list)
+    enrichment: Optional[str] = None  # "online", "offline cache" or "mixed"; None if enrichment did not run
 
     @property
     def ok(self) -> bool:
@@ -198,6 +199,7 @@ class AnalysisResult:
             "indicators": len(self.incident.indicators),
             "missing": sorted({m.modality.value for c in self.incident.captures for m in c.missing}),
             "similar": [s.__dict__ for s in self.similar[:20]],
+            "enrichment": self.enrichment,
             "notes": self.notes,
         }
 
@@ -245,18 +247,25 @@ def analyze(
 
     `offline=False` allows network enrichment (registries, DNS over HTTPS); it never contacts the
     page itself. `fetch=True` (and online) lets a URL be fetched live with `ftf.fetch`: only on the
-    sandbox VM, never on the workbench or in the demo app.
+    only when online and enabled (the container image sets FTF_FETCH=1), never on a VM.
     Input bytes are copied into a per-run directory (`run_dir`, else a fresh temp dir under
     $FTF_RUN_DIR or the system temp dir), hashed with sha256 and never executed or rendered.
     `base_dir` is the folder of the base's dataset.json (its vector stores), passed to linking.
     """
     from ftf.pipeline import stages  # late import: stages imports this module's types
 
+    notes: list[str] = []
+    if not offline:  # one short probe at the start; no network means the offline package
+        from ftf.enrich.probe import network_up
+
+        if not network_up():
+            offline = True
+            notes.append("network probe failed: enrichment uses the offline cache and the precomputed base")
     own_dir = run_dir is None
     rdir = Path(run_dir) if run_dir is not None else Path(tempfile.mkdtemp(prefix="ftf-run-", dir=_run_root()))
     rdir.mkdir(parents=True, exist_ok=True)
     ctx = stages.RunContext(inp=inp, base=base, offline=offline, run_dir=rdir, fetch=fetch,
-                            base_dir=Path(base_dir) if base_dir is not None else None)
+                            base_dir=Path(base_dir) if base_dir is not None else None, notes=notes)
     reports: list[StageReport] = []
     for name, fn in stages.STAGES:
         start = time.perf_counter()
@@ -280,4 +289,5 @@ def analyze(
         input_root=ctx.input_root,
         from_base=ctx.from_base,
         notes=ctx.notes,
+        enrichment=ctx.enrichment,
     )

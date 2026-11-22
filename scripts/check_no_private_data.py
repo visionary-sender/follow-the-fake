@@ -2,7 +2,7 @@
 """Fail if private data, secrets or raw challenge files reach tracked files or commit messages.
 
 Scam infrastructure (domains, URLs, tracker, account, tenant and pixel ids) and the names of public
-figures and brands are public and may be in git (owner, 2026-11-22 08:10). The check fails only on:
+figures and brands are public and may be in git. The check fails only on:
 
 1. personal data of private individuals: e-mail addresses and phone numbers, including the ones in
    the organiser dataset (their digits are searched for; the value is never printed);
@@ -40,7 +40,19 @@ RESERVED_DOMAINS = (
     "example", "test", "invalid", "local", "example.com", "example.org", "example.net", "noreply.github.com",
 )
 # Invented fixtures that look like captured pages (path -> reason). Nothing else may be committed raw.
-RAW_ALLOWED = {"tests/scanner/fixtures/meta_ssr.html": "invented SSR fixture"}
+RAW_ALLOWED = {
+    "tests/scanner/fixtures/meta_ssr.html": "invented SSR fixture",
+    **{
+        f"docs/figures/{name}.png": "chart generated from evaluation outputs by scripts/make_figures*.py"
+        for name in (
+            "baseline_vs_model",
+            "evidence_separation",
+            "layer_ablation",
+            "rarity_rank_frequency",
+            "sensitivity",
+        )
+    },
+}
 # Test files whose e-mail and phone literals are invented (sequential digits, reserved or made-up
 # domains); their secrets are still checked. Path -> reason.
 PERSONAL_ALLOWED = {

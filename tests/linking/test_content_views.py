@@ -1,4 +1,4 @@
-"""HACK-24 phase 2: calibrated content views wired into the ledger and assignment. Synthetic data only."""
+"""phase 2: calibrated content views wired into the ledger and assignment. Synthetic data only."""
 
 from __future__ import annotations
 

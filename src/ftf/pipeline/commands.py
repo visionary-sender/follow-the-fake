@@ -35,8 +35,9 @@ def register_analyze(subparsers: argparse._SubParsersAction) -> None:
     parser.add_argument("input", metavar="INPUT", help="URL, keyword, file, case folder or base incident id")
     parser.add_argument("--kind", choices=INPUT_KINDS, help="input kind (default: guessed from INPUT)")
     parser.add_argument("--base", type=Path, help="campaign base, a contract dataset.json (default: $FTF_BASE, else the fixture)")
-    parser.add_argument("--online", action="store_true", help="allow network enrichment: registries, DNS over HTTPS (default: offline; FTF_OFFLINE=1 forces offline)")
-    parser.add_argument("--fetch", action="store_true", help="with --online, fetch a URL input live with ftf fetch; sandbox VM only, never the workbench")
+    parser.add_argument("--offline", action="store_true", help="no network: enrichment from the cache and the precomputed base only (FTF_OFFLINE=1 also forces it)")
+    parser.add_argument("--online", action="store_true", help="no-op: online is the default; kept so old scripts keep working")
+    parser.add_argument("--fetch", action="store_true", help="fetch a URL input live with ftf fetch when online (or FTF_FETCH=1); sandbox VM only, never on a dev VM")
     parser.add_argument("--out", type=Path, help="write the result as a contract Dataset (JSON) here")
     parser.set_defaults(func=run_analyze)
 
@@ -45,7 +46,7 @@ def register_serve(subparsers: argparse._SubParsersAction) -> None:
     parser = subparsers.add_parser(
         "serve",
         help="start the demo web app (Streamlit; needs the 'app' extra)",
-        description="Start the Streamlit demo app. On the workbench VM keep the default address and use an SSH tunnel.",
+        description="Start the Streamlit demo app. On a VM keep the default address and use an SSH tunnel.",
     )
     parser.add_argument("--port", type=int, default=8501, help="port (default: %(default)s)")
     parser.add_argument("--address", default="127.0.0.1", help="bind address (default: %(default)s)")
@@ -102,8 +103,9 @@ def run_analyze(args: argparse.Namespace) -> int:
     except ValueError as exc:
         print(f"ftf analyze: {exc}", file=sys.stderr)
         return USAGE_EXIT
-    offline = not args.online or _env_flag("FTF_OFFLINE")
-    result = analyze(inp, base, offline=offline, fetch=args.fetch, base_dir=base_dir(args.base))
+    offline = args.offline or _env_flag("FTF_OFFLINE")  # online by default; a failed probe falls back in analyze()
+    fetch = args.fetch or _env_flag("FTF_FETCH")
+    result = analyze(inp, base, offline=offline, fetch=fetch, base_dir=base_dir(args.base))
     try:
         dataset = result.to_dataset()
     except ValueError as exc:

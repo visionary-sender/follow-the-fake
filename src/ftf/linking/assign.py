@@ -1,6 +1,6 @@
 """Open-set assignment of a new incident to the campaigns of one relation: assign, new or review.
 
-Method (07 §2.4, D1/D2 "Assignment"):
+Rules:
 
 * The new incident's probe captures are its canonical non-decoy captures (its decoys only if it
   has nothing else). The scoring context is built over the collection plus the incident, so
@@ -14,7 +14,7 @@ Method (07 §2.4, D1/D2 "Assignment"):
   layers for the relation, or a live private id; see `grouping.MIN_LAYERS`); `new` if it is <= tau - 3; `review` otherwise. An item whose
   evidence capacity is below tau cannot reach the bar at all, so it goes to `review`, never `new`
   (a screenshot-only item is not proof of a new campaign).
-* Tie at the top (HACK-64): if another campaign also clears the bar with a qualifying ledger
+* Tie at the top: if another campaign also clears the bar with a qualifying ledger
   and no tenant/owner conflict, and the target leads it by less than `TIE_MARGIN` (1 bit, a
   likelihood ratio under 2), the incident goes to review with a note naming both, never to
   `assign`. The margin is a fixed number of bits for every relation: the bits are already on
@@ -26,12 +26,12 @@ Method (07 §2.4, D1/D2 "Assignment"):
   can show is read from the collection itself (indicator provenance -> artefact type).
 * A `new` call becomes `review` when the best score plus the capacity of the missing modalities
   (what the capacity would rise by with them) reaches the assign bar: the missing input could
-  have produced the assignment. The note names those inputs (HACK-67).
+  have produced the assignment. The note names those inputs.
 * An incident whose (non-decoy) capture is an exact duplicate (`duplicate_of`) of a collection
   capture is assigned to the campaign holding that capture; if that capture is in no campaign
   or in several, it goes to review.
 * The decision is made per incident. An incident with several landers (end points, see
-  `grouping.incident_chain`) may hold unrelated sites (HACK-57): each lander is matched on its
+  `grouping.incident_chain`) may hold unrelated sites: each lander is matched on its
   own (the campaigns it clears the bar against with a qualifying ledger, or the campaign
   holding the capture it duplicates). If no campaign is reached by every pointing lander, the
   incident goes to review, with a note naming each lander's best campaign. An assignment to a
@@ -39,7 +39,7 @@ Method (07 §2.4, D1/D2 "Assignment"):
 * Under operator / campaign a tenant or owner conflict between any probe capture and a member
   of the chosen campaign (cannot-link) sends the incident to review instead of assigning it.
 * The collection is not re-clustered.
-* Content views (HACK-24, off by default): with `calibrations`, the ledger adds capped content-view
+* Content views (off by default): with `calibrations`, the ledger adds capped content-view
   rows (`ledger.with_content`), read from the vector stores under `base_dir` (collection captures)
   and `incident_dir` (the incident's captures). They raise scores and name similar creatives in
   the candidate notes, but never make a pair qualify, so they can lift an item to review, never
@@ -130,7 +130,7 @@ def link_incident(
     """The assignment plus ledgers from the incident's captures to members of its top candidate campaigns.
 
     `base` is the output of `ftf link` / `link_dataset`. The links are valid inside `base` plus
-    the incident. Content views (HACK-24) are on only with `calibrations`: vector views read the
+    the incident. Content views are on only with `calibrations`: vector views read the
     stores under `base_dir` / `incident_dir` (where the base's and the incident's datasets were
     written), or `vector_store` when given; without either only value views (hashes) count. With
     content views on, the scan is linear (see the module docstring).
@@ -454,7 +454,7 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
             if mps.bits <= 0:
                 continue
             if not mps.substantive and relation is not Relation.ecosystem:
-                # platform-level or creative evidence only (HACK-66): explained at ecosystem level, never as
+                # platform-level or creative evidence only: explained at ecosystem level, never as
                 # a link of `relation`
                 mps = setup.be.score(mps.a, mps.b, Relation.ecosystem)
                 if mps.bits <= 0:
@@ -672,7 +672,7 @@ def _missing_could_reach_bar(
 
     `extra` is the capacity of the missing modalities (`evidence_capacity`'s missing_bits). When
     the best candidate's score plus that capacity reaches the bar, the absence of a match is not
-    evidence of a new campaign, so the item goes to review instead of new (HACK-67).
+    evidence of a new campaign, so the item goes to review instead of new.
     """
     if not gains or best + extra < bar:
         return None

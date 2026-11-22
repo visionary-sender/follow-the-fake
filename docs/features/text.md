@@ -62,7 +62,7 @@ sets, with a standard error of about 0.044.
     The HAR is used only when a capture has neither, taking the `text/html` response body with
     the most visible text.
   - Size caps: only the first 64 MB of HTML or MHTML is read; HARs over 64 MB are skipped.
-  - Ingestion (HACK-9) owns these formats. This module keeps to what text extraction needs.
+  - The ingestion module owns these formats. This module keeps to what text extraction needs.
 - **Masking** (`mask.py`) replaces, in this order:
   1. Emails become `<URL>`.
   2. Names of real news outlets and programmes (a fixed public list in `mask.py`) become
@@ -76,7 +76,7 @@ sets, with a standard error of about 0.044.
      commenter names and invented platform brand names. A pair that starts with a
      common Polish first name is also reported as a `person_mention`.
 
-  The gazetteer is a plain list in `ftf.features.people` (shared with faces, HACK-15).
+  The gazetteer is a plain list in `ftf.features.people` (shared with faces).
 - **Template fingerprint.** Texts with fewer than 5 masked tokens get no template, because they
   would all look alike. Otherwise it is MinHash with 128 permutations over lower-cased word 5-shingles of the
   masked text. Hashing uses blake2b, then fixed-seed `(a·x + b) mod (2^61 − 1)`. The output is
@@ -90,7 +90,7 @@ sets, with a standard error of about 0.044.
   pinned Hub revision. If the model cannot load (missing extra, or no network on first use), the
   family logs one warning and skips embeddings; the other indicators are still written.
   - `FTF_TEXT_MODEL=e5-base` switches to `intfloat/multilingual-e5-base` (768-d, MIT, 1.11 GB).
-  - The default is e5-small: it is 2.4× smaller and fast enough on a jury laptop.
+  - The default is e5-small: it is 2.4× smaller and fast enough on a laptop.
 - **Offline.** `ftf features prefetch` downloads the ONNX graph and tokenizer into the same cache.
   With `FTF_OFFLINE=1` the loader passes `local_files_only`, so it only reads that cache, and
   `ftf features` stops before it starts if a file is missing, naming it.
@@ -112,10 +112,10 @@ sets, with a standard error of about 0.044.
 The final container needs `tesseract-ocr`, `tesseract-ocr-pol` and `tesseract-ocr-eng` from apt.
 Without them, OCR is skipped with one warning.
 
-## Measured on `ftf-visual`
+## Measured on a cloud VM
 
-CPU time per item, as process CPU plus Tesseract child CPU, with 4 threads. The run was Ingestion's
-organiser dataset (`gs://follow-the-fake-data/outputs/ingest/organiser/`): 25 incidents, 37
+CPU time per item, as process CPU plus Tesseract child CPU, with 4 threads. The run was the ingestion module's
+organiser dataset (`gs://<DATA_BUCKET>/outputs/ingest/organiser/`): 25 incidents, 37
 screenshots and 28 page captures. The e2-standard-8 VM was shared with other workers.
 
 | step | items | CPU s / item (mean) |
@@ -129,13 +129,13 @@ Output counts: `ocr_text` 36 (one of 37 images had no confident text), `page_tex
 `text_template` 63, `text_embedding` 64, `person_mention` 230, `keyword` 174, `topic` 25
 (investment 19, health 6). No errors.
 
-Outputs are in `gs://follow-the-fake-data/outputs/visual/hack-13/organiser/`, with the pair reports
+Outputs are in `gs://<DATA_BUCKET>/outputs/visual/<run>/organiser/`, with the pair reports
 in `text/report-*-p3p4.json`.
 
-### OCR time on 2 cores (HACK-89)
+### OCR time on 2 cores
 
 `ftf features` (all families) per input, `taskset -c 0,1`, `OMP_NUM_THREADS=2`, `FTF_THREADS=2`,
-`ftf-visual`. The inputs are the three incidents with the most OCR-able images in each set (the
+a cloud VM. The inputs are the three incidents with the most OCR-able images in each set (the
 corpus maximum is 5 images, so these are not large).
 
 | input | images | before (s) | after, run with the 2000 px downscale (s) |
@@ -202,6 +202,6 @@ times, so I cannot say whether any single call on these inputs passed 180 s. Tim
   headlines and institution names ("Narodowy Bank Polski") collapse too. That trades some
   over-masking for catching invented commenter and brand names.
 - **HAR main document.** The longest HTML body may be a consent wall or a cloaking decoy;
-  Ingestion's main-document choice should replace it.
+  the ingestion module's main-document choice should replace it.
 - **No language detection.** Masking and the lexicon assume Polish; other languages still get
   OCR (eng), templates and embeddings.

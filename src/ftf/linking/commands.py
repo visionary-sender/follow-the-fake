@@ -4,7 +4,7 @@
 per relation; `ftf index` builds the candidate index of a linked collection; `ftf assign` assigns
 new incidents to it (through the index, no rescan); `ftf sensitivity` flags fragile links (±2 bits).
 `--content-views CALIBRATION.json` (from `ftf calibrate-similarity`) switches on the calibrated
-content views of `score`, `link` and `assign` (HACK-24); without it they are off.
+content views of `score`, `link` and `assign`; without it they are off.
 """
 
 from __future__ import annotations
@@ -322,7 +322,7 @@ def register_sensitivity(subparsers: argparse._SubParsersAction) -> None:
         "sensitivity",
         help="flag links whose verdict flips when one layer's weights move by ±2 bits",
         description="Recompute every ledger link of LINKED.json with each layer's weights moved by -DELTA and +DELTA "
-        "(one layer at a time, then all together) and count the flipped verdicts per relation (07 E6).",
+        "(one layer at a time, then all together) and count the flipped verdicts per relation.",
     )
     parser.add_argument("collection", type=Path, metavar="LINKED.json")
     parser.add_argument("-o", "--out", type=Path, required=True, metavar="REPORT.json")

@@ -1,4 +1,4 @@
-"""Evidence ledger and result tables as plain data (no Streamlit), for the app, HACK-31 and the README.
+"""Evidence ledger and result tables as plain data (no Streamlit), for the app and the README.
 
 Vocabulary, `defang` and `tier` come from `ftf.app.relations` (one copy, shared with the
 Campaigns page): CERT Polska evidence tiers Strong / Medium / Supplementary, and

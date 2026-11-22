@@ -1,12 +1,12 @@
-"""`ftf build-base`: the organiser's dataset folder in, a campaign base out (HACK-32).
+"""`ftf build-base`: the organiser's dataset folder in, a campaign base out.
 
 Stages run in this fixed order, each through the owning project's published call:
 
 | stage | owner | call |
 |---|---|---|
-| ingest | Ingestion (HACK-9) | `ftf.ingest.ingest([raw], root=raw, name=...) -> Dataset` (with indicators) |
-| features | Features (HACK-13/14/15/40) | `ftf.features.pipeline.extract(incident, raw, out) -> Incident` |
-| link | Linking (HACK-21/22) | `ftf.linking.link_dataset(ds) -> Dataset` |
+| ingest | Ingestion | `ftf.ingest.ingest([raw], root=raw, name=...) -> Dataset` (with indicators) |
+| features | Features | `ftf.features.pipeline.extract(incident, raw, out) -> Incident` |
+| link | Linking | `ftf.linking.link_dataset(ds) -> Dataset` |
 
 Features run before linking because `extract` refuses datasets that already carry links. A
 stage whose package is not installed yet is skipped with a note. If no linkable indicator

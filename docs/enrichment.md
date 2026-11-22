@@ -35,11 +35,11 @@ Only these services are contacted, and never the scanned domain's own web server
 DNS goes through a public DoH resolver. Nothing is submitted to scanning services. The User-Agent
 is generic (`ftf-domain-enrichment/0.1 (+keyless registry lookups; research)`).
 
-| Service | Used for | Terms (checked 2026-11-21) | Our limits |
+| Service | Used for | Terms (as recorded) | Our limits |
 |---|---|---|---|
 | IANA RDAP bootstrap, `data.iana.org/rdap/dns.json` | which RDAP server runs a TLD | Openly published file. The IANA terms page we tried returned 404, so no terms text was confirmed. | one request per run; cached 30 days |
 | RDAP servers of the registries | registrar, IANA registrar id, creation date | Each registry sets its own policy. No key is needed. | 1 request/s per host; retry 429/5xx with backoff, honouring `Retry-After`; cached 30 days |
-| Google Public DNS, `dns.google/resolve` (DoH JSON) | A, NS, MX | The Google Public DNS terms bind the use to the Google APIs Terms of Service. The page we read gives no numeric limit. The resolver makes its own queries to the domain's nameservers; the workbench does not. | 1 request/s; A, NS and MX per domain; cached 1 day |
+| Google Public DNS, `dns.google/resolve` (DoH JSON) | A, NS, MX | The Google Public DNS terms bind the use to the Google APIs Terms of Service. The page we read gives no numeric limit. The resolver makes its own queries to the domain's nameservers; the cloud VM does not. | 1 request/s; A, NS and MX per domain; cached 1 day |
 | crt.sh, `crt.sh/?q=…&output=json` | issuers, earliest `not_before`, other names on the same certificates | The page states no terms of use or limits. It returns 429 and 502 under load. | 1 request per 5 s; 150 s timeout; 3 retries; cached 7 days |
 | CERT Polska warning list, `hole.cert.pl/domains/v2/domains.json` (about 22 MB) | `cert_pl_listed`, listed date | Usage rules on cert.pl/lista-ostrzezen: anyone may use the list for any purpose, commercial use included; no attribution is required; no warranty; users act at their own risk. No download limit is stated. | one download per run, matched locally; each domain cached 1 day |
 

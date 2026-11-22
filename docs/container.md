@@ -1,4 +1,4 @@
-# Container: running the jury image
+# Container: running the image
 
 One image holds the `ftf` command, the demo web app and the safe URL fetcher. It needs a CPU
 only (no GPU), none of our keys and none of our cloud. It contains no organiser data, no campaign
@@ -10,14 +10,17 @@ or, with no arguments, builds the base if needed and serves the app.
 ## 1. Build
 
 Building needs internet access for pip, apt and Playwright's Chromium. It takes about 5 minutes and
-the image is 1.63 GB (1,631,734,508 bytes, measured on the workbench on 2026-11-22). The image
+the image is 5.57 GB (5,568,573,805 bytes, measured on a cloud VM; it was 7.60 GB before, with the models stored twice). It holds the CPU torch build, the CPU feature models, tesseract, ffmpeg and Chromium. The image
 includes Playwright's headless Chromium (`/opt/ms-playwright/chromium_headless_shell-1248`) with
 its Debian system libraries, which `ftf fetch` needs; their licences are in
 [`licences.md`](licences.md) section 2a.
 
-Before the build, fetch the brand stop-list (HACK-75). It is built from our own public corpus
+The build needs BuildKit (the Dockerfile uses `COPY --chmod`): Docker 23 and later enables it by
+default; on older clients set `DOCKER_BUILDKIT=1` (tested on Docker 20.10.24 with that variable).
+
+Before the build, fetch the brand stop-list. It is built from our own public corpus
 (batch 1, the pages tagged as real outlets) and holds hashed values only. It lives in the private
-bucket, so run the fetch on the workbench VM, where the bucket is reachable:
+bucket, so run the fetch on a cloud VM, where the bucket is reachable:
 
 ```bash
 scripts/fetch-brand-stoplist.sh     # writes docker/brand-stoplist/brand-stoplist.json (gitignored)
@@ -122,7 +125,7 @@ rebuilt. Rebuild the base (`ftf build-base … --force`) after any extractor or 
 | `FTF_BASE_DIR` | `/base` | where the entry point looks for and builds the base |
 | `FTF_RAW_ROOT` | `/data/raw` | organiser folder; artefact paths in the base are relative to it |
 | `FTF_OFFLINE` | unset | `1` forces every network lookup off (enrichment, build-base) |
-| `FTF_FETCH` | unset | `1` lets the app fetch a submitted URL live with the safe fetcher, only while "Online enrichment" is ticked and `FTF_OFFLINE` is not set |
+| `FTF_FETCH` | `1` in the image | `1` lets the app and `ftf analyze` fetch a submitted URL live with the safe fetcher, only when online and `FTF_OFFLINE` is not set |
 | `FTF_ENRICH_CACHE` | `/base/enrichment/cache.json` if present | enrichment cache file |
 | `FTF_PORT` | `8501` | app port inside the container |
 | `FTF_OCR_TIMEOUT` | `600` | seconds per OCR call. A call that times out skips that image with a warning and an `ocr_skipped` collector indicator |
@@ -131,26 +134,29 @@ rebuilt. Rebuild the base (`ftf build-base … --force`) after any extractor or 
 
 ## Offline and online
 
-The jury's machine has internet access. In the app, "Online enrichment" (off by default) allows
-registry and DNS lookups for submitted domains. Live page fetching is additionally off unless the
-container gets `-e FTF_FETCH=1` and "Online enrichment" is ticked (`FTF_OFFLINE=1` overrides both).
-It then runs only under the hardened flags above; the fetcher refuses to run as root and keeps
+A reviewer's machine has internet access. Enrichment is online by default: the app's "Online enrichment"
+box (ticked by default) allows registry and DNS lookups for submitted domains. A start probe and a
+5-second timeout per lookup fall back to the enrichment cache and the precomputed base when the
+network is down; the app shows `enrichment: online`, `offline cache`, `mixed` or `no answer`. Live page fetching
+is opt-in: the image sets `FTF_FETCH=1`, and it runs only when online (`FTF_OFFLINE=1` overrides
+both). It then runs only under the hardened flags above; the fetcher refuses to run as root and keeps
 Chromium's sandbox on. A dead or cloaked page is a normal result, not an error. Building the base
 makes no network requests.
 
-On the workbench VM the same image runs with `--network none` or `-e FTF_OFFLINE=1`: nothing there
-contacts scam infrastructure.
+On a cloud VM the same image runs with `--network none` or `-e FTF_OFFLINE=1`: analyze and
+enrichment make no lookups there. `ftf fetch` and the scanner do not read `FTF_OFFLINE`; live fetching
+stays off the cloud VM by rule.
 
 ## Resources
 
 2 CPUs and 4 GB memory are enough: the app idles at about 150 MB, and building the base for the
-challenge set takes about 2 minutes. Disk: the image (1.63 GB) plus a few MB of base. With the visual
+challenge set takes about 2 minutes. Disk: the image (5.57 GB) plus a few MB of base. With the visual
 families on 2 CPUs the slowest organiser input took about 263 s, so expect a few minutes for one input;
 the OCR and video timeouts above bound a single slow call.
 
-## Verified on the workbench (HACK-72, 2026-11-22)
+## Verified on a cloud VM
 
-Built on `ftf-workbench` from the branch with `sudo docker build -t ftf:dev .` (1.63 GB, Chromium
+Built on a cloud VM from the branch with `sudo docker build -t ftf:dev .` (1.63 GB in an earlier build, Chromium
 present as above). Checks, run with the hardening flags of section 2 (`--memory=4g --cpus=2`):
 
 - **App:** `docker run -d` with `-e FTF_OFFLINE=1`, no organiser folder and no base (the entry point

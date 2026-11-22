@@ -1,25 +1,25 @@
-# Follow the Fake ad-library scan, one capped run (HACK-20). Installed on the sandbox VM by
-# scripts/scanner-sandbox.sh. Runs as the unprivileged user hack20; never fetches landing pages.
+# Follow the Fake ad-library scan, one capped run. Installed on the sandbox VM by
+# scripts/scanner-sandbox.sh. Runs as the unprivileged user ftf-scanner; never fetches landing pages.
 [Unit]
 Description=Follow the Fake ad-library scan
 Wants=network-online.target
 After=network-online.target
 # Search terms are private: the file is copied to the sandbox from the workbench (scripts/scanner-sandbox.sh
 # keywords). Until it exists the run is skipped, not failed.
-ConditionPathExists=/opt/hack-20/config/scanner-keywords.txt
+ConditionPathExists=/opt/ftf-scanner/config/scanner-keywords.txt
 
 [Service]
 Type=oneshot
-User=hack20
-Group=hack20
+User=ftf-scanner
+Group=ftf-scanner
 UMask=0027
-WorkingDirectory=/opt/hack-20/home
-Environment=HOME=/opt/hack-20/home XDG_CACHE_HOME=/opt/hack-20/home/.cache XDG_CONFIG_HOME=/opt/hack-20/home/.config
-Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/hack-20/ms-playwright LANG=C.UTF-8
-EnvironmentFile=-/opt/hack-20/scan.env
-ExecStart=/opt/hack-20/venv/bin/ftf scan --out /opt/hack-20/data --download-creatives --keywords-file /opt/hack-20/config/scanner-keywords.txt $FTF_SCAN_ARGS
-StandardOutput=append:/opt/hack-20/log/scan.log
-StandardError=append:/opt/hack-20/log/scan.log
+WorkingDirectory=/opt/ftf-scanner/home
+Environment=HOME=/opt/ftf-scanner/home XDG_CACHE_HOME=/opt/ftf-scanner/home/.cache XDG_CONFIG_HOME=/opt/ftf-scanner/home/.config
+Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/ftf-scanner/ms-playwright LANG=C.UTF-8
+EnvironmentFile=-/opt/ftf-scanner/scan.env
+ExecStart=/opt/ftf-scanner/venv/bin/ftf scan --out /opt/ftf-scanner/data --download-creatives --keywords-file /opt/ftf-scanner/config/scanner-keywords.txt $FTF_SCAN_ARGS
+StandardOutput=append:/opt/ftf-scanner/log/scan.log
+StandardError=append:/opt/ftf-scanner/log/scan.log
 # 75 = another scan still holds the lock: skipped, not failed.
 SuccessExitStatus=75
 TimeoutStartSec=90min
@@ -28,4 +28,4 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=/opt/hack-20/data /opt/hack-20/home /opt/hack-20/log
+ReadWritePaths=/opt/ftf-scanner/data /opt/ftf-scanner/home /opt/ftf-scanner/log

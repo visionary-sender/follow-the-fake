@@ -1,4 +1,4 @@
-"""Glue for `ftf eval openset|degrade|distractors` (HACK-28): ground-truth groups from the labels,
+"""Glue for `ftf eval openset|degrade|distractors`: ground-truth groups from the labels,
 the distractor plan, and the markdown tables written next to the JSON.
 
 Nothing here reads organiser values itself. Which captures become which distractor is decided

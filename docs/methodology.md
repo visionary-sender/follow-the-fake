@@ -60,7 +60,7 @@ one decision by one actor, so a layer counts once when it is combined with other
 
 Kinds and their layers are declared in `ftf.indicators._ids.KINDS`, `ftf.indicators.kit._KINDS`,
 `ftf.indicators.domains` (the landing's own hosts, the redirect chain and the displayed domain of an
-ad, HACK-48; the page's own URLs come from `ftf.indicators._pages`) and `ftf.enrich.domain`. The extractors read files as inert text and never fetch a URL found in a
+ad; the page's own URLs come from `ftf.indicators._pages`) and `ftf.enrich.domain`. The extractors read files as inert text and never fetch a URL found in a
 capture. The content layers (text embeddings, image hashes, faces) count only through calibrated
 content views, which are off by default (5.6); without them the scores below use the identifier,
 kit, infrastructure and ad-text indicators.
@@ -110,18 +110,18 @@ subtracts the rarity term:
   values the corpus knows: `log2[(c + α)/(1 + α)]`, where `c` is the larger of the corpus operator count
   and the sample's pre-groups (`ftf.linking.background`).
   Without a corpus, the pre-group count above is used. The default run has no corpus.
-- **Brand stop-list (on by default, HACK-66).** A scam clone loads the impersonated outlet's logo,
+- **Brand stop-list (on by default).** A scam clone loads the impersonated outlet's logo,
   fonts, favicon, CDN and analytics. Those values are the outlet's skin, not the scammer's. `ftf
   brand-stoplist` hashes every value seen on the real outlet pages of the background corpus (tagged
   `must_not_link`). The default scoring path reads that file from `$FTF_BRAND_STOPLIST`, or from
   `/data/derived/linking/brand-stoplist/brand-stoplist.json` when the variable is not set. A
   stop-listed value is `hub_subsumed` with 0 bits under every relation except ecosystem. The
-  `brand_asset` kind counts under ecosystem only, with or without the list. Without the file (the jury
-  image ships it, HACK-75), the engine prints a warning and scores as if no stop-list existed.
+  `brand_asset` kind counts under ecosystem only, with or without the list. Without the file (the
+  image ships it), the engine prints a warning and scores as if no stop-list existed.
   The file holds digests only.
 - A value carried by more than 500 captures never proposes a candidate pair (`HUB_POSTINGS`).
 - The priors above are the **hand table**. `ftf link --weights FILE` replaces them with a learned table
-  (HACK-23, `ftf.linking.learned`), which keeps the same fields. The default run uses the hand table.
+  (`ftf.linking.learned`), which keeps the same fields. The default run uses the hand table.
 
 ### 5.2 How layers are scored against a relation
 
@@ -163,7 +163,7 @@ platforms.
    **−4 bits** (`conflict_bits`) once for that layer, and the pair is a **cannot-link**: the verdict
    can never be `link`. A platform conflict costs bits only, since one operator can run several
    platforms. A conflict on the template or the ecosystem relation is not counted.
-4. **Platform and creative gate (HACK-66).** Under the campaign, operator and tracking-account
+4. **Platform and creative gate.** Under the campaign, operator and tracking-account
    relations, a pair needs at least one positive row outside the platform and creative layers whose
    value sits below platform level. The level is the value's place in the discovered hierarchy, or
    else its kind's usual `Indicator.level`. Platform constants and platform-level values in other
@@ -171,7 +171,7 @@ platforms.
    (an ad, a celebrity's face or photo) can be reused by anyone. Without such a row the pair counts
    at most one positive layer and no live private id, so it never links or assigns. Its bits stay in
    the ledger, and an assignment explains it under the ecosystem relation instead.
-5. **Corroborated landing build (HACK-84, campaign relation).** A copied kit alone is template
+5. **Corroborated landing build (campaign relation).** A copied kit alone is template
    evidence: under the campaign relation the kit layer counts at half scale and does not open the
    campaign gate. One campaign's captures, however, usually share one landing build. When the pair
    shares a whole-page skeleton or a normalised inline script that at most 2 pre-groups carry, and
@@ -189,7 +189,7 @@ platforms.
 
 The values below are invented. The priors, scales and rules are the ones in the code, and the
 rarity counts `k` are assumed for the example. Two captures are compared under the campaign
-relation in a collection of 30 captures (the 2026-11-22 demo slice, a snapshot), where a campaign typically has 3 captures.
+relation in a collection of 30 captures (the demo slice, a snapshot), where a campaign typically has 3 captures.
 
 | Layer | Kind (prior × scale) | Shared value (invented) | k | Bits | Status |
 |---|---|---|---:|---:|---|
@@ -291,7 +291,7 @@ can run under two pixels and one pixel can serve two landings.
   unit. With several landers, a case folder can hold unrelated sites, so they join only through
   their own evidence, except that landers on the same own exact host (for example a live page and
   its archived copy; the registered domain is not enough, and a hub host never counts) are one site
-  and start in one unit (HACK-84). A lander that would join two different hosts joins neither.
+  and start in one unit. A lander that would join two different hosts joins neither.
   Assignment of a new item does not apply this join yet.
 - **Output.** Each relation gives its campaigns, and each campaign keeps its links, so the report can
   show which captures are held together by which evidence.
@@ -359,7 +359,7 @@ the engine publishes its τ in the dataset. The two differ, so read the score as
 linkable values, so a pair is scored only when it shares at least one non-hub value, and values
 carried by more than 500 captures are skipped. The ledger costs O(pairs × layers). The clustering is
 greedy merging, O(E log E) for E edges. A new item is assigned with one index lookup per value and one
-score per campaign member. The 2026-11-22 demo slice has 30 captures, so none of these numbers has been measured
+score per campaign member. The demo slice has 30 captures, so none of these numbers has been measured
 at scale. The design targets 10^5 incidents; that target is a plan, not a result.
 
 **Limits, stated plainly:**
@@ -367,7 +367,7 @@ at scale. The design targets 10^5 incidents; that target is a plan, not a result
 - **The numbers are priors.** The structure (rarity over groups, the best value per layer, bits
   added across layers, collector exclusion, missing as 0) is the method. The weights and thresholds
   are explicit, auditable guesses, set from the cross-case reading and not fitted. A learned table
-  (HACK-23) exists as an option (`--weights`), but the default run keeps the hand table. A ±2-bit sensitivity sweep is
+  exists as an option (`--weights`), but the default run keeps the hand table. A ±2-bit sensitivity sweep is
   part of the evaluation protocol and is not yet run; links that flip under it will be flagged.
 - **No true negatives in the case sample.** Every case is a scam, so every cross-campaign pair is a
   hard negative from a correlated population. The background corpus that would give real rarity
@@ -375,7 +375,7 @@ at scale. The design targets 10^5 incidents; that target is a plan, not a result
 - **Independence across layers is assumed.** Bits add across layers. Where two layers move together
   (one operator's pixel spanning two campaigns) the sum overstates the evidence, which is why the
   operator-level layers are scaled down under the campaign relation.
-- **Content similarity is off by default.** Calibrated views (5.6) need Visual's vectors and a
+- **Content similarity is off by default.** Calibrated views (5.6) need the visual vectors and a
   calibration fitted on the same kind of data; their positives come from the ledger's own campaign
   groups, so a campaign the identifiers miss teaches the calibration nothing.
 - **Enrichment is best effort.** A registry, DNS or certificate lookup can fail. A failed lookup

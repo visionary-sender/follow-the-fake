@@ -1,4 +1,4 @@
-"""HACK-84: a corroborated landing build counts for the campaign; a copied kit alone stays template-level.
+"""a corroborated landing build counts for the campaign; a copied kit alone stays template-level.
 
 Placeholder values only, no case data.
 """

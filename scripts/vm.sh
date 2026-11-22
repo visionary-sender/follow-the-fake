@@ -12,12 +12,12 @@
 # name (override with FTF_VM_SLUG), so several worktrees can use the VM at once. The venv installs
 # the pip extras in FTF_VM_EXTRAS (default app,dev,fetch; the visual families need features too).
 # Nothing is computed locally: the laptop only lists files, packs them and drives ssh.
+# Runs on the VM always export FTF_OFFLINE=1 (analyze and enrichment stay offline there).
 set -euo pipefail
 
-VM=${FTF_VM:-ftf-workbench}
+VM=${FTF_VM:-workbench}
 ZONE=${FTF_VM_ZONE:-europe-central2-a}
-PROJECT=${FTF_VM_PROJECT:-follow-the-fake}
-export CLOUDSDK_ACTIVE_CONFIG_NAME=${CLOUDSDK_ACTIVE_CONFIG_NAME:-follow-the-fake}
+PROJECT=${FTF_VM_PROJECT:-${FTF_GCP_PROJECT:?set FTF_GCP_PROJECT or FTF_VM_PROJECT}}
 
 usage() { sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 [ $# -ge 1 ] || usage
@@ -37,6 +37,9 @@ case "$slug" in ''|.|..|-*) echo "vm.sh: bad slug '$slug'" >&2; exit 2 ;; esac
 # Runs on the VM as: bash -c "$remote" ftf-vm <slug> <mode> [args...]; the tarball is on stdin.
 read -r -d '' remote <<'REMOTE' || true
 set -euo pipefail
+# FTF_OFFLINE=1 on our VMs, so analyze, enrichment and build-base make no lookups there.
+# It does not guard `ftf fetch` or the scanner; live fetching stays off the workbench by rule.
+export FTF_OFFLINE=1
 slug=$1; mode=$2; shift 2
 w=/work/$slug
 mkdir -p "$w"
@@ -93,7 +96,7 @@ ssh_vm() {
     --ssh-flag=-T --command "$1"
 }
 
-# The licence table covers the `features` extra too (HACK-80), so `licences` installs it by default.
+# The licence table covers the `features` extra too, so `licences` installs it by default.
 extras=${FTF_VM_EXTRAS:-app,dev,fetch}
 if [ "$mode" = licences ]; then extras=${FTF_VM_EXTRAS:-app,dev,fetch,features}; fi
 remote_cmd="FTF_VM_EXTRAS=$(printf '%q' "$extras") bash -c $(printf '%q' "$remote") ftf-vm $(printf '%q ' "$slug" "$mode" "$@")"
