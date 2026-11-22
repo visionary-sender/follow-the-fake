@@ -98,3 +98,15 @@ def test_public_service_in_dataset_is_not_a_hit(check, tmp_path, domain):
     path.write_text(json.dumps(ds), encoding="utf-8")
     root = _tree(tmp_path, {"src/a.py": f"HOST = '{domain}'\n"})
     assert check.check(path, root, None) == 0
+
+
+@pytest.mark.parametrize("lookalike", ["bing.com.fixture-lookalike.net", "clarity.ms.fixture-lookalike.net", "taboola.com-mirror.fixture-lookalike.net"])
+def test_lookalike_of_public_service_is_still_a_hit(check, tmp_path, lookalike):
+    ds = {"incidents": [{"id": "demo-1", "indicators": [
+        {"kind": "script_url", "layer": "landing", "value": f"https://{lookalike}/tag.js"},
+        {"kind": "aio_landing", "layer": "landing", "value": VALUE},
+    ]}]}
+    path = tmp_path / "dataset.json"
+    path.write_text(json.dumps(ds), encoding="utf-8")
+    root = _tree(tmp_path, {"src/a.py": f"HOST = '{lookalike}'\n"})
+    assert check.check(path, root, None) == 1
