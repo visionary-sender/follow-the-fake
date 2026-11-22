@@ -8,7 +8,10 @@ Supported inputs, each also accepted on its own:
 4. a HAR file; 5. an MHTML file (kept as one ``mhtml`` artefact; only its MIME headers are read);
 6. a bare ``http(s)://`` URL (fetched only with ``fetch=True`` and the HACK-17 fetcher installed);
 7. a fetcher or scanner capture folder (``capture.json`` inside) or a run folder holding several
-   (:mod:`ftf.ingest.manifests`).
+   (:mod:`ftf.ingest.manifests`);
+8. a text file that is mostly http(s) URLs, one per line (a ``.txt`` whose non-empty lines are at
+   least half URLs): one bare-URL incident per distinct URL (:func:`url_list`). The organiser root
+   also picks up its top-level ``scam_links*.txt``.
 
 Any other single file (a screenshot, a video, a yt-dlp ``.info.json``) becomes a one-artefact capture.
 File names are untrusted: they are only ever used as path components and sanitised ids.
@@ -16,6 +19,7 @@ File names are untrusted: they are only ever used as path components and sanitis
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import os
 import time
@@ -26,7 +30,7 @@ from pathlib import Path
 from ftf.contract import ArtefactType, MissingModality, Stage
 from ftf.indicators import redact
 from ftf.ingest import files as F
-from ftf.ingest import ids, manifests
+from ftf.ingest import ids, manifests, urllist
 from ftf.ingest.model import RawArtefact, RawCapture, RawIncident
 
 ORGANISER_SOURCES = {"do_udostepnienia", "BACKUP"}
@@ -228,9 +232,66 @@ def single_file(path: Path) -> RawIncident:
 def bare_url(url: str) -> RawIncident:
     data = url.encode("utf-8")
     art = RawArtefact(rel="url", type=ArtefactType.url, sha256=hashlib.sha256(data).hexdigest(), size=len(data))
+    return _url_incident(art, source="input", source_ref=redact(url), url=url)
+
+
+def _url_incident(art: RawArtefact, *, source: str, source_ref: str, url: str) -> RawIncident:
     cap = RawCapture(key=ids.SINGLE_CAPTURE_KEY, artefacts=[art], stage=Stage.unknown, missing_reason=URL_MISSING_REASON)
     cap.missing = [MissingModality(modality=m, reason=URL_MISSING_REASON) for m in (ArtefactType.html, ArtefactType.har, ArtefactType.screenshot)]
-    return RawIncident(source="input", source_ref=redact(url), captures=[cap], fixed_id=ids.input_incident_id(url))
+    return RawIncident(source=source, source_ref=source_ref, captures=[cap], fixed_id=ids.input_incident_id(url))
+
+
+URL_LIST_SOURCE = "url_list"
+URL_LIST_GLOB = "scam_links*.txt"
+URL_LIST_MAX_BYTES = 16 * 1024 * 1024
+URL_LIST_MIN_SHARE = 0.5  # at least this share of a list's non-empty lines are URLs
+
+
+def is_url_list(path: Path) -> bool:
+    """A ``.txt`` file whose non-empty lines are at least half http(s) URLs, with at least one."""
+    if path.suffix.lower() != ".txt" or path.is_symlink() or not path.is_file():
+        return False
+    if path.stat().st_size > URL_LIST_MAX_BYTES:
+        return False  # too large to read as a list: kept as one text artefact, as before
+    with path.open("rb") as fh:
+        head = fh.read(URL_LIST_MAX_BYTES)
+    lines = [line for line in head.split(b"\n") if line.strip()]
+    hits = sum(urllist.url_line(line) is not None for line in lines)
+    return hits > 0 and hits >= URL_LIST_MIN_SHARE * len(lines)
+
+
+def url_list(path: Path) -> list[RawIncident]:
+    """One incident per distinct URL of a list file; other lines (header, notes) are ignored.
+
+    Ids are those of the bare-URL path (``input:<sha12 of the URL>``), so a URL gives the same
+    incident whether typed or listed. ``source`` is ``url_list`` and ``source_ref`` the file name.
+    Each url artefact names the list file (``path``) and carries the URL's digest, which is how
+    the readers in :mod:`ftf.indicators` find the URL's own line again.
+    """
+    if path.is_symlink():
+        raise ValueError(f"refusing to follow a symlink input: {path}")
+    if path.stat().st_size > URL_LIST_MAX_BYTES:
+        raise ValueError(f"{path.name}: URL list larger than {URL_LIST_MAX_BYTES} bytes")
+    name = _nfc(path.name)
+    out: list[RawIncident] = []
+    seen: set[str] = set()
+    for url in urllist.urls(path.read_bytes()):
+        if url in seen:
+            continue
+        seen.add(url)
+        data = url.encode("utf-8")
+        art = RawArtefact(rel=name, type=ArtefactType.url, path=path, sha256=urllist.digest(url), size=len(data))
+        out.append(_url_incident(art, source=URL_LIST_SOURCE, source_ref=name, url=url))
+    return out
+
+
+def _top_url_lists(folder: Path) -> list[RawIncident]:
+    """The organiser root's top-level ``scam_links*.txt`` files, read as URL lists."""
+    out: list[RawIncident] = []
+    for p in _listdir(folder):
+        if p.is_file() and fnmatch.fnmatch(p.name.lower(), URL_LIST_GLOB) and is_url_list(p):
+            out.extend(url_list(p))
+    return out
 
 
 def fetch_available() -> bool:
@@ -288,8 +349,8 @@ def load(item: str | Path, *, fetch: bool = False, fetch_dir: Path | None = None
                              "expected the v1 layout (HACK-20): <out>/<stamp>-<source>-<id>/{capture.json,ad.json,creative-<n>.<ext>}")
         subs = [p for p in _listdir(path) if p.is_dir()]
         if subs and all(organiser_source(p) for p in subs):  # the raw data root itself
-            return [inc for p in subs for inc in organiser_root(p, organiser_source(p))]
+            return [inc for p in subs for inc in organiser_root(p, organiser_source(p))] + _top_url_lists(path)
         return [case_folder(path, organiser_source(path.parent))]
     if path.is_file():
-        return [single_file(path)]
+        return url_list(path) if is_url_list(path) else [single_file(path)]
     raise FileNotFoundError(f"input not found: {item}")

@@ -34,6 +34,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         help="load inputs into contract captures (and extract indicators)",
         description=(
             "Load organiser dataset roots, case folders, saved HTML pages, HAR or MHTML files, bare URLs, "
+            "URL lists (.txt, one URL per line), "
             "fetcher and scanner capture folders or run folders into one contract Dataset. Captured files "
             "are parsed as inert data; nothing is fetched unless --fetch is given (needs the ftf.fetch extra)."
         ),
