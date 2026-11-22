@@ -247,6 +247,9 @@ def test_ocr_timeout_env(monkeypatch):
     assert ocr_timeout() == 600
     monkeypatch.setenv("FTF_OCR_TIMEOUT", "7")
     assert ocr_timeout() == 7
+    for bad in ("10m", "0", "-5", ""):
+        monkeypatch.setenv("FTF_OCR_TIMEOUT", bad)
+        assert ocr_timeout() == 600
 
 
 def test_ocr_timeout_is_skipped_with_warning_and_other_families_run(tmp_path, monkeypatch, caplog):

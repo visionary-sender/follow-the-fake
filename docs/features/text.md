@@ -43,10 +43,12 @@ sets, with a standard error of about 0.044.
 - **OCR.** Tesseract 5 (`pol+eng`, `--psm 3`) runs as a subprocess. Its input is a greyscale
   copy of the image, upscaled to at least 1400 px wide (at most 3×). Scaling large screenshots down to
   2000 px was measured and dropped: it removed OCR text on two of six inputs (−1.5% and −9% characters). Each Tesseract call may run for
-  `FTF_OCR_TIMEOUT` seconds (default 600). When it runs out, that image's OCR is skipped, one
+  `FTF_OCR_TIMEOUT` seconds (default 600; a value that is not a positive integer falls back to 600; the
+  faces fallback OCR uses the same setting, previously 120 s). When it runs out, that image's OCR is skipped, one
   warning is logged per run, and its capture gets an `ocr_skipped` indicator. Page text, templates,
-  embeddings and the other families still run. The video frame timeouts (ffmpeg and ffprobe) are
-  `FTF_VIDEO_TIMEOUT` seconds (default 900). A line is kept when its mean
+  embeddings and the other families still run. The ffmpeg frame call timeout is
+  `FTF_VIDEO_TIMEOUT` seconds (default 900); ffprobe keeps 60 s. In a video keyframe, a timed-out OCR is
+  logged and that keyframe is skipped (no indicator). A line is kept when its mean
   word confidence is at least 60. `ocr_text` keeps platform chrome such as "Sponsorowane" or
   "Identyfikator biblioteki". Lines made only of chrome phrases and OCR debris are removed (`ocr.content_lines`) from the text that
   feeds templates, embeddings and keywords.

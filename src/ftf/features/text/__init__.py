@@ -116,6 +116,9 @@ def features_for_image(path: Path) -> list[Feature]:
 
     try:
         lines = ocr_lines(Path(path))
+    except subprocess.TimeoutExpired:  # keyframe: logged only, no capture to attach an indicator to
+        log.warning("OCR timed out on %s (FTF_OCR_TIMEOUT); keyframe skipped", Path(path).name)
+        return []
     except Exception as e:  # no tesseract, or an unreadable / hostile image
         log.warning("OCR failed on %s: %s: %s", Path(path).name, type(e).__name__, e)
         return []

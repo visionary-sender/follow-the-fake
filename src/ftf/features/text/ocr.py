@@ -53,8 +53,15 @@ def threads() -> int:
 
 
 def ocr_timeout() -> int:
-    """Seconds allowed for one Tesseract call (``FTF_OCR_TIMEOUT``, default 600)."""
-    return int(os.environ.get("FTF_OCR_TIMEOUT", DEFAULT_TIMEOUT_S))
+    """Seconds allowed for one Tesseract call (``FTF_OCR_TIMEOUT``, default 600).
+
+    A value that is not a positive integer falls back to the default, so a typo never fails analysis.
+    """
+    try:
+        v = int(os.environ.get("FTF_OCR_TIMEOUT", DEFAULT_TIMEOUT_S))
+    except ValueError:
+        return DEFAULT_TIMEOUT_S
+    return v if v >= 1 else DEFAULT_TIMEOUT_S
 
 
 def _prepare(src: Path, dst: Path) -> Path:

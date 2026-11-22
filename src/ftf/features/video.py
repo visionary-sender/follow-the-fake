@@ -63,7 +63,16 @@ THUMB = 64  # dedup compares grayscale thumbnails of this size
 DEDUP_DIFF = 2.0  # mean absolute grey-level difference (0-255) below which frames are duplicates
 MAX_SIDE = 1600  # longest side of a written keyframe (enough for OCR of phone recordings)
 MAX_SECONDS = 1800  # decode at most this much of any video
-TIMEOUT = int(os.environ.get("FTF_VIDEO_TIMEOUT", 900))  # seconds per ffmpeg / ffprobe call
+def _video_timeout() -> int:
+    try:
+        v = int(os.environ.get("FTF_VIDEO_TIMEOUT", 900))
+    except ValueError:
+        return 900
+    return v if v >= 1 else 900
+
+
+TIMEOUT = _video_timeout()  # seconds per ffmpeg call (FTF_VIDEO_TIMEOUT)
+PROBE_TIMEOUT = 60  # seconds per ffprobe call
 
 # Containers ffmpeg may open: no playlists (hls, concat) that could pull in other files.
 FORMATS = "mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts"
@@ -118,7 +127,7 @@ def probe(path: Path) -> Optional[VideoInfo]:
         "-protocol_whitelist", "file", "-format_whitelist", FORMATS, f"file:{path}",
     ]
     try:
-        r = _run(cmd, timeout=TIMEOUT)
+        r = _run(cmd, timeout=PROBE_TIMEOUT)
     except subprocess.TimeoutExpired:
         return None
     if r.returncode != 0:
