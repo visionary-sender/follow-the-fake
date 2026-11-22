@@ -47,10 +47,19 @@ PERSONAL_ALLOWED = {
     "tests/indicators/test_platform.py": "invented phone and e-mail literals in normaliser tests",
     "tests/enrich/test_enrich_sources.py": "invented e-mail literal in certificate-parsing test",
 }
+# Test files whose generic credential literals (assignments, URLs) are invented. Private keys and
+# cloud or forge tokens are still checked everywhere. Path -> reason.
+SECRET_ALLOWED = {
+    "tests/indicators/test_domains.py": "invented access-token literal in URL-stripping test",
+    "tests/indicators/test_kit.py": "invented access-token literal in URL-stripping test",
+    "tests/fetch/test_guard_upstream.py": "invented proxy credential in guard test",
+}
 RAW_EXTENSIONS = {
     ".har": "HAR", ".mhtml": "MHTML", ".mht": "MHTML", ".warc": "WARC", ".pdf": "PDF",
     ".png": "image", ".jpg": "image", ".jpeg": "image", ".gif": "image", ".webp": "image",
     ".bmp": "image", ".html": "HTML", ".htm": "HTML",
+    ".zip": "archive", ".tar": "archive", ".tgz": "archive", ".gz": "archive", ".7z": "archive",
+    ".rar": "archive", ".mp4": "video", ".webm": "video", ".mov": "video",
 }
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}", re.I)
 PHONE_RE = re.compile(r"(?<![\w.])(?:\+48[ \-]?\d{9}|(?:\+48[ \-]?)?\d{3}[ \-]\d{3}[ \-]\d{3})(?![\w])")
@@ -59,9 +68,13 @@ SECRET_RES = (
     re.compile(r"\bAKIA[0-9A-Z]{16}\b|\bAIza[0-9A-Za-z_\-]{35}\b"),
     re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}\b|\bgithub_pat_[A-Za-z0-9_]{22,}\b"),
     re.compile(r"\bxox[abprs]-[A-Za-z0-9\-]{10,}\b|\bglpat-[A-Za-z0-9_\-]{20,}\b"),
+)
+# Generic credential shapes; a placeholder (<name>, $(command), {name}) is not a value.
+SECRET_GENERIC_RES = (
     re.compile(
-        r"""(?i)(?:password|passwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token)["']?\s*[:=]\s*["'][^"'\s]{8,}["']"""
+        r"""(?i)[\w\-]*(?:password|passwd|secret|token|api[_-]?key)[\w\-]*["']?\s*[:=]\s*["'](?![$<{])[^"'\s]{8,}["']"""
     ),
+    re.compile(r"""[a-z][a-z0-9+.\-]*://(?![<{$])[^/\s:@'"]+:(?![<{$])(?!password@|pass@|secret@|changeme@)[^/\s@'"]{4,}@""", re.I),
 )
 
 
@@ -84,26 +97,30 @@ def _dataset_contacts(dataset: dict) -> tuple[set[str], set[str]]:
             if not isinstance(value, str):
                 continue
             emails |= {m.lower() for m in EMAIL_RE.findall(value) if not _reserved(m)}
-            phones |= {re.sub(r"\D", "", m)[-9:] for m in PHONE_RE.findall(value)}
+            for run in re.findall(r"\+?\d[\d \-]{6,}\d", value):
+                digits = re.sub(r"\D", "", run)
+                if re.fullmatch(r"(?:0{1,2}48|48)?\d{9}|0\d{9}", digits):
+                    phones.add(digits[-9:])
     return emails, phones
 
 
 def _rules(dataset: dict) -> tuple[list[tuple[str, re.Pattern]], int, int]:
     emails, phones = _dataset_contacts(dataset)
-    rules: list[tuple[str, re.Pattern]] = [("personal", EMAIL_RE), ("personal", PHONE_RE)]
+    rules: list[tuple[str, re.Pattern]] = [("personal-generic", EMAIL_RE), ("personal-generic", PHONE_RE)]
     rules += [("secret", pattern) for pattern in SECRET_RES]
+    rules += [("secret-generic", pattern) for pattern in SECRET_GENERIC_RES]
     if emails or phones:
         parts = [re.escape(e) for e in sorted(emails)] + [r"[ \-]?".join(p) for p in sorted(phones)]
-        rules.append(("personal", re.compile(r"(?<![\w@])(?:" + "|".join(parts) + r")(?!\w)", re.I)))
+        rules.append(("personal-dataset", re.compile(r"(?<![\w@])(?:" + "|".join(parts) + r")(?!\w)", re.I)))
     return rules, len(emails), len(phones)
 
 
 def _line_hits(line: str, rules):
     for cls, pattern in rules:
         for m in pattern.finditer(line):
-            if cls == "personal" and "@" in m.group(0) and _reserved(m.group(0)):
+            if cls.startswith("personal") and "@" in m.group(0) and _reserved(m.group(0)):
                 continue
-            yield cls, m.group(0)
+            yield cls.split("-")[0], m.group(0)
 
 
 def _raw_type(path: Path, data: bytes) -> str | None:
@@ -148,6 +165,15 @@ def check(dataset_path: Path, root: Path, messages: Path | None) -> int:
     except (OSError, ValueError) as exc:
         print(f"check_no_private_data: cannot read the dataset: {exc.__class__.__name__}", file=sys.stderr)
         return 2
+    values = [
+        ind.get("value")
+        for inc in dataset.get("incidents", [])
+        for ind in inc.get("indicators", [])
+        if isinstance(ind.get("value"), str)
+    ]
+    if not values:
+        print("check_no_private_data: the dataset has no indicator values; refusing to pass", file=sys.stderr)
+        return 2
     rules, n_emails, n_phones = _rules(dataset)
     print(f"dataset contacts: {n_emails} e-mail, {n_phones} phone number(s)")
     hits = 0
@@ -158,16 +184,20 @@ def check(dataset_path: Path, root: Path, messages: Path | None) -> int:
         kind = _raw_type(path, data)
         if kind and rel not in RAW_ALLOWED:
             hits += 1
-            print(f"{rel}:1: raw (digest {_digest(kind)})")
+            print(f"{rel}:1: raw (digest {_digest(rel + kind)})")
         if b"\0" in data[:8192]:
             continue
         files += 1
-        file_rules = [r for r in rules if r[0] == "secret"] if rel in PERSONAL_ALLOWED else rules
+        file_rules = rules
+        if rel in PERSONAL_ALLOWED:
+            file_rules = [r for r in file_rules if r[0] != "personal-generic"]
+        if rel in SECRET_ALLOWED:
+            file_rules = [r for r in file_rules if r[0] != "secret-generic"]
         for lineno, line in enumerate(data.decode("utf-8", "replace").splitlines(), start=1):
             for cls, matched in _line_hits(line, file_rules):
                 hits += 1
                 print(f"{rel}:{lineno}: {cls} (digest {_digest(matched)})")
-    print(f"tracked files scanned: {files}")
+    print(f"files scanned: {files} (walked tree, excluding ignored build and data folders)")
     if messages is not None:
         text = messages.read_text(encoding="utf-8", errors="replace")
         for lineno, line in enumerate(text.splitlines(), start=1):

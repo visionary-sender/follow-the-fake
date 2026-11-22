@@ -83,7 +83,7 @@ def test_phone_number_in_tree_is_a_personal_hit(check, tmp_path, capsys):
     assert check.check(_dataset(tmp_path), root, None) == 1
     out = capsys.readouterr().out
     assert "src/a.py:1: personal" in out
-    assert "512" not in out
+    assert "512345" not in out
 
 
 def test_dataset_contact_is_searched_for_in_any_format(check, tmp_path, capsys):
@@ -178,9 +178,65 @@ def test_commit_messages_are_scanned(check, tmp_path, capsys):
     assert check.check(_dataset(tmp_path), root, messages) == 1
     out = capsys.readouterr().out
     assert "commit-messages:1: personal" in out
-    assert "512" not in out
+    assert "512345" not in out
 
 
 def test_missing_dataset_is_an_error(check, tmp_path):
     root = _tree(tmp_path, {"src/a.py": "x = 1\n"})
     assert check.check(tmp_path / "absent.json", root, None) == 2
+
+
+def test_dataset_phone_with_zero_prefix_is_searched_for(check, tmp_path, capsys):
+    dataset = _dataset(tmp_path, extra=[{"kind": "ad_caption", "layer": "creative", "value": "call 0512 345 678"}])
+    root = _tree(tmp_path, {"src/c.txt": "512345678\n"})
+    assert check.check(dataset, root, None) == 1
+    assert "src/c.txt:1: personal" in capsys.readouterr().out
+
+
+def test_dataset_contact_in_allowlisted_fixture_is_still_a_hit(check, tmp_path, capsys):
+    dataset = _dataset(tmp_path, extra=[{"kind": "ad_caption", "layer": "creative", "value": CONTACT_EMAIL}])
+    root = _tree(tmp_path, {"tests/enrich/test_enrich_sources.py": f"x = '{CONTACT_EMAIL}'\n"})
+    assert check.check(dataset, root, None) == 1
+    assert "tests/enrich/test_enrich_sources.py:1: personal" in capsys.readouterr().out
+
+
+def test_dataset_without_indicator_values_is_an_error(check, tmp_path):
+    path = tmp_path / "empty.json"
+    path.write_text(json.dumps({"incidents": [{"id": "x", "indicators": []}]}), encoding="utf-8")
+    root = _tree(tmp_path, {"src/a.py": "x = 1\n"})
+    assert check.check(path, root, None) == 2
+
+
+def test_archive_is_a_raw_hit(check, tmp_path, capsys):
+    root = _tree(tmp_path, {"src/cases.zip": b"PK\x03\x04\x00"})
+    assert check.check(_dataset(tmp_path), root, None) == 1
+    assert "src/cases.zip:1: raw" in capsys.readouterr().out
+
+
+def test_url_with_credentials_is_a_secret_hit(check, tmp_path, capsys):
+    url = "https://svc:" + "Passw0rdValue" + "@host.example.test/x"  # assembled: invented credential
+    root = _tree(tmp_path, {"src/a.py": f"URL = '{url}'\n"})
+    assert check.check(_dataset(tmp_path), root, None) == 1
+    out = capsys.readouterr().out
+    assert "src/a.py:1: secret" in out
+    assert "Passw0rd" not in out
+
+
+def test_placeholders_are_not_secrets(check, tmp_path):
+    root = _tree(tmp_path, {
+        "docs/a.md": "PROXY=http://<user>:<password>@<host>:<port>\n",
+        "scripts/b.sh": 'GH_TOKEN="$(gh_token)"\n',
+    })
+    assert check.check(_dataset(tmp_path), root, None) == 0
+
+
+def test_invented_secret_fixture_keeps_private_key_check(check, tmp_path, capsys):
+    header = "-----BEGIN " + "RSA PRIVATE KEY-----"
+    token = "TOKEN = 'abcdef" + "1234567890'"  # assembled: invented token literal
+    root = _tree(tmp_path, {
+        "tests/indicators/test_kit.py": f"{token}\n{header}\n",
+    })
+    assert check.check(_dataset(tmp_path), root, None) == 1
+    out = capsys.readouterr().out
+    assert "tests/indicators/test_kit.py:2: secret" in out
+    assert "tests/indicators/test_kit.py:1" not in out
