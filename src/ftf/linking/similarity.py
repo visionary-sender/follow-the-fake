@@ -103,6 +103,27 @@ def jaccard_similarity(a: str, b: str) -> Optional[float]:
     return len(sa & sb) / len(sa | sb)
 
 
+_HEX_WORD = re.compile(r"^[0-9a-fA-F]+$")
+TEMPLATE_WORDS = 128  # ftf.features.text.template.NUM_PERM
+
+
+def hex_minhash_tokens(value: str) -> Optional[str]:
+    """Visual's `text_template` value (one hex string of 128 big-endian uint32 words) as the
+    space-separated tokens `minhash_similarity` reads; None unless it is exactly that format."""
+    v = value.strip().lower()
+    if len(v) != 8 * TEMPLATE_WORDS or not _HEX_WORD.match(v):
+        return None
+    return " ".join(v[i:i + 8] for i in range(0, len(v), 8))
+
+
+def text_template_similarity(a: str, b: str) -> Optional[float]:
+    """MinHash similarity of two Visual `text_template` values (name-masked text shingles)."""
+    ta, tb = hex_minhash_tokens(a), hex_minhash_tokens(b)
+    if ta is None or tb is None:
+        return None
+    return minhash_similarity(ta, tb)
+
+
 # --------------------------------------------------------------------------- views
 
 
@@ -143,6 +164,7 @@ for _v in (
     View("image_dhash", "value", "hamming", 0.0, 1.0, hamming_similarity, multi_value=True),
     View("image_pdq", "value", "hamming", 0.0, 1.0, hamming_similarity, multi_value=True),
     View("text_minhash", "value", "minhash", 0.0, 1.0, minhash_similarity),
+    View("text_template", "value", "minhash", 0.0, 1.0, text_template_similarity),
     View("dom_minhash", "value", "minhash", 0.0, 1.0, minhash_similarity),
     View("dom_shingles", "value", "jaccard", 0.0, 1.0, jaccard_similarity),
 ):
