@@ -7,9 +7,6 @@ import pytest
 from ftf.contract.fixture import fixture_dir
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "make_campaign_graph.py"
-_spec = importlib.util.spec_from_file_location("make_campaign_graph", SCRIPT)
-mcg = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(mcg)
 
 
 def _png_width(path: Path) -> int:
@@ -23,6 +20,10 @@ def test_campaign_graph_png_is_1200_px_wide(tmp_path):
     dataset = fixture_dir() / "dataset.json"
     if not dataset.exists():
         pytest.skip("fixture absent (see docs/contract.md)")
+    # Imported after the skip: the `app` and `dev` extras (networkx, matplotlib) may be absent.
+    spec = importlib.util.spec_from_file_location("make_campaign_graph", SCRIPT)
+    mcg = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mcg)
     from ftf.contract import Dataset
 
     ds = Dataset.from_json(dataset.read_bytes())

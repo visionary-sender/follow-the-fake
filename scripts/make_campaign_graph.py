@@ -8,13 +8,14 @@ hash) is drawn. Graph data comes from `ftf.app.relations`; only the drawing live
 
     python3 -I scripts/make_campaign_graph.py DATASET.json OUT.png [--campaign ID]
 
-Run it in the project venv with the app and dev extras, on the cloud workbench (see docs/contract.md).
+Run it in the project venv with the app and dev extras, on a cloud VM (see docs/contract.md).
 Needs the `app` extra (networkx) and the `dev` extra (matplotlib).
 """
 
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 
 import matplotlib
@@ -41,9 +42,17 @@ def incident_of(ds: Dataset) -> dict[str, str]:
     return {c.id: inc.id for inc in ds.incidents for c in inc.captures}
 
 
+CASE_FOLDER = re.compile(r"[A-Za-z]{0,2}\d{1,4}")
+
+
 def case_label(ds: Dataset) -> dict[str, str]:
-    """Incident id -> case folder number (the folder name the submission came from)."""
-    return {inc.id: (inc.source_ref or inc.id) for inc in ds.incidents}
+    """Incident id -> case folder number. Only folder-shaped names are drawn; anything else (URLs,
+    keywords, hashes, ad-library ids) becomes a neutral index so no captured value reaches the figure."""
+    labels: dict[str, str] = {}
+    for n, inc in enumerate(sorted(ds.incidents, key=lambda i: i.id), 1):
+        ref = inc.source_ref or ""
+        labels[inc.id] = ref if CASE_FOLDER.fullmatch(ref) else f"I{n}"
+    return labels
 
 
 def pick_campaign(ds: Dataset, threshold: float) -> Campaign:
@@ -97,7 +106,8 @@ LABEL_OFFSET = (0.0, 0.07, -0.07, 0.14, -0.14)
 
 
 def _place_edge_labels(ax, fig, g: nx.Graph, pos: dict) -> None:
-    """Put each edge label in the first free slot; no label may cover a node or another label."""
+    """Put each edge label in the first free slot that covers no node and no other label. When no slot
+    is free the label goes at the midpoint, so it may overlap; the figure still shows every edge."""
     from matplotlib.transforms import Bbox
 
     renderer = fig.canvas.get_renderer()
