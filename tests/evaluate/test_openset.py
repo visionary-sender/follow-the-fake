@@ -34,12 +34,15 @@ def test_loo_item_full(results):
 
 def test_loco_full(results):
     loco = _by(results, "loco")
-    for g, inc in [("A", "ia1"), ("A", "ia2"), ("A", "ia3"), ("B", "ib1"), ("C", "ic1"), ("D", "id1"), ("D", "id2")]:
+    for g, inc in [("A", "ia1"), ("A", "ia2"), ("A", "ia3"), ("B", "ib1"), ("B", "ib2"), ("C", "ic1"), ("D", "id1")]:
         r = loco[(g, inc)]
         assert r.outcome == "new" and r.known_groups == [], (g, inc)
-    # Folder-2 style incident: removing A also removes mix/b, which still belongs to B.
-    mix = loco[("A", "imix")]
-    assert mix.known_groups == ["B"] and mix.outcome == "correct"
+    assert not any(r.known_groups for r in loco.values())
+    # Mixed incident: removing A also removes mix/b, which still belongs to B. It is reported
+    # apart as loco_mixed, with the group that stays in the reference as its known group.
+    mixed = _by(results, "loco_mixed")
+    assert mixed[("A", "imix")].known_groups == ["B"] and mixed[("A", "imix")].outcome == "correct"
+    assert mixed[("B", "imix")].known_groups == ["A"]
 
 
 def test_degraded_modes(results):
@@ -59,9 +62,12 @@ def test_summary_uses_raw_counts(results):
     assert full["items"] == 6 and full["assigned"] == "6 of 6" and full["false_accepts"] == "0 of 6"
     assert full["median_evidence_capacity_bits"] == 30.0
     loco = rows[("loco", FULL)]
-    # A: ia1-3 + imix, B: ib1-2 + imix, C: ic1, D: id1-2. imix comes out "correct" twice.
-    assert loco["items"] == 10 and loco["new"] == 8 and loco["false_accepts"] == "0 of 10"
-    assert len(rows) == 2 * 6  # two protocols x (full + five modes)
+    # A: ia1-3, B: ib1-2, C: ic1, D: id1 (id2 is its duplicate, held out with it). All come out new.
+    assert loco["items"] == 7 and loco["new"] == 7 and loco["false_accepts"] == "0 of 7"
+    # imix holds a group that stays in the reference, so it is reported apart, once per group.
+    mixed = rows[("loco_mixed", FULL)]
+    assert mixed["items"] == 2 and mixed["correct"] == 2 and mixed["false_accepts"] == "0 of 2"
+    assert len(rows) == 3 * 6  # three protocols x (full + five modes)
     json.dumps(summarise(results))
     json.dumps(to_jsonable(results))
 

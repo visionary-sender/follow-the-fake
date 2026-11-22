@@ -10,15 +10,18 @@ Protocols (plans 07 §4 E2, 05 §5):
 - loo_item: hold out one incident whose groups keep members elsewhere, cluster the rest,
   assign the held-out incident.
 - loco: hold out every incident that holds a capture of one group, cluster the rest, assign
-  each held-out incident. They should come out `new`.
+  each held-out incident. Its known groups are empty, so these items should come out `new`.
+- loco_mixed: a loco item that also holds captures of a group that stays in the reference
+  (one incident mixes two groups). It has known groups, so it is reported apart from loco:
+  `correct` when the chosen campaign maps to one of them, `wrong` otherwise.
 
-Unit of hold-out is the incident, because `assign` takes an incident. An incident can hold
-captures of several groups (folder 2 mixes A1 and B). It is held out once per protocol run:
-in loo_item it is one item whose *known groups* are all its groups that keep a member in the
-reference; in loco, holding out group g also removes the other captures of the incidents that
-hold g. Either way an `assign` is correct when the chosen campaign maps to one of the item's
-known groups (see `campaign_group`), and wrong otherwise. Exact duplicates (`duplicate_of`
-either way) of a held-out capture are held out with it, so a re-capture cannot leak the answer.
+Unit of hold-out is the incident, because `assign` takes an incident. One incident can mix
+two groups. It is held out once per protocol run: in loo_item it is one item whose *known
+groups* are all its groups that keep a member in the reference; in loco, holding out group g
+also removes the other captures of the incidents that hold g. Either way an `assign` is
+correct when the chosen campaign maps to one of the item's known groups (see `campaign_group`),
+and wrong otherwise. Exact duplicates (`duplicate_of` either way) of a held-out capture are
+held out with it, at capture level (see `hold_out`), so a re-capture cannot leak the answer.
 
 Report raw counts ("3 of 15"), never a single accuracy number; ~15 items is a regression suite,
 not a benchmark.
@@ -40,6 +43,7 @@ from ftf.evaluate.perturb import (
     decision_diff,
     degrade_incident,
     expected_met,
+    hold_out,
     link_violations,
     replace_incidents,
     with_incidents,
@@ -109,22 +113,6 @@ def campaign_group(capture_ids: Iterable[str], group_of: Mapping[str, set[str]])
     return sorted(g for g, n in votes.items() if n == top)
 
 
-def _hold_out_set(ds: Dataset, incident_ids: Iterable[str]) -> set[str]:
-    """Incident ids to remove: the given ones plus incidents whose every capture is an exact
-    duplicate of (or the canonical of) a capture being removed."""
-    drop = set(incident_ids)
-    canon = {c.id: (c.duplicate_of or c.id) for i in ds.incidents for c in i.captures}
-    while True:
-        roots = {canon[c.id] for i in ds.incidents if i.id in drop for c in i.captures}
-        more = {
-            i.id for i in ds.incidents
-            if i.id not in drop and all(canon[c.id] in roots for c in i.captures)
-        }
-        if not more:
-            return drop
-        drop |= more
-
-
 def _judge(
     *,
     protocol: str,
@@ -143,6 +131,8 @@ def _judge(
     true = sorted({g for c in incident.captures for g in group_of.get(c.id, ())})
     ref_caps = {c.id for i in rest.incidents for c in i.captures}
     known = sorted(g for g in true if any(g in group_of.get(c, ()) for c in ref_caps))
+    if protocol == "loco" and known:
+        protocol = "loco_mixed"  # a LOCO item with a known group is not a `new` case
     camps = {c.id: c for c in base.campaigns}
 
     def maps(cid: str | None) -> list[str]:
@@ -177,7 +167,7 @@ def _judge(
 # --------------------------------------------------------------------------------------------
 
 def _runs(ds: Dataset, groups: Mapping[str, Sequence[str]], protocols: Sequence[str]):
-    """Yield (protocol, held_out label, incident ids to test, incident ids to remove)."""
+    """Yield (protocol, held_out label, incident ids to test, reference without them)."""
     unknown = set(protocols) - set(PROTOCOLS)
     if unknown:
         raise ValueError(f"unknown protocols {sorted(unknown)}")
@@ -188,15 +178,15 @@ def _runs(ds: Dataset, groups: Mapping[str, Sequence[str]], protocols: Sequence[
             gs = {g for c in inc.captures for g in group_of.get(c.id, ())}
             if not gs:
                 continue
-            drop = _hold_out_set(ds, [inc.id])
-            rest_caps = {c.id for i in ds.incidents if i.id not in drop for c in i.captures}
+            rest = hold_out(ds, [inc.id], name=f"{ds.name}-loo_item-{inc.id}")
+            rest_caps = {c.id for i in rest.incidents for c in i.captures}
             if any(set(groups[g]) & rest_caps for g in gs):
-                yield "loo_item", inc.id, [inc.id], drop
+                yield "loo_item", inc.id, [inc.id], rest
     if "loco" in protocols:
         for g, caps in groups.items():
             members = sorted({inc_of[c] for c in caps if c in inc_of})
             if members:
-                yield "loco", g, members, _hold_out_set(ds, members)
+                yield "loco", g, members, hold_out(ds, members, name=f"{ds.name}-loco-{g}")
 
 
 def run_openset(
@@ -222,8 +212,7 @@ def run_openset(
     group_of = _group_of(groups)
     by_id = {i.id: i for i in dataset.incidents}
     results: list[ItemResult] = []
-    for protocol, label, tested, drop in _runs(dataset, groups, protocols):
-        rest = with_incidents(dataset, drop=drop, name=f"{dataset.name}-{protocol}-{label}")
+    for protocol, label, tested, rest in _runs(dataset, groups, protocols):
         base = engine.link_dataset(rest)
         for iid in tested:
             for mode in modes:
@@ -278,6 +267,7 @@ def threshold_sweep(results: Iterable[ItemResult], mode: str = FULL) -> list[dic
     At threshold t an item is accepted into its best candidate if that candidate's score >= t;
     this re-decides from the candidates and ignores the engine's own decision. Known items are
     loo_item results with a known group; unknown items are loco results with no known group.
+    loco_mixed results are in neither set and are not swept.
     correct: known items whose accepted best candidate is right; false accepts: unknown items
     accepted, plus known items accepted into a wrong campaign. Items without candidates are
     never accepted. Empty if no item exposes candidate scores.
@@ -356,8 +346,8 @@ def run_distractors(
             r.violations += decision_diff(base, after)
             for inc in d.incidents:
                 orig = next(i for i in plain.incidents if i.id == inc.id)
-                rest_before = engine.link_dataset(with_incidents(plain, drop=[inc.id]))
-                rest_after = engine.link_dataset(with_incidents(swapped, drop=[inc.id]))
+                rest_before = engine.link_dataset(hold_out(plain, [inc.id]))
+                rest_after = engine.link_dataset(hold_out(swapped, [inc.id]))
                 a0 = engine.link_incident(rest_before, orig, relation=relation)
                 a1 = engine.link_incident(rest_after, inc, relation=relation)
                 r.decisions[inc.id] = a1.assignment.decision.value
