@@ -120,10 +120,13 @@ HAND_TABLE = WeightTable(
         # flow: template-level config (sold/copied with the kit): full template, weak campaign
         "aio_flow": _K(L.tenant, 3.0, relations=_row(1.0, 0.0, 0.25, 0.25, 1.0)),
         "aio_owner": _K(L.owner, 6.0, single_valued=True, private=True),  # one owner per page
-        # campaign id sits in Ingestion's owner layer, so it only matters when the owner id is absent;
-        # not single-valued: one owner runs several campaigns, and a differing campaign is no cannot-link
-        "aio_campaign": _K(L.owner, 5.0, private=True),
-        "aio_campaign_name": _K(L.owner, 3.0),  # owner-chosen label, names repeat more than ids
+        # campaign id (Ingestion files it in the owner layer, level campaign): one per page, so a differing
+        # id under one owner is a different campaign of the same operator. Single-valued and campaign-only:
+        # a conflict row under the campaign relation, nothing under operator, and never a cannot-link
+        # (cannot-link stays tenant/owner ids, `ledger.has_private_conflict`).
+        "aio_campaign": _K(L.owner, 4.0, single_valued=True, private=True, relations=_row(0.0, 0.0, 0.0, 1.0, 1.0)),
+        # owner-chosen label of the campaign: names repeat more than ids, so no conflict; campaign-only too
+        "aio_campaign_name": _K(L.owner, 3.0, relations=_row(0.0, 0.0, 0.0, 1.0, 1.0)),
         "aio_landing": _K(L.landing, 4.0),  # landing id; multi-valued (a capture can show several)
         "aio_landing_name": _K(L.landing, 3.0),  # label of the landing, weaker than its id
         # platform constants: one term for all of them (layer max), never a private id
@@ -186,6 +189,20 @@ HAND_TABLE = WeightTable(
         # infrastructure (HACK-19 enrichment and prototype signals); shared hosting is weak
         "third_party_host": _K(L.infrastructure, 1.5),  # HACK-11: foreign host a page loads; CDNs are hubs
         "third_party_domain": _K(L.infrastructure, 1.5),  # HACK-11: its registered domain, coarser
+        # site identity (HACK-48, final names on HACK-10): in the landing layer, so the within-layer max keeps
+        # "same site" from stacking with the landing id; not single-valued (domains rotate daily: a differing
+        # domain carries nothing, no conflict penalty) and nothing about the template. landing_domain also
+        # carries the CERT listing domain. ad_display_domain (creative layer) only restates it: kept weak.
+        "landing_host": _K(L.landing, 3.0, relations=_row(0.0, 0.0, 1.0, 1.0, 1.0)),
+        "landing_domain": _K(L.landing, 2.5, relations=_row(0.0, 0.0, 1.0, 1.0, 1.0)),
+        "ad_landing_domain": _K(L.landing, 2.5, relations=_row(0.0, 0.0, 1.0, 1.0, 1.0)),
+        "ad_display_domain": _K(L.creative, 1.0, relations=_row(0.0, 0.0, 1.0, 1.0, 1.0)),
+        # redirectors and trackers on the way (tracker_instance when the URL looks like a click tracker, else
+        # infrastructure; scoring uses the indicator's own layer): can be a hub shared by unrelated operators,
+        # so not private; pre-group rarity does the rest. The chain shape sits in the landing layer.
+        "chain_host": _K(L.tracker_instance, 2.0),
+        "chain_domain": _K(L.tracker_instance, 2.0),
+        "redirect_chain_shape": _K(L.landing, 1.0, relations=_row(0.0, 0.0, 1.0, 1.0, 1.0)),
         "server_ip": _K(L.infrastructure, 1.5),
         "a_record_ip": _K(L.infrastructure, 1.5),
         "nameserver": _K(L.infrastructure, 1.5),
@@ -223,3 +240,23 @@ IGNORED_VALUES = frozenset({"unknown"})
 
 # Layers whose unknown kinds are treated as operator-private ids (fallback in `WeightTable.weight`).
 PRIVATE_LAYERS = frozenset({Layer.tenant, Layer.owner, Layer.tracker_instance, Layer.tracking_account})
+
+
+def unknown_kinds(ds, table: WeightTable = HAND_TABLE) -> dict[str, int]:
+    """Linkable kinds in `ds` without an explicit entry in `table` (they use the layer fallback), with counts."""
+    from collections import Counter
+
+    from ftf.contract.models import linkable
+
+    counts = Counter(i.kind for inc in ds.incidents for i in inc.indicators if linkable(i) and i.kind not in table.kinds)
+    return dict(sorted(counts.items()))
+
+
+def warn_unknown_kinds(ds, table: WeightTable, prog: str) -> None:
+    """One stderr line naming the kinds scored with the per-layer fallback (bounded by the within-layer max)."""
+    import sys
+
+    found = unknown_kinds(ds, table)
+    if found:
+        listed = ", ".join(f"{k} ({n})" for k, n in found.items())
+        print(f"ftf {prog}: warning: kinds without a weight entry use the layer fallback: {listed}", file=sys.stderr)
