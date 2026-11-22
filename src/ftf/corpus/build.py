@@ -304,6 +304,7 @@ def build_corpus(
     picked_fetch_dirs: list[str],
     name: str = "corpus",
     victim_dirs: list[str] | None = None,
+    egress_dirs: list[str] | None = None,
 ) -> dict:
     root = Path(root)
     incidents: list[m.Incident] = []
@@ -326,6 +327,12 @@ def build_corpus(
     if scanner:
         fetched = read_fetch_dirs(root, fetch_dirs)
         victims = read_fetch_dirs(root, victim_dirs or [])
+        # Re-fetches of the same URLs from other egress IPs (HACK-45): extra attempts, recorded in
+        # the manifest (the ingested dataset merges them with the default fetch by URL).
+        egress: dict[str, list[FetchedCapture]] = defaultdict(list)
+        for sub in egress_dirs or []:
+            for fc in read_fetch_dirs(root, [sub]).values():
+                egress[fc.requested_url].append(fc)
         files: dict[str, dict[str, m.Incident]] = {}
         for row in read_queue(root / scanner / "queue.jsonl", runs):
             if row.capture_dir:  # v1 scanner layout: one folder per item
@@ -377,6 +384,12 @@ def build_corpus(
                     "victim_category": vc.category if vc else None,
                     "victim_final_url": vc.manifest.get("final_url") if vc else None,
                     "victim_flipped_to_live": bool(vc and vc.is_page and not (fc and fc.is_page)),
+                    "egress": [
+                        {"dir": e.rel_dir.split("/", 1)[0], "capture_id": e.manifest.get("capture_id"),
+                         "profile": e.manifest.get("profile") or "egress", "outcome": e.outcome,
+                         "category": e.category, "final_url": e.manifest.get("final_url")}
+                        for e in (egress.get(url, []) if url else [])
+                    ],
                     "creatives": sum(1 for c in inc.captures for a in c.artefacts if _is_creative(a)),
                 },
             ):
@@ -463,6 +476,14 @@ def summarise(rows: list[dict]) -> dict:
         "by_corpus_kind": dict(sorted(by_kind.items())),
         "by_corpus_kind_and_source": dict(sorted(by_kind_source.items())),
         "ads_with_landing_page": sum(1 for r in rows if r["corpus_kind"] == AD_RECORD and r["has_landing_page"]),
+        "egress": {
+            "refetched": sum(1 for r in rows if r.get("egress")),
+            "live_only_via_egress": sum(
+                1 for r in rows
+                if any(e["category"] == "live" for e in r.get("egress") or [])
+                and r.get("fetch_category") != "live" and r.get("victim_category") != "live"
+            ),
+        },
         "victim_profile": {
             "refetched": sum(1 for r in rows if r.get("victim_outcome")),
             "flipped_to_live": sum(1 for r in rows if r.get("victim_flipped_to_live")),

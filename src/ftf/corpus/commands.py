@@ -79,7 +79,13 @@ def _articles(args: argparse.Namespace) -> int:
 def _tag_ingested(args: argparse.Namespace) -> int:
     from ftf.corpus.ingested import check_indicators, tag_ingested
 
-    summary = tag_ingested(Path(args.dataset), Path(args.manifest), Path(args.out))
+    from ftf.corpus.ingested import read_lines
+
+    summary = tag_ingested(
+        Path(args.dataset), Path(args.manifest), Path(args.out),
+        legit=read_lines(args.legit_list), persons=read_lines(args.person_keywords),
+        extra_listed=read_lines(args.listed_domains),
+    )
     print(json.dumps(summary, indent=2))
     check_indicators(summary, json.loads(Path(args.dataset).read_text(encoding="utf-8")))
     return 0
@@ -104,6 +110,7 @@ def _build(args: argparse.Namespace) -> int:
         picked_fetch_dirs=args.picked_fetch or [],
         name=args.name,
         victim_dirs=args.victim_fetch or [],
+        egress_dirs=args.egress_fetch or [],
     )
     print(json.dumps(summary, indent=2, ensure_ascii=False))
     return 0
@@ -133,6 +140,9 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     g.add_argument("--dataset", required=True, help="`ftf ingest` output (dataset.json)")
     g.add_argument("--manifest", required=True, help="manifest.jsonl from `ftf corpus build`")
     g.add_argument("--out", required=True, help="output corpus_kind.jsonl")
+    g.add_argument("--legit-list", help="registrable domains of regulated brokers / real brands (one per line)")
+    g.add_argument("--person-keywords", help="scanner keywords that are a person's name (one per line)")
+    g.add_argument("--listed-domains", help="extra CERT Polska listed registrable domains (one per line)")
     g.set_defaults(func=_tag_ingested)
 
     v = sub.add_parser("convert-scanner", help="rewrite a pre-v1 scanner snapshot in the v1 per-capture layout")
@@ -150,4 +160,5 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     b.add_argument("--picked", action="append", help="hand-picked must-not-link TSV list, relative to cwd or --root (repeatable)")
     b.add_argument("--picked-fetch", action="append", help="subdir of `ftf fetch` output for --picked")
     b.add_argument("--victim-fetch", action="append", help="subdir of `ftf fetch --profile victim-pl-mobile` output (repeatable)")
+    b.add_argument("--egress-fetch", action="append", help="subdir of re-fetches from other egress IPs (repeatable)")
     b.set_defaults(func=_build)

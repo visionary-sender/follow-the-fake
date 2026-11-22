@@ -409,7 +409,7 @@ def test_tag_ingested(corpus, tmp_path):
     out = tmp_path / "kinds.jsonl"
     s = tag_ingested(tmp_path / "ing.json", root / "manifest.jsonl", out)
     rows = {r["incident_id"]: r for r in map(json.loads, out.read_text().splitlines())}
-    assert s["untagged"] == 1 and s["tagged"] == 5
+    assert s["excluded"] == 1 and s["tagged"] == 5
     assert rows["fetch:cap-g"]["corpus_kind"] == "bare_domain"  # cloaked default fetch only
     assert rows["fetch:v-g"]["corpus_kind"] == "fetched_landing" and rows["fetch:v-g"]["profiles"] == ["victim-pl-mobile"]
     assert {i["corpus_incident_id"] for i in rows["fetch:cap-lp"]["corpus_items"]} == {"adlib:meta-1", "adlib:meta-2"}
@@ -521,7 +521,7 @@ def test_tag_ingested_scanner_items_and_check(corpus, tmp_path):
     assert rows["adlib:meta-1"]["corpus_kind"] == "ad_record"
     assert rows["certpl:dead.example"]["corpus_kind"] == "bare_domain"
     assert rows["fetch:cap-live"]["corpus_kind"] == "fetched_landing"
-    assert s["untagged"] == 0 and s["indicators_by_layer"] == {"creative": 1, "kit": 2}
+    assert s["excluded"] == 0 and s["indicators_by_layer"] == {"creative": 1, "kit": 2}
     check_indicators(s, ing)
     empty = {"incidents": [{"id": "fetch:x", "captures": [{"id": "fetch:x:c1", "observed": "live"}], "indicators": []}]}
     with pytest.raises(SystemExit):
@@ -542,4 +542,53 @@ def test_tag_ingested_merged_refetch(corpus, tmp_path):
     out = tmp_path / "k.jsonl"
     s = tag_ingested(tmp_path / "ing.json", root / "manifest.jsonl", out)
     (row,) = map(json.loads, out.read_text().splitlines())
-    assert s["untagged"] == 0 and row["corpus_kind"] == "fetched_landing" and "cap-lp" in row["fetch_folders"]
+    assert s["excluded"] == 0 and row["corpus_kind"] == "fetched_landing" and "cap-lp" in row["fetch_folders"]
+
+
+def test_labels_flags_exclude_and_egress(corpus, tmp_path):
+    from ftf.corpus.ingested import tag_ingested
+
+    root, picked = corpus
+    _capture(root / "egress-1", "e-g", "https://invest.example/", "live", "live", "2026-11-21T23:30:00Z")
+    wb = tmp_path / "wb.tsv"
+    snap = "https://web.archive.org/web/20261118061622if_/https://news-b.example/x-st1"
+    wb.write_text(f"{snap}\tnews-b.example\tarticle\n")
+    _capture(root / "picked-wb", "cap-wb", snap, "live", "live", "2026-11-21T23:00:00Z")
+    summary = build_corpus(root, "scanner", [RUN], ["fetch-1", "fetch-2"], [picked, wb], ["picked-fetch", "picked-wb"],
+                           "t", egress_dirs=["egress-1"])
+    assert summary["egress"] == {"refetched": 1, "live_only_via_egress": 1}
+    man = {r["incident_id"]: r for r in map(json.loads, (root / "manifest.jsonl").read_text().splitlines())}
+    assert man["adlib:g-3"]["egress"][0]["capture_id"] == "e-g"
+
+    ing = {"incidents": [
+        {"id": "adlib:g-3", "captures": [{"id": "adlib:g-3:ad"}], "indicators": []},
+        {"id": "adlib:meta-1", "captures": [{"id": "adlib:meta-1:ad"}], "indicators": []},
+        {"id": "certpl:dead.example", "captures": [{"id": "certpl:dead.example:listing"}], "indicators": []},
+        {"id": "fetch:e-g", "captures": [{"id": "fetch:e-g:c1"}], "indicators": []},
+        {"id": "fetch:cap-wb", "captures": [{"id": "fetch:cap-wb:c1"}], "indicators": []},
+        {"id": "fetch:orphan", "captures": [{"id": "fetch:orphan:c1"}], "indicators": []},
+    ]}
+    (tmp_path / "ing.json").write_text(json.dumps(ing))
+    out = tmp_path / "k.jsonl"
+    s = tag_ingested(tmp_path / "ing.json", root / "manifest.jsonl", out,
+                     legit={"shared.example"}, persons={"brzoska"})
+    rows = {r["incident_id"]: r for r in map(json.loads, out.read_text().splitlines())}
+    assert rows["certpl:dead.example"]["scam_label"] == "listed"
+    assert rows["adlib:meta-1"]["scam_label"] == "legit_suspected"  # its landing domain is on the legit list
+    assert rows["adlib:g-3"]["scam_label"] == "unknown"  # cloaked, but the keyword is not a person
+    assert rows["fetch:e-g"]["corpus_kind"] == "fetched_landing" and rows["fetch:e-g"]["profiles"] == ["egress"]
+    assert rows["fetch:cap-wb"]["corpus_flags"] == ["wayback_infra"] and rows["fetch:cap-wb"]["scam_label"] == "not_scam"
+    assert rows["fetch:orphan"]["corpus_kind"] == "exclude" and s["excluded"] == 1
+    eff = s["effective_sample"]
+    assert eff["ads"] == 3 and eff["ads_with_creatives"] == 1 and eff["must_not_link_pages"] == 2
+    assert eff["unique_live_landers"] == 3  # shared lander once, live CERT page, egress-only page
+
+
+def test_scam_label_suspected():
+    from ftf.corpus.ingested import scam_label
+
+    row = {"corpus_kind": "ad_record", "source": "meta", "query": "Person Name", "target_url": "https://lp.example/",
+           "fetch_capture_id": "a", "fetch_category": "cloaked", "victim_capture_id": None}
+    assert scam_label([row], set(), set(), {"person name"}) == "suspected"
+    assert scam_label([row], set(), set(), set()) == "unknown"
+    assert scam_label([row], {"lp.example"}, set(), set()) == "listed"
