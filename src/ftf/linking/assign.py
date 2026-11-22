@@ -20,6 +20,10 @@ Method (07 §2.4, D1/D2 "Assignment"):
 * An incident whose (non-decoy) capture is an exact duplicate (`duplicate_of`) of a collection
   capture is assigned to the campaign holding that capture; if that capture is in no campaign
   or in several, it goes to review.
+* The decision is made per incident. An incident with several landers (end points, see
+  `grouping.incident_chain`) may hold unrelated sites (HACK-57): each lander is matched on its
+  own (its assign target, or the campaign holding the capture it duplicates), and if two
+  landers point to different campaigns the incident goes to review, with a note naming both.
 * Under operator / campaign a tenant or owner conflict between any probe capture and a member
   of the chosen campaign (cannot-link) sends the incident to review instead of assigning it.
 * The collection is not re-clustered.
@@ -50,7 +54,7 @@ from ftf.contract.models import (
     linkable,
 )
 from ftf.linking.backend import Backend
-from ftf.linking.grouping import CANNOT_LINK_RELATIONS, MIN_LAYERS, SINGLE_VALUED_LAYERS, canonical_map, has_conflict, link_id, qualifies
+from ftf.linking.grouping import CANNOT_LINK_RELATIONS, MIN_LAYERS, SINGLE_VALUED_LAYERS, canonical_map, has_conflict, incident_chain, link_id, qualifies
 from ftf.linking.types import METHOD, PairScore
 
 NEW_MARGIN = 3.0  # bits below tau at which an item is declared new
@@ -115,6 +119,7 @@ def link_incident(
 
     scored: list[tuple[Campaign, Optional[PairScore], dict[str, PairScore]]] = []
     conflicted: set[str] = set()  # campaigns with a tenant/owner conflict against the incident
+    by_probe: dict[str, dict[str, PairScore]] = defaultdict(dict)  # probe capture -> campaign id -> best pair
     for camp in campaigns:
         members = _members(camp, canon, stage)
         per_member: dict[str, PairScore] = {}
@@ -124,6 +129,9 @@ def link_incident(
                 ps = be.score(x, m, relation)
                 if blocks_on_conflict and has_conflict(ps):
                     conflicted.add(camp.id)
+                prev = by_probe[x].get(camp.id)
+                if prev is None or _rank(ps) > _rank(prev):
+                    by_probe[x][camp.id] = ps
                 if best_m is None or _rank(ps) > _rank(best_m):
                     best_m = ps
             if best_m is not None:
@@ -159,7 +167,14 @@ def link_incident(
         None,
     )
 
-    if dup_of and (dup_camp is None or dup_camp.id in conflicted):
+    pointed = _lander_targets(incident, canon, stage, own, by_probe, campaigns, bar, tau, min_layers)
+    disagree = len(set(pointed.values())) > 1
+
+    if disagree:
+        # Several landers of one incident point to different campaigns: the folder may hold
+        # unrelated sites, so a person decides.
+        decision, campaign_id = Decision.review, None
+    elif dup_of and (dup_camp is None or dup_camp.id in conflicted):
         # A duplicate of a capture in no campaign, in several, or one whose campaign conflicts
         # with the incident's other captures: a person decides.
         decision, campaign_id = Decision.review, None
@@ -183,6 +198,9 @@ def link_incident(
         note = f"exact duplicate of {', '.join(dup_of)} ({where}); " + note
     if decision is Decision.review and conflicted & {c.id for c in [target, dup_camp] if c is not None}:
         note = "tenant/owner conflict with the best campaign; " + note
+    if disagree:
+        named = "; ".join(f"{x} -> {cid}" for x, cid in sorted(pointed.items()))
+        note = f"landers disagree ({named}); " + note
     assignment = Assignment(
         incident_id=incident.id,
         candidates=candidates,
@@ -209,6 +227,40 @@ def link_incident(
                 seen.add(lid)
                 links.append(link)
     return IncidentResult(assignment=assignment, links=links)
+
+
+def _lander_targets(
+    incident: Incident,
+    canon: dict[str, str],
+    stage: dict[str, Stage],
+    own: set[str],
+    by_probe: dict[str, dict[str, PairScore]],
+    campaigns: list[Campaign],
+    bar: float,
+    tau: float,
+    min_layers: int,
+) -> dict[str, str]:
+    """Lander capture -> the campaign it points to on its own, for incidents with several landers.
+
+    A lander duplicating a collection capture points to the one campaign holding that capture;
+    any other lander to its best campaign that clears the bar with a qualifying ledger. Landers
+    pointing nowhere are left out. Empty when the incident has at most one lander.
+    """
+    ends, _ = incident_chain(incident, canon, stage)
+    if len(ends) < 2:
+        return {}
+    out: dict[str, str] = {}
+    for e in ends:
+        if e not in own:
+            holding = [c.id for c in campaigns if e in {canon.get(m, m) for m in c.capture_ids}]
+            if len(holding) == 1:
+                out[e] = holding[0]
+            continue
+        ranked = sorted(by_probe.get(e, {}).items(), key=lambda kv: (-kv[1].bits, kv[0]))
+        hit = next((cid for cid, ps in ranked if ps.bits >= bar and qualifies(ps, tau, min_layers)), None)
+        if hit is not None:
+            out[e] = hit
+    return out
 
 
 def _rank(ps: PairScore) -> tuple[bool, float]:
