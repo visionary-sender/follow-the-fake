@@ -109,9 +109,7 @@ build-report.json        which build stages ran or were skipped
 The enrichment cache is derived from organiser domains, so it is never baked into the image; it
 travels only inside a privately handed-over base bundle.
 
-The final base bundle is the folder `<BASE_BUNDLE_DIR>` (the `dataset.json` plus its `vectors/`,
-`build-report.json` and enrichment cache, as in the layout above), handed over privately. Its export
-tables are in `<EXPORT_DIR>`.
+The final base bundle is `<BASE_BUNDLE_DIR>`, handed over privately; its export tables are in `<EXPORT_DIR>`.
 
 An input that is already in the base shows its stored analysis: `ftf analyze` returns the base's
 incident for it, so an extractor or feature change shows for that input only after the base is
@@ -128,8 +126,6 @@ rebuilt. Rebuild the base (`ftf build-base … --force`) after any extractor or 
 | `FTF_FETCH` | `1` in the image | `1` lets the app and `ftf analyze` fetch a submitted URL live with the safe fetcher, only when online and `FTF_OFFLINE` is not set |
 | `FTF_ENRICH_CACHE` | `/base/enrichment/cache.json` if the base comes from `/base` (serve mode); the package cache when present (both modes) | enrichment cache file, copied to a fresh `/tmp/ftf-enrichment.*` directory |
 | `FTF_PORT` | `8501` | app port inside the container |
-| `FTF_OCR_TIMEOUT` | `600` | seconds per OCR call. A call that times out skips that image with a warning and an `ocr_skipped` collector indicator |
-| `FTF_VIDEO_TIMEOUT` | `900` | seconds for ffmpeg keyframe extraction per video |
 | `FTF_BRAND_STOPLIST` | `/opt/ftf-brand/brand-stoplist.json` | brand stop-list (hashed values of real outlet pages, from the build's `docker/brand-stoplist/` folder); `off` switches it off, a missing file warns and scores without it |
 | `FTF_PACKAGE` | unset | offline package folder (section below); each setting it provides is used only when unset |
 
