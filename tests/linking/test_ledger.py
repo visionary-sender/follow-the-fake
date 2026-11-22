@@ -304,6 +304,24 @@ def test_shared_aio_campaign_opens_the_gate_whatever_wins_its_slot():
     assert verdict(score_pair(ctx, "c1/lander", "o1/lander", Relation.campaign), ctx) != "link"
 
 
+def test_differing_aio_campaign_closes_the_gate():
+    """HACK-53 review: two aio campaign ids with the same owner-chosen name and one live pixel: two campaigns."""
+    def camp(cid: str) -> list:
+        return [
+            ind(L.owner, "aio_campaign", cid),
+            ind(L.owner, "aio_campaign_name", "Promo"),
+            ind(L.tracking_account, "meta_pixel", "pixel-1", live=True),
+            ind(L.creative, "ad_caption", "Same caption"),
+        ]
+    fillers = [incident(f"f{i}", [ind(L.landing, "aio_landing", f"landing-f{i}")]) for i in range(10)]
+    ds = Dataset(name="names", incidents=[incident("c1", camp("campaign-1")), incident("c2", camp("campaign-2"))] + fillers)
+    ctx = ScoringContext.from_dataset(ds)
+    s = score_pair(ctx, "c1/lander", "c2/lander", Relation.campaign)
+    assert row(s, "aio_campaign").status is EvidenceStatus.conflict
+    assert not s.live_private and s.layers_positive <= 1
+    assert verdict(s, ctx) != "link"
+
+
 def test_owner_campaigns_grouping():
     """End to end: the two campaigns of one owner are one operator group and two campaign groups."""
     from ftf.linking import link_dataset
