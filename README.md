@@ -28,7 +28,8 @@ The image contains the installed `ftf` package and the hashed brand stop-list fr
 `docker/brand-stoplist/` (see the data section above), but no organiser data, no secrets and no git
 metadata; the build context is default-deny in `.dockerignore`. It runs as a non-root user, and the
 entry point is `ftf`. Building needs internet access, because pip and apt fetch the dependencies.
-The image is 1.63 GB and includes Playwright's headless Chromium with its Debian system libraries,
+The image is 5.57 GB (`docker images` size). It holds the CPU build of torch, the CPU feature models
+with the face reference set, tesseract and ffmpeg, and Playwright's headless Chromium with its Debian system libraries,
 which `ftf fetch` needs. Run it with the hardening flags in [docs/container.md](docs/container.md).
 
 For the jury, from a clean checkout of the repository root (fetch the brand stop-list first, see

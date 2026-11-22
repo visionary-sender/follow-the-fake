@@ -10,10 +10,13 @@ or, with no arguments, builds the base if needed and serves the app.
 ## 1. Build
 
 Building needs internet access for pip, apt and Playwright's Chromium. It takes about 5 minutes and
-the image is 1.63 GB (1,631,734,508 bytes, measured on the workbench on 2026-11-22). The image
+the image is 5.57 GB (5,568,573,805 bytes, measured on ftf-workbench-2 on 2026-11-22, HACK-90; it was 7.60 GB before, with the models stored twice). It holds the CPU torch build, the CPU feature models, tesseract, ffmpeg and Chromium. The image
 includes Playwright's headless Chromium (`/opt/ms-playwright/chromium_headless_shell-1248`) with
 its Debian system libraries, which `ftf fetch` needs; their licences are in
 [`licences.md`](licences.md) section 2a.
+
+The build needs BuildKit (the Dockerfile uses `COPY --chmod`): Docker 23 and later enables it by
+default; on older clients set `DOCKER_BUILDKIT=1` (tested on Docker 20.10.24 with that variable).
 
 Before the build, fetch the brand stop-list (HACK-75). It is built from our own public corpus
 (batch 1, the pages tagged as real outlets) and holds hashed values only. It lives in the private
@@ -134,11 +137,11 @@ contacts scam infrastructure.
 ## Resources
 
 2 CPUs and 4 GB memory are enough: the app idles at about 150 MB, and building the base for the
-challenge set takes about 2 minutes. Disk: the image (1.63 GB) plus a few MB of base.
+challenge set takes about 2 minutes. Disk: the image (5.57 GB) plus a few MB of base.
 
 ## Verified on the workbench (HACK-72, 2026-11-22)
 
-Built on `ftf-workbench` from the branch with `sudo docker build -t ftf:dev .` (1.63 GB, Chromium
+Built on `ftf-workbench` from the branch with `sudo docker build -t ftf:dev .` (1.63 GB at HACK-72, Chromium
 present as above). Checks, run with the hardening flags of section 2 (`--memory=4g --cpus=2`):
 
 - **App:** `docker run -d` with `-e FTF_OFFLINE=1`, no organiser folder and no base (the entry point

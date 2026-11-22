@@ -36,10 +36,16 @@ RUN useradd --create-home --uid 10001 ftf \
 COPY --from=build /wheels /wheels
 # --- Safe URL fetcher (HACK-17) --------------------------------------------------------------
 # `ftf fetch` needs Playwright and its headless Chromium (BSD) plus the system libraries it links.
+# The layer fails if any dependency pulled in CUDA (nvidia-*, cuda-*, cupy-cuda*) or triton, or a torch
+# that is not +cpu (HACK-90): the image must keep the CPU torch wheel only. The freeze goes to a file
+# first, so a failing `pip freeze` fails the layer too.
 RUN if [ "${FTF_EXTRAS#*features}" != "$FTF_EXTRAS" ]; then \
         pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu "torch==${TORCH_VERSION}+cpu"; \
     fi \
     && pip install "$(ls /wheels/ftf-*.whl)[${FTF_EXTRAS}]" && rm -rf /wheels \
+    && pip freeze > /tmp/freeze.txt \
+    && ! grep -i -E '^(nvidia[-_]|triton|cuda|cupy)|^torch==' /tmp/freeze.txt | grep -v -E '^torch==[0-9.]+\+cpu$' \
+    && rm -f /tmp/freeze.txt \
     && playwright install --with-deps --only-shell chromium \
     && rm -rf /var/lib/apt/lists/* \
     && chmod -R a+rX /opt/ms-playwright
@@ -62,9 +68,9 @@ RUN if [ "$FTF_WITH_MODELS" != 0 ]; then \
     fi
 # Face reference set (HACK-83): filled on the workbench by scripts/fetch_face_reference.sh into the
 # gitignored build context. The folder may be empty (the build still works; faces are then embedded
-# but not named).
-COPY docker/build-context/faces-reference/ /opt/ftf-models/face-reference/
-RUN chmod -R a+rX /opt/ftf-models
+# but not named). --chmod makes the set readable by the non-root user in this same COPY layer; a
+# separate `RUN chmod -R` over /opt/ftf-models would copy every model file into a layer again (HACK-90).
+COPY --chmod=0755 docker/build-context/faces-reference/ /opt/ftf-models/face-reference/
 # Offline at run time: the weights are read from $FTF_MODEL_DIR and the reference set from
 # $FTF_FACE_REFERENCE; nothing is fetched from the hub. Global FTF_OFFLINE is not set (it would also
 # switch off the jury's live enrichment); the model loaders honour it on their own paths.
