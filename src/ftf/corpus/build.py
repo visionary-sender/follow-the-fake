@@ -204,7 +204,10 @@ def _attempt_label(man: dict) -> str:
 
 def _is_creative(a: m.Artefact) -> bool:
     name = (a.path or "").rsplit("/", 1)[-1]
-    return a.type is m.ArtefactType.ad_screenshot or (a.type is m.ArtefactType.asset and name.startswith("creative-"))
+    in_dir = "/creatives/" in f"/{a.path or ''}"  # pre-v1 scanner: creatives/<sha256>.<ext>
+    return a.type is m.ArtefactType.ad_screenshot or (
+        a.type is m.ArtefactType.asset and (name.startswith("creative-") or in_dir)
+    )
 
 
 def _source_label(row: QueueRow) -> str:
