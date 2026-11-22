@@ -316,7 +316,7 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
             None,
         )
     target_bits = next((ps.bits for camp, ps, _ in scored if target is not None and camp.id == target.id), 0.0)
-    tie = rival is not None and target_bits - rival[1].bits < TIE_MARGIN
+    tie = rival is not None and target_bits - rival[1].bits < TIE_MARGIN - 1e-9
 
     if setup.campaigns_of is not None:
         holding = setup.campaigns_of
@@ -372,10 +372,10 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
         note = f"exact duplicate of {', '.join(dup_of)} ({where}); " + note
     if decision is Decision.review and conflicted & {c.id for c in [target, dup_camp] if c is not None}:
         note = "tenant/owner conflict with the best campaign; " + note
-    if tie and decision is Decision.review and not disagree and not dup_of and target.id not in conflicted:
+    if tie and decision is Decision.review:
         note = (
-            f"tie at the top: {target.id} {target_bits:.1f} bits vs {rival[0].id} {rival[1].bits:.1f} bits "
-            f"(lead under the {TIE_MARGIN:.0f}-bit margin); " + note
+            f"tie at the top: {target.id} {target_bits:.2f} bits vs {rival[0].id} {rival[1].bits:.2f} bits "
+            f"(lead under the {TIE_MARGIN:g}-bit margin); " + note
         )
     if off_lander:
         named = "; ".join(f"{x} -> {cid}" for x, cid in sorted(pointed.items()))

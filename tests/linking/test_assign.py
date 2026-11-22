@@ -340,15 +340,17 @@ def test_tie_rule_is_the_same_on_the_indexed_path():
         assert [l.model_dump() for l in fast.links] == [l.model_dump() for l in lin.links], case
 
 
-def test_tie_rule_holds_for_every_relation_with_two_campaigns():
-    # Relation-agnostic: the template relation (kit, landing, creative, offer) sees the same tie.
-    a = [simple(f"a{i}", (L.landing, "LA"), (L.kit, "KA")) for i in range(2)]
+def test_tie_rule_is_relation_agnostic_template():
+    # The template relation (kit, landing, creative, offer) applies the same margin.
+    a = [simple(f"a{i}", (L.landing, "LA"), (L.kit, "KA"), (L.offer, "OA")) for i in range(2)]
     b = [simple(f"b{i}", (L.landing, "LB"), (L.kit, "KB")) for i in range(2)]
     ds = dataset(*a, *b)
     col = link_dataset(ds, [Relation.template], backend=stub_backend(ds))
+    assert _k(col, Relation.template) == 2  # bar = TAU + 1 = 7
     tie = simple("n", (L.landing, "LA"), (L.kit, "KA"), (L.landing, "LB"), (L.kit, "KB"))
     t = assign(col, tie, relation=Relation.template, backend=stub_backend)
     assert t.decision is Decision.review and "tie at the top" in t.note
-    win = simple("n", (L.landing, "LA"), (L.kit, "KA"), (L.landing, "LB"))
+    # a 9 vs b 7: the rival also clears the bar, but trails by 2 bits
+    win = simple("n", (L.landing, "LA"), (L.kit, "KA"), (L.offer, "OA"), (L.landing, "LB"), (L.kit, "KB"))
     w = assign(col, win, relation=Relation.template, backend=stub_backend)
     assert w.decision is Decision.assign
