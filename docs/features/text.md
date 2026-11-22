@@ -27,6 +27,7 @@ the text it came from with `provenance.locator = "src=<indicator id>"`.
 | `person_mention` | a gazetteer name in canonical form (note `gazetteer`), or a first-name + surname pair as written (note `name pair, surface form`) | same |
 | `keyword` | a canonical keyword from a fixed scam lexicon | same |
 | `topic` (**new kind**) | `investment`, `crypto` or `health` | same, only when one topic clearly dominates |
+| `ocr_skipped` (layer `collector`, level `capture`) | `timeout` | the capture whose screenshot OCR hit `FTF_OCR_TIMEOUT`; never linked |
 
 Sidecar files in `OUT/text/`:
 
@@ -40,7 +41,12 @@ sets, with a standard error of about 0.044.
 ## Method
 
 - **OCR.** Tesseract 5 (`pol+eng`, `--psm 3`) runs as a subprocess. Its input is a greyscale
-  copy of the image, upscaled to at least 1400 px wide (at most 3×). A line is kept when its mean
+  copy of the image, upscaled to at least 1400 px wide (at most 3×). Scaling large screenshots down to
+  2000 px was measured and dropped: it removed OCR text on two of six inputs (−1.5% and −9% characters). Each Tesseract call may run for
+  `FTF_OCR_TIMEOUT` seconds (default 600). When it runs out, that image's OCR is skipped, one
+  warning is logged per run, and its capture gets an `ocr_skipped` indicator. Page text, templates,
+  embeddings and the other families still run. The video frame timeouts (ffmpeg and ffprobe) are
+  `FTF_VIDEO_TIMEOUT` seconds (default 900). A line is kept when its mean
   word confidence is at least 60. `ocr_text` keeps platform chrome such as "Sponsorowane" or
   "Identyfikator biblioteki". Lines made only of chrome phrases and OCR debris are removed (`ocr.content_lines`) from the text that
   feeds templates, embeddings and keywords.
@@ -123,6 +129,29 @@ Output counts: `ocr_text` 36 (one of 37 images had no confident text), `page_tex
 
 Outputs are in `gs://follow-the-fake-data/outputs/visual/hack-13/organiser/`, with the pair reports
 in `text/report-*-p3p4.json`.
+
+### OCR time on 2 cores (HACK-89)
+
+`ftf features` (all families) per input, `taskset -c 0,1`, `OMP_NUM_THREADS=2`, `FTF_THREADS=2`,
+`ftf-visual`. The inputs are the three incidents with the most OCR-able images in each set (the
+corpus maximum is 5 images, so these are not large).
+
+| input | images | before (s) | after, run with the 2000 px downscale (s) |
+|---|---|---|---|
+| organiser, rank 0 | 11 | 263.3 | 207.3 |
+| organiser, rank 1 | 6 | 31.7 | 26.9 |
+| organiser, rank 2 | 3 | 20.3 | 22.9 |
+| corpus, rank 0 | 5 | 38.2 | 73.9 |
+| corpus, rank 1 | 4 | 9.4 | 14.2 |
+| corpus, rank 2 | 4 | 17.2 | 16.2 |
+
+The downscale was then dropped (see Method): it removed OCR characters on two inputs (organiser
+rank 0: 9017 → 8879; corpus rank 2: 653 → 592), so the kept code takes the "before" OCR path. The
+corpus rank 0 rise is not explained by OCR (its text is unchanged, 4354 → 4356 characters), so it is
+most likely load on the shared VM; treat single timings here as ±50 %. The timeout change itself
+(`FTF_OCR_TIMEOUT`, default 600 instead of 180) applies per Tesseract call. I did not record per-image
+times, so I cannot say whether any single call on these inputs passed 180 s. Timing of the final code
+(without the downscale) was not re-measured before the PR.
 
 ### Acceptance
 

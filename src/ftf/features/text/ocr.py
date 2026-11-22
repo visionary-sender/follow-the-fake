@@ -16,6 +16,7 @@ from pathlib import Path
 LANGS = "pol+eng"
 MIN_LINE_CONF = 60.0  # mean word confidence of a kept line (Tesseract scale 0-100)
 MIN_WIDTH = 1400  # narrower images are upscaled: Tesseract reads small UI text poorly
+DEFAULT_TIMEOUT_S = 600  # per Tesseract call (FTF_OCR_TIMEOUT); a timed-out image is skipped
 
 # Lines that are platform UI chrome (Meta Ad Library, Facebook, Instagram), not ad copy.
 # Kept in ocr_text; dropped from the text that feeds templates and embeddings.
@@ -51,6 +52,11 @@ def threads() -> int:
     return int(os.environ.get("FTF_THREADS", min(4, os.cpu_count() or 1)))
 
 
+def ocr_timeout() -> int:
+    """Seconds allowed for one Tesseract call (``FTF_OCR_TIMEOUT``, default 600)."""
+    return int(os.environ.get("FTF_OCR_TIMEOUT", DEFAULT_TIMEOUT_S))
+
+
 def _prepare(src: Path, dst: Path) -> Path:
     """Greyscale, upscaled copy of the image; the original path if Pillow is not installed."""
     try:
@@ -77,7 +83,7 @@ def ocr_lines(path: Path, min_conf: float = MIN_LINE_CONF) -> list[str]:
         env = dict(os.environ, OMP_THREAD_LIMIT=str(threads()))
         out = subprocess.run(
             [exe, str(img), "stdout", "-l", LANGS, "--psm", "3", "tsv"],
-            capture_output=True, env=env, timeout=180, check=True,
+            capture_output=True, env=env, timeout=ocr_timeout(), check=True,
         ).stdout.decode("utf-8", "replace")
     lines: dict[tuple[str, str, str], list[tuple[float, str]]] = {}
     for row in out.splitlines()[1:]:

@@ -238,3 +238,42 @@ def test_short_masked_text_gets_no_template():
     with pytest.raises(ValueError):
         tpl.minhash(set())
     assert kw.keywords("Stawka w Bankier.pl rośnie, potencjał ai") == []
+
+
+def test_ocr_timeout_env(monkeypatch):
+    from ftf.features.text.ocr import ocr_timeout
+
+    monkeypatch.delenv("FTF_OCR_TIMEOUT", raising=False)
+    assert ocr_timeout() == 600
+    monkeypatch.setenv("FTF_OCR_TIMEOUT", "7")
+    assert ocr_timeout() == 7
+
+
+def test_ocr_timeout_is_skipped_with_warning_and_other_families_run(tmp_path, monkeypatch, caplog):
+    import subprocess
+
+    pytest.importorskip("bs4")
+    pytest.importorskip("lxml")
+    import ftf.features.text.ocr as ocr
+
+    _no_embeddings(monkeypatch)
+
+    def slow(path, min_conf=ocr.MIN_LINE_CONF):
+        raise subprocess.TimeoutExpired(cmd="tesseract", timeout=1)
+
+    monkeypatch.setattr(ocr, "ocr_lines", slow)
+    raw = tmp_path / "raw"
+    (raw / "c").mkdir(parents=True)
+    pytest.importorskip("PIL").Image.new("RGB", (16, 16), "white").save(raw / "c" / "screenshot.png")
+    (raw / "c" / "page.html").write_text(f"<html><body><p>{A}</p></body></html>")
+    ds = dataset_from_files(sorted((raw / "c").iterdir()), raw)
+    with caplog.at_level("WARNING"):
+        ds = pipeline.apply_all(ds, raw, tmp_path / "out", ["text"])
+    indicators = [i for inc in ds.incidents for i in inc.indicators]
+    skipped = [i for i in indicators if i.kind == "ocr_skipped"]
+    assert len(skipped) == 1 and skipped[0].value == "timeout"
+    assert skipped[0].layer.value == "collector" and skipped[0].level.value == "capture"
+    assert "page_text" in [i.kind for i in indicators] and "text_template" in [i.kind for i in indicators]
+    assert len([r for r in caplog.records if "OCR timed out" in r.getMessage()]) == 1
+    stats = json.loads((tmp_path / "out" / "text" / "stats.json").read_text())
+    assert stats["ocr_timeouts"] == 1
