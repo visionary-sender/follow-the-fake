@@ -38,6 +38,9 @@ __pycache__/
 .env
 .playwright-mcp/
 
+# brand stop-list (HACK-75): fetched from the bucket on the build host, never in git
+docker/brand-stoplist/*.json
+
 # model weights
 *.pt
 *.pth

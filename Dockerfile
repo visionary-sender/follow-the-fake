@@ -23,6 +23,7 @@ ENV PIP_NO_CACHE_DIR=1 \
     FTF_RAW_ROOT=/data/raw \
     FTF_BASE_DIR=/base \
     FTF_MODEL_DIR=/opt/ftf-models \
+    FTF_BRAND_STOPLIST=/opt/ftf-brand/brand-stoplist.json \
     STREAMLIT_SERVER_HEADLESS=true \
     STREAMLIT_BROWSER_GATHER_USAGE_STATS=false \
     STREAMLIT_SERVER_FILE_WATCHER_TYPE=none
@@ -49,6 +50,14 @@ RUN if [ "$FTF_WITH_MODELS" != 0 ]; then \
 
 COPY docker/entrypoint.sh /usr/local/bin/ftf-entrypoint
 RUN chmod 0755 /usr/local/bin/ftf-entrypoint
+
+# --- Brand stop-list (HACK-75) ---------------------------------------------------------------
+# Hashed values of real outlet pages, read by the linking engine from FTF_BRAND_STOPLIST. It is
+# fetched into docker/brand-stoplist/ on the build host (scripts/fetch-brand-stoplist.sh) and is
+# never in git. The folder always exists (.gitkeep), so the build works without the file; then
+# the engine warns at run time and scores without the stop-list (the platform/creative gate still
+# holds the brand-negative result).
+COPY docker/brand-stoplist/ /opt/ftf-brand/
 
 USER ftf
 WORKDIR /home/ftf

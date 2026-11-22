@@ -5,6 +5,8 @@
 !README.md
 !src/
 !docker/entrypoint.sh
+!docker/brand-stoplist/
+!docker/brand-stoplist/*
 
 # Bytecode and build leftovers inside the copied source tree.
 **/__pycache__
