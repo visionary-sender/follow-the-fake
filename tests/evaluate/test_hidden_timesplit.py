@@ -5,9 +5,18 @@ import json
 import pytest
 
 from ftf.cli import main
-from ftf.contract import Capture, Dataset, Incident, Indicator, Layer, Level, Observed, Provenance
+from ftf.contract import Campaign, Capture, Dataset, Incident, Indicator, Layer, Level, Observed, Provenance, Relation
 from ftf.evaluate.commands import EvalInputError
-from ftf.evaluate.hidden import hidden_dataset, render_markdown as render_hidden, run_hidden
+from ftf.evaluate.hidden import (
+    folder_names,
+    hidden_dataset,
+    informative_cases,
+    render_markdown as render_hidden,
+    run_hidden,
+    score_levels,
+    unit_map,
+    unit_partition,
+)
 from ftf.evaluate.timesplit import render_markdown as render_split, run_timesplit, split_incidents
 from ftf.evaluate.units import SPEC_SCHEMA, GroundTruthSpec
 
@@ -111,9 +120,72 @@ def test_e1_scores_campaign_and_reports_the_wrong_merge():
 def test_e1_reports_analyst_must_not_link_violations():
     spec = make_spec(must_not_link=[{"a": [P1], "b": [D1], "relation": "campaign", "reason": "invented"}])
     wrong = run_hidden(make_dataset(), spec, "baseline")["wrong_merges"]
-    analyst = [w for w in wrong if w["source"] == "analyst_verdict"]
+    analyst = [w for w in wrong if w["sources"] == ["analyst_verdict"]]
     assert [(w["a"], w["b"]) for w in analyst] == [("BACKUP:p1", "do_udostepnienia:1")]
     assert all("reason" not in w for w in analyst)
+
+
+def test_wrong_merge_that_is_also_an_analyst_violation_is_one_entry():
+    spec = make_spec(must_not_link=[{"a": [P2], "b": [D4], "relation": "campaign", "reason": "invented"}])
+    wrong = run_hidden(make_dataset(), spec, "baseline")["wrong_merges"]
+    assert len(wrong) == 1
+    assert (wrong[0]["a"], wrong[0]["b"]) == ("BACKUP:p2", "do_udostepnienia:4")
+    assert wrong[0]["sources"] == ["platform_ids", "analyst_verdict"]
+
+
+SPLIT_C1, SPLIT_C2, REF = "do_udostepnienia:2:c1", "do_udostepnienia:2:c2", "BACKUP:p1:c1"
+COLLAPSED = "do_udostepnienia:2"
+
+
+def _split_dataset() -> Dataset:
+    """Two captures of one collapsed incident, and one reference capture (invented ids)."""
+    return Dataset(name="split", incidents=[
+        Incident(id=COLLAPSED, source="do_udostepnienia", source_ref="2",
+                 captures=[Capture(id=SPLIT_C1, stage="lander"), Capture(id=SPLIT_C2, stage="lander")]),
+        Incident(id="BACKUP:p1", source="BACKUP", source_ref="p1", captures=[Capture(id=REF, stage="lander")]),
+    ])
+
+
+def _clustered(ds: Dataset, clusters: list[list[str]]) -> Dataset:
+    """The dataset with the engine's campaign clusters given explicitly (order as given)."""
+    return ds.model_copy(update={"campaigns": [
+        Campaign(id=f"cmp:{n}", label="invented", relation=Relation.campaign, capture_ids=c)
+        for n, c in enumerate(clusters, start=1)
+    ]})
+
+
+def _collapse_spec(**expected) -> GroundTruthSpec:
+    return GroundTruthSpec.from_dict({"schema": SPEC_SCHEMA, "collapse_incidents": [COLLAPSED],
+                                      "expected_e1": expected})
+
+
+def test_split_unit_is_counted_and_joins_neither_side():
+    ds = _split_dataset()
+    spec = _collapse_spec(campaign=[[COLLAPSED, REF]], owner=[[COLLAPSED], [REF]])
+    units = unit_map(ds, spec)
+    assert units[SPLIT_C1] == units[SPLIT_C2] == COLLAPSED
+    # the engine puts the two captures of the collapsed incident in different clusters, in either order
+    for clusters in ([[SPLIT_C1, REF], [SPLIT_C2]], [[SPLIT_C2], [SPLIT_C1, REF]]):
+        part = unit_partition(_clustered(ds, clusters), "campaign", ds, units)
+        assert part.split == [COLLAPSED]
+        assert part.clusters == [[REF]]
+    parts = {"campaign": part, "operator": unit_partition(_clustered(ds, clusters), "operator", ds, units)}
+    cases = informative_cases(parts, spec, units, ("campaign", "owner"), folder_names(ds))
+    assert len(cases) == 1
+    assert cases[0]["levels"]["campaign"] == {"expected": "together", "engine": "apart", "agree": False}
+
+
+def test_level_scores_count_the_same_collapsed_units():
+    ds = _split_dataset()
+    spec = _collapse_spec()
+    units = unit_map(ds, spec)
+    labels = {"groups": [{"level": "campaign", "relation": "campaign", "members": [SPLIT_C1, SPLIT_C2, REF]}],
+              "must_not_link": []}
+    parts = {"campaign": unit_partition(_clustered(ds, [[SPLIT_C1, SPLIT_C2, REF]]), "campaign", ds, units)}
+    row = score_levels(labels, parts, units, ("campaign",))[0]
+    assert row["label_groups"] == 1
+    assert row["pairwise"]["items"] == 2  # the collapsed incident and the reference capture, not three captures
+    assert (row["pairwise"]["tp"], row["pairwise"]["true_pairs"]) == (1, 1)
 
 
 def test_e1_informative_case_differs_between_levels():
@@ -167,3 +239,36 @@ def test_eval_cli_writes_both_outputs(tmp_path, capsys):
     split = json.loads((tmp_path / "out" / "timesplit" / "timesplit-baseline-hidden.json").read_text())
     assert hidden["leak_check_hits"] == 0 and split["counts"]["items"] == 4
     assert "engine baseline, platform ids hidden" in capsys.readouterr().out
+
+
+def test_timesplit_lists_folders_that_bridge_two_truth_groups():
+    spec = GroundTruthSpec.from_dict({
+        "schema": SPEC_SCHEMA,
+        "expected_e1": {"campaign": [[P1, D1], [P2, D3], [D2], [D4]]},
+        "analyst_groups": {"analyst_campaign": [{"relation": "campaign", "members": [P1, D3], "reason": "invented"}]},
+    })
+    result = run_timesplit(make_dataset(), spec, "baseline", hide=True)
+    assert result["bridging_folders"] == [
+        {"folder": "BACKUP:p1", "groups": 2},
+        {"folder": "do_udostepnienia:3", "groups": 2},
+    ]
+    assert "BACKUP:p1 (2 groups)" in render_split(result)
+
+
+def test_fragmentation_counts_truth_groups_whose_later_items_all_came_out_new():
+    spec = GroundTruthSpec.from_dict({
+        "schema": SPEC_SCHEMA,
+        "expected_e1": {"campaign": [[P1, D1], [P2, D3], [D2], [D4]]},
+        "analyst_groups": {"analyst_campaign": [{"relation": "campaign", "members": [D2, D3], "reason": "invented"}]},
+    })
+    result = run_timesplit(make_dataset(), spec, "baseline", hide=True)
+    decision = {it["item"]: it["decision"] for it in result["items"]}
+    assert decision["do_udostepnienia:2"] == decision["do_udostepnienia:3"] == "new"
+    assert result["fragmentation"] == 1
+    assert result["fragmented_groups"] == [["do_udostepnienia:2", "do_udostepnienia:3"]]
+    assert "Limitation: the base is not grown" in render_split(result)
+
+
+def test_default_spec_has_no_bridging_and_no_fragmentation():
+    result = run_timesplit(make_dataset(), make_spec(), "baseline", hide=True)
+    assert result["bridging_folders"] == [] and result["fragmentation"] == 0 and result["fragmented_groups"] == []
