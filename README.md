@@ -26,7 +26,9 @@ Without `--base`, the commands use `$FTF_BASE`, and otherwise the private fixtur
 
 The image contains only the installed `ftf` package (no data, no secrets, no git metadata; the
 build context is default-deny in `.dockerignore`). It runs as a non-root user, and the
-entry point is `ftf`. Building needs internet access, because pip fetches the dependencies.
+entry point is `ftf`. Building needs internet access, because pip and apt fetch the dependencies.
+The image is 1.63 GB and includes Playwright's headless Chromium with its Debian system libraries,
+which `ftf fetch` needs. Run it with the hardening flags in [docs/container.md](docs/container.md).
 
 For the jury, from a clean checkout of the repository root:
 
@@ -430,8 +432,8 @@ come only with the optional `fetch` extra and are listed separately in `LICENSES
 
 System packages in the image, models (`FTF_WITH_MODELS`, off by default) and outside services, with
 their licences and usage limits: [docs/licences.md](docs/licences.md). Some system libraries that
-Chromium needs are LGPL or MPL; they are not covered by a named exception yet and await an owner
-decision (listed in that document).
+Chromium needs (LGPL, MPL or GPL in part) are a named exception (HACK-68, owner, 2026-11-22), listed
+in that document. The base image's own packages include GPL and LGPL ones and await an owner decision.
 
 ## Operations
 
