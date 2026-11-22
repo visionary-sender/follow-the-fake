@@ -23,8 +23,7 @@ import math
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
-
-import networkx as nx
+from typing import TYPE_CHECKING
 
 from ftf.contract import (
     Dataset,
@@ -36,6 +35,9 @@ from ftf.contract import (
     Relation,
     linkable,
 )
+
+if TYPE_CHECKING:  # networkx is an `app` extra; `ftf export` imports this module without it
+    import networkx as nx
 
 RELATIONS: tuple[Relation, ...] = tuple(Relation)
 
@@ -277,6 +279,8 @@ def relation_graph(ds: Dataset, relation: Relation, threshold: float | None = No
     for c in camps:
         for cid in c.capture_ids:
             member[cid].append(c.id)
+    import networkx as nx
+
     g = nx.Graph(relation=rel)
 
     def add_node(cid: str) -> None:
@@ -303,12 +307,14 @@ def clusters(ds: Dataset, relation: Relation, threshold: float | None = None) ->
     rel = Relation(relation)
     g = relation_graph(ds, rel, threshold)
     out = [
-        Cluster(c.id, c.label, rel, tuple(c.capture_ids), tuple(_campaign_link_ids(ds, c, g)), "campaign")
+        Cluster(c.id, c.label, rel, tuple(c.capture_ids), tuple(_campaign_link_ids(ds, c)), "campaign")
         for c in ds.campaigns
         if c.relation is rel
     ]
     covered = [set(c.capture_ids) for c in out]
     n = 0
+    import networkx as nx
+
     for comp in sorted(nx.connected_components(g), key=lambda s: (-len(s), sorted(s))):
         if len(comp) < 2 or any(comp <= cov for cov in covered):
             continue
@@ -320,7 +326,7 @@ def clusters(ds: Dataset, relation: Relation, threshold: float | None = None) ->
     return out
 
 
-def _campaign_link_ids(ds: Dataset, campaign, g: nx.Graph | None = None) -> list[str]:
+def _campaign_link_ids(ds: Dataset, campaign) -> list[str]:
     """The campaign's own links of its relation with both ends inside it, else the drawable
     links of its relation inside it."""
     if campaign.link_ids:
@@ -328,11 +334,8 @@ def _campaign_link_ids(ds: Dataset, campaign, g: nx.Graph | None = None) -> list
         by_id = {l.id: l for l in ds.links}
         return [lid for lid in campaign.link_ids
                 if by_id[lid].relation is campaign.relation and {by_id[lid].a, by_id[lid].b} <= inside]
-    if g is None:
-        g = relation_graph(ds, campaign.relation)
     inside = set(campaign.capture_ids)
-    sub = g.subgraph([c for c in inside if c in g])
-    return sorted({e.link_id for _, _, d in sub.edges(data=True) for e in d["edges"]})
+    return sorted(l.id for l in ds.links if l.relation is campaign.relation and {l.a, l.b} <= inside)
 
 
 def campaign_summary(ds: Dataset, relation: Relation | None = None, top: int = 5) -> list[CampaignSummary]:
@@ -390,6 +393,8 @@ def indicator_view(ds: Dataset, campaign_id: str, min_captures: int = 2) -> nx.G
     for ind in ds.indicators():
         if ind.capture_id in caps and linkable(ind) and ind.value is not None:
             holders[("ind", ind.layer.value, ind.kind, ind.value)].add(ind.capture_id)
+    import networkx as nx
+
     g = nx.Graph(campaign_id=campaign_id)
     for cid in sorted(caps):
         g.add_node(cid, side="capture", **meta[cid])
@@ -464,6 +469,8 @@ def _strongest_path(g: nx.Graph, a: str, b: str) -> list[str] | None:
     """Fewest hops between `a` and `b`, ties broken towards stronger links."""
     if a not in g or b not in g:
         return None
+    import networkx as nx
+
     try:
         return nx.shortest_path(g, a, b, weight=lambda u, v, d: 1.0 + 1.0 / (1.0 + max(d["bits"], 0.0)))
     except nx.NetworkXNoPath:
