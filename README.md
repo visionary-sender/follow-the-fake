@@ -443,7 +443,7 @@ Next steps, ranked by expected gain:
 |---|---|---|---|
 | 1 | Get more labelled pairs from CERT (confirmed campaign and must-not-link pairs) | high: removes most of the in-sample problem in E1 | medium, depends on CERT |
 | 2 | Calibrate the content views on those pairs, so text can support a decision | high: text is our cleanest campaign signal | medium |
-| 3 | Use nameserver and registrar in the campaign gate | medium to high: they split operator pairs well | low to medium |
+| 3 | Use nameserver and registrar in the campaign gate | medium to high: they split operator pairs well; a rare shared nameserver or registrar separates operators (5 vs 0 and 6 vs 1 pairs), but a copied kit keeps the original's infrastructure, so it needs a kit-copy guard first | low to medium |
 | 4 | Grow the reference base in E7, so later items can join one another | medium: tests the realistic case | low |
 | 5 | Test shared certificates once a certificate source answers reliably | medium: untested today | medium, depends on the source |
 | 6 | Get a licence answer for reading Ad Library pages and for the face reference set | high for a real deployment, no effect on the score | low; depends on a licence answer |
