@@ -1,0 +1,36 @@
+# Public figures, brands and TV/news outlets that scam ads impersonate, plus generic Polish scam phrases; no private people (HACK-87). Read by `ftf scan --keywords-file`.
+
+[meta]
+# Public figures whose names the scam ads use
+Brzoska
+Glapiński
+Monika Olejnik
+Tomasz Lis
+Mateusz Morawiecki
+Donald Tusk
+Robert Lewandowski
+Krzysztof Stanowski
+Tomasz Sekielski
+# TV and news brands the scam ads impersonate
+TVN24
+Polsat News
+Interia
+Bankier
+# Companies and institutions the scam ads impersonate
+Orlen
+PGE
+Baltic Pipe
+PKO BP
+Pekao
+InPost
+NBP
+# Scam phrases (multi-word, so they do not match ordinary ads)
+platforma inwestycyjna
+pasywny dochód
+bitcoin
+kryptowaluty
+
+[google_atc]
+invest
+trading
+crypto
