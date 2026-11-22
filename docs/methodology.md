@@ -287,6 +287,12 @@ can run under two pixels and one pixel can serve two landings.
   mean cross weight is non-negative and at least one cross pair is an edge, and never when a
   cannot-link pair sits between them. Unlike connected components, one false private-id match cannot
   join two campaigns, because the other cross pairs outvote it.
+- **One incident, one unit where unambiguous.** An incident with at most one lander starts as one
+  unit. With several landers, a case folder can hold unrelated sites, so they join only through
+  their own evidence, except that landers on the same own exact host (for example a live page and
+  its archived copy; the registered domain is not enough, and a hub host never counts) are one site
+  and start in one unit (HACK-84). A lander that would join two different hosts joins neither.
+  Assignment of a new item does not apply this join yet.
 - **Output.** Each relation gives its campaigns, and each campaign keeps its links, so the report can
   show which captures are held together by which evidence.
 

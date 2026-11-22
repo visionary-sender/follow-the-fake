@@ -308,3 +308,29 @@ def test_lander_duplicating_an_unknown_stage_capture_still_counts_as_a_lander():
     m = incident("m", [cap("m-x", duplicate_of="f-c1"), cap("m-y")], {"m-x": [(L.kit, "K1")], "m-y": [(L.offer, "O9")]})
     part = _partition(group(stub_backend(dataset(f, m)), Relation.campaign)[0])
     assert part == {frozenset({"f-c1", "m-x"}), frozenset({"m-y"})}
+
+
+def test_landers_on_the_same_own_host_are_one_site():
+    # HACK-84: a live page and its archived copy in one case folder share the scam's own host.
+    from ftf.linking.grouping import _pair, must_link_groups
+
+    ds = dataset(incident("m", [cap(f"m-l{i}") for i in range(1, 6)], {f"m-l{i}": [] for i in range(1, 6)}))
+
+    def host(value, status=EvidenceStatus.shared, bits=0.0):  # bits after the within-layer max may be 0
+        return EvidenceRow(layer=L.landing, kind="landing_host", status=status, value=value, bits=bits)
+
+    pair = lambda a, b, rows: PairScore(a=a, b=b, relation=Relation.campaign, bits=3.0, rows=rows, layers_positive=1)
+    by_pair = {
+        _pair("m-l1", "m-l2"): pair("m-l1", "m-l2", [host("a.example", bits=3.0)]),
+        _pair("m-l1", "m-l3"): pair("m-l1", "m-l3", [host("hub.example", EvidenceStatus.hub_subsumed)]),
+    }
+    assert must_link_groups(ds, by_pair) == [["m-l1", "m-l2"]]
+    by_pair[_pair("m-l1", "m-l2")] = pair("m-l1", "m-l2", [host("a.example")])  # subsumed by a landing id: still one site
+    assert must_link_groups(ds, by_pair) == [["m-l1", "m-l2"]]
+    conflict = EvidenceRow(layer=L.tenant, kind="tenant_id", status=EvidenceStatus.conflict, bits=-4.0)
+    by_pair[_pair("m-l1", "m-l2")] = pair("m-l1", "m-l2", [host("a.example"), conflict])
+    assert must_link_groups(ds, by_pair) == []
+    # m-l4 shares one host with m-l3 and another with m-l5: ambiguous, nothing is chained through it
+    by_pair[_pair("m-l3", "m-l4")] = pair("m-l3", "m-l4", [host("b.example")])
+    by_pair[_pair("m-l4", "m-l5")] = pair("m-l4", "m-l5", [host("c.example")])
+    assert must_link_groups(ds, by_pair) == []

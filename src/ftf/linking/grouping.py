@@ -23,7 +23,8 @@ Method (07 §1.8, D2 "Linking / clustering"):
   all non-decoy captures of the incident (ad, pre-lander, lander) start in one unit, unless two
   of them conflict. With several end points the incident is not one chain: a case folder can
   hold unrelated sites, so its landers join only through their own evidence, like any other
-  pair. Its ad / pre-lander captures are then attached to the lander they share the most
+  pair, except that landers on the same own host (a live page and its archived copy) are one
+  site and start in one unit (`SAME_SITE_KINDS`, HACK-84). Its ad / pre-lander captures are then attached to the lander they share the most
   evidence with (the highest-bit pair with bits > 0 and, under operator / campaign, no
   tenant/owner conflict; ties by id); without any such evidence they stay their own unit.
   Ingestion marks every saved page of a case folder as a lander, so a folder with two saved
@@ -78,6 +79,10 @@ MIN_LAYERS: dict[Relation, int] = {
     Relation.campaign: 2,
     Relation.ecosystem: 1,
 }
+# Same site (HACK-84): landers of one incident that share the scam's own exact host (not the registered domain;
+# a hub host never counts) are one site, e.g. a live page and its archived copy in one case folder; they are
+# must-linked (`_same_site`). Assignment (`assign.lander_reach`) does not apply this yet.
+SAME_SITE_KINDS = frozenset({"landing_host"})
 # A value carried by more captures than this is a hub: it carries ~0 bits, so it never proposes pairs.
 HUB_POSTINGS = 500
 
@@ -251,6 +256,7 @@ def must_link_groups(ds: Dataset, by_pair: dict[frozenset[str], PairScore]) -> l
         if len(ends) <= 1:
             groups.append(ends + rest)
             continue
+        groups += _same_site(ends, by_pair)
         for x in rest:
             best: Optional[tuple[float, str]] = None
             for e in ends:
@@ -263,6 +269,31 @@ def must_link_groups(ds: Dataset, by_pair: dict[frozenset[str], PairScore]) -> l
             if best is not None:
                 groups.append([best[1], x])
     return groups
+
+
+def _same_site(ends: list[str], by_pair: dict[frozenset[str], PairScore]) -> list[list[str]]:
+    """One incident's landers on the same own host, one group per host value (HACK-84).
+
+    Same host means a `SAME_SITE_KINDS` row with status `shared` in the pair's ledger, whatever its bits after
+    the within-layer max (a stronger landing id beside it must not undo the join) and under every relation (the
+    row says "shared" even where the kind carries no bits); a hub host (`hub_subsumed`) never joins. Pairs with a
+    tenant/owner conflict never join. A lander that would join two different host groups makes both ambiguous:
+    they are dropped, so landers sharing nothing are never chained through it."""
+    by_host: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for i, a in enumerate(ends):
+        for b in ends[i + 1:]:
+            ps = by_pair.get(_pair(a, b))
+            if ps is None or (ps.relation in CANNOT_LINK_RELATIONS and has_conflict(ps)):
+                continue
+            for r in ps.rows:
+                if r.kind in SAME_SITE_KINDS and r.status is EvidenceStatus.shared:
+                    by_host[(r.kind, r.value)] |= {a, b}
+    groups = list(by_host.values())
+    seen: dict[str, int] = defaultdict(int)
+    for g in groups:
+        for m in g:
+            seen[m] += 1
+    return [sorted(g, key=ends.index) for g in groups if all(seen[m] == 1 for m in g)]
 
 
 def candidate_pairs(ds: Dataset, relation: Relation, nodes: Optional[set[str]] = None) -> set[tuple[str, str]]:
