@@ -79,7 +79,7 @@ class RunContext:
     base: Dataset
     offline: bool
     run_dir: Path
-    fetch: bool = False  # live page fetching: sandbox only, never on the workbench or the jury's machine
+    fetch: bool = False  # live page fetching: only when online (the jury image sets FTF_FETCH=1); never on the workbench
     input_root: Optional[Path] = None  # artefact paths of the incident are relative to this
     base_dir: Optional[Path] = None  # folder of the base dataset.json: the base's vector stores
     incident: Optional[Incident] = None
@@ -87,6 +87,7 @@ class RunContext:
     assignment: Optional[Assignment] = None
     from_base: bool = False
     notes: list[str] = field(default_factory=list)
+    enrichment: Optional[str] = None  # "online", "offline cache" or "mixed" (HACK-91)
 
     def __post_init__(self) -> None:
         if self.input_root is None:
@@ -353,6 +354,21 @@ def _domains(ctx: RunContext) -> list[tuple[str, str]]:
     return list(dict.fromkeys(out))
 
 
+def enrichment_mode(origins: Counter, offline: bool) -> str:
+    """The HACK-91 label. "online": no answer needed the fallback. "offline cache": an offline run, or
+    every answer fell back to a stale cache entry. "no answer": nothing came from the network or the cache.
+    "mixed": some of each."""
+    if offline:
+        return "offline cache"
+    total = sum(origins.values())
+    fallen = origins["stale-cache"] + origins["none"]
+    if fallen == 0:
+        return "online"
+    if origins["none"] == total:
+        return "no answer"
+    return "offline cache" if fallen == total else "mixed"
+
+
 def enrichment(ctx: RunContext) -> tuple[str, str]:
     if ctx.from_base:
         return "skipped", "precomputed indicators from the base"
@@ -362,11 +378,12 @@ def enrichment(ctx: RunContext) -> tuple[str, str]:
     try:
         from ftf.enrich import Cache, Enricher
         from ftf.enrich.commands import DEFAULT_CACHE
+        from ftf.enrich.probe import ShortTimeoutClient
     except ImportError:
         return "not_available", "domain enrichment (HACK-19) not installed"
     cache_path = Path(DEFAULT_CACHE)
     cache = Cache(cache_path if cache_path.is_file() else None)  # never create a cache file as a side effect
-    enricher = Enricher(cache, offline=ctx.offline)
+    enricher = Enricher(cache, offline=ctx.offline, client=ShortTimeoutClient())
     added: list[Indicator] = []
     origins: Counter[str] = Counter()
     unknown = 0
@@ -393,10 +410,10 @@ def enrichment(ctx: RunContext) -> tuple[str, str]:
     if not done:
         return "skipped", "no registrable domain in this input"
     ctx.incident = _add_indicators(ctx.incident, added)
-    mode = "offline (cache only)" if ctx.offline else "online"
+    ctx.enrichment = enrichment_mode(origins, ctx.offline)
     where = ", ".join(f"{k}: {v}" for k, v in sorted(origins.items()))
     fail = f"; {failed} domain(s) failed" if failed else ""
-    return "ok", f"{mode}; {len(added)} indicator(s), {unknown} unknown; lookups {where}{fail}"
+    return "ok", f"enrichment: {ctx.enrichment}; {len(added)} indicator(s), {unknown} unknown; lookups {where}{fail}"
 
 
 def link_assign(ctx: RunContext) -> tuple[str, str]:

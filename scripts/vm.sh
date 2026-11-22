@@ -12,6 +12,7 @@
 # name (override with FTF_VM_SLUG), so several worktrees can use the VM at once. The venv installs
 # the pip extras in FTF_VM_EXTRAS (default app,dev,fetch; the visual families need features too).
 # Nothing is computed locally: the laptop only lists files, packs them and drives ssh.
+# Runs on the VM always export FTF_OFFLINE=1 (analyze and enrichment stay offline there).
 set -euo pipefail
 
 VM=${FTF_VM:-ftf-workbench}
@@ -37,6 +38,9 @@ case "$slug" in ''|.|..|-*) echo "vm.sh: bad slug '$slug'" >&2; exit 2 ;; esac
 # Runs on the VM as: bash -c "$remote" ftf-vm <slug> <mode> [args...]; the tarball is on stdin.
 read -r -d '' remote <<'REMOTE' || true
 set -euo pipefail
+# HACK-91: FTF_OFFLINE=1 on our VMs, so analyze, enrichment and build-base make no lookups there.
+# It does not guard `ftf fetch` or the scanner; live fetching stays off the workbench by rule.
+export FTF_OFFLINE=1
 slug=$1; mode=$2; shift 2
 w=/work/$slug
 mkdir -p "$w"

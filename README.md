@@ -14,7 +14,7 @@ It starts from one suspicious item: an ad, a saved page, a URL or a keyword. The
 
 1. **Capture.** A saved ad, page, HAR file or video is read as inert bytes. A URL is opened once in a locked-down headless browser (`ftf fetch`), which keeps the traffic, the final HTML and the redirect chain. Live scam pages are fetched only on an isolated sandbox machine. Ad libraries are searched by keyword (`ftf scan`). The tool never submits a form and never runs a saved script.
 2. **Extract.** Each capture yields indicators, filed under layers such as tracking account, kit, infrastructure or face.
-3. **Enrich.** Domains are looked up in four keyless public services. A failed lookup becomes "unknown", never an error.
+3. **Enrich.** Domains are looked up in four keyless public services. Enrichment is online by default and falls back to a cache when the network is down. A failed lookup becomes "unknown", never an error.
 4. **Link.** Each pair of captures gets a score in bits. A shared value is worth bits only if it is rare. The engine then assigns the new item to a known campaign, starts a new campaign, or sends it to review.
 5. **Show.** The result is a campaign view with each link and its evidence. `ftf export` writes the same result as CSV tables.
 
@@ -504,14 +504,16 @@ docker run --rm -p 127.0.0.1:8501:8501 -v "$PWD/base-bundle:/base:ro" ftf
 # then open http://127.0.0.1:8501
 ```
 
-Online by default lands HACK-91. Until then, live enrichment and fetching are off unless `--online` is given to `ftf analyze`, or `FTF_FETCH=1` lets the app fetch a submitted URL while "Online enrichment" is ticked.
+Enrichment is online by default. A start probe (two DNS-over-HTTPS hosts) and a 5-second timeout per lookup (15 s for crt.sh, one retry) fall back to the enrichment cache and the precomputed base. After the first request that gets no answer, the run stays offline, so a dead network costs about one timeout. The enrichment stage and the JSON summary's `enrichment` field say `online`, `offline cache`, `mixed` or `no answer`, and the app shows the same label.
+
+`--offline` on `ftf analyze`, or `FTF_OFFLINE=1`, forces the cache. `--online` is a no-op. Live page fetching stays opt-in: `--fetch` or `FTF_FETCH=1`, and only when online. The image sets `FTF_FETCH=1`.
 
 ### Command-line equivalents
 
 ```bash
 pip install -e .                 # the ftf command
 pip install -e '.[app]'          # the demo app
-ftf analyze INPUT --base dataset.json --out result.json   # add --online for live lookups
+ftf analyze INPUT --base dataset.json --out result.json   # online by default; add --offline for the cache only
 ftf export --base dataset.json --out DIR
 ftf serve --base dataset.json --port 8501
 ```
@@ -529,7 +531,7 @@ docker run --rm ftf --help
 docker run --rm ftf --version
 ```
 
-Without the stop-list file the build still works, and the engine warns and scores without it. The image is 1.63 GB and includes Playwright's headless Chromium, which `ftf fetch` needs. The hardened run, the first start with the organiser's folder and the image leak check are in [docs/container.md](docs/container.md).
+Without the stop-list file the build still works, and the engine warns and scores without it. The image is 5.57 GB (`docker images` size). It holds the CPU build of torch, the CPU feature models with the face reference set, tesseract and ffmpeg, and Playwright's headless Chromium, which `ftf fetch` needs. The build uses BuildKit (`COPY --chmod`); Docker 23 and later enables it by default, and older clients need `DOCKER_BUILDKIT=1`. The hardened run, the first start with the organiser's folder and the image leak check are in [docs/container.md](docs/container.md).
 
 ### Walkthrough
 
@@ -548,8 +550,8 @@ These are the method's outputs from hand-set weights, not a measured accuracy.
 | `FTF_BASE` | `/base/dataset.json` if present | campaign base for the app and `ftf analyze` |
 | `FTF_BASE_DIR` | `/base` | where the entry point looks for and builds the base |
 | `FTF_RAW_ROOT` | `/data/raw` | organiser folder; artefact paths in the base are relative to it |
-| `FTF_OFFLINE` | unset | `1` forces every network lookup off |
-| `FTF_FETCH` | unset | `1` lets the app fetch a submitted URL live, only while "Online enrichment" is ticked and `FTF_OFFLINE` is not set |
+| `FTF_OFFLINE` | unset | `1` forces every network lookup off (same as `--offline` on `ftf analyze`) |
+| `FTF_FETCH` | `1` in the image | `1` lets the app and `ftf analyze` fetch a submitted URL live (`--fetch`), only when online and `FTF_OFFLINE` is not set |
 | `FTF_ENRICH_CACHE` | `/base/enrichment/cache.json` if present | enrichment cache file |
 | `FTF_PORT` | `8501` | app port inside the container |
 | `FTF_BRAND_STOPLIST` | `/opt/ftf-brand/brand-stoplist.json` | brand stop-list; `off` switches it off, a missing file warns |
