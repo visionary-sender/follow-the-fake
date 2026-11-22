@@ -54,7 +54,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "--from-raw",
         type=Path,
         metavar="DIR",
-        help="ingest this folder (organiser data, saved pages, HARs, scam link lists) and take its registered domains, as --from-dataset does",
+        help="ingest this folder (organiser data, saved pages, HARs; runs every extractor, so slower) and take its registered domains, as --from-dataset does",
     )
     parser.add_argument("--cache", type=Path, default=DEFAULT_CACHE, help="cache file (default: %(default)s)")
     parser.add_argument("--offline", action="store_true", help="never use the network; serve the cache (also FTF_OFFLINE=1)")

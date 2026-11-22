@@ -123,3 +123,14 @@ def test_duplicate_is_skipped_before_any_lookup(tmp_path, capsys, monkeypatch):
     assert report["domains_enriched"] == 1
     assert report["invalid_inputs"][0]["input"] == "https://www.example.com/x"
     assert len([u for u in net.calls if "example.com" in u and "dns.google" in u]) == 3  # one lookup set, not two
+
+
+def test_shared_ad_display_domain_is_not_counted_as_dropped(tmp_path):
+    from ftf.indicators import domains as domain_indicators
+
+    cap = Capture(id="case:c1", stage=Stage.unknown, artefacts=[])
+    ad_only = Indicator(id="case:c1:i1", capture_id="case:c1", layer=Layer.creative, kind="ad_display_domain",
+                        level=Level.campaign, value="facebook.com", observed=Observed.static,
+                        provenance=Provenance(artefact_id=None, locator="test"), extractor="domains@test")
+    ds = Dataset(name="test", incidents=[Incident(id="case", source="synthetic", captures=[cap], indicators=[ad_only])])
+    assert domain_indicators.shared_dropped(ds) == {}  # a brand shown in an ad is never an enrichment candidate

@@ -258,12 +258,14 @@ def shared_category(domain: str) -> str:
 
 
 def shared_dropped(dataset: Dataset) -> dict[str, int]:
-    """Count of shared registered domains `registered_domains` leaves out, by stop-list group.
+    """Count of shared enrichment candidates `registered_domains` leaves out, by stop-list group.
 
     Counts and categories only: the domain names themselves are never returned, because the
     organiser's data names must not leave the outputs bucket."""
     kept = set(registered_domains(dataset, include_shared=False))
-    dropped = [d for d in registered_domains(dataset, include_shared=True) if d not in kept]
+    roles = domain_roles(dataset)
+    dropped = [d for d in registered_domains(dataset, include_shared=True)
+               if d not in kept and roles.get(d, set()) & _ENRICH_ROLES]
     counts: dict[str, int] = {}
     for d in dropped:
         cat = shared_category(d)
