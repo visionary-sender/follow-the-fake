@@ -108,6 +108,38 @@ The image ships it: `scripts/fetch-brand-stoplist.sh` copies it into the build c
 build still works and the engine warns and scores without the stop-list. Details:
 [docs/container.md](docs/container.md) and [docs/linking-decisions.md](docs/linking-decisions.md).
 
+### Face reference set (`FTF_FACES_REFERENCE`)
+
+The faces feature family (`ftf.features.faces`) compares every face in an ad creative or landing page
+with a small reference set of public figures who are impersonated in scam ads. For each face it
+records the nearest reference person (`person_face`, with the cosine similarity and the top three
+candidates) and a 128-dimension face embedding, so the same face can be linked across captures. No
+threshold is applied here: the linking engine weighs `person_face` low, because one celebrity is used
+by many unrelated campaigns.
+
+The set is defined by `src/ftf/features/faces/reference_manifest.json`. It lists 11 people, each with
+their Wikidata id and the Wikimedia Commons images used (24 in total, at most five per person):
+
+- Rafał Brzoska, Krzysztof Stanowski, Tomasz Sekielski, Monika Olejnik, Mateusz Morawiecki, Donald Tusk,
+  Robert Lewandowski, Radosław Sikorski, Andrzej Domański, Andrzej Duda, Anita Werner.
+
+Only public domain, CC0 and CC BY images are accepted, each with exactly one clear face. The build
+downloads the Commons thumbnails and embeds the largest face of each with SFace. No organiser image is
+ever used as a reference, and the images and embeddings are not in git. The build is
+`python -m ftf.features.faces.reference build`; the embeddings take about 12 KB.
+
+The reference is loaded in this order:
+
+1. the prebuilt directory named by `FTF_FACES_REFERENCE` (our copy is
+   `gs://follow-the-fake-data/outputs/visual/hack-15/reference/`);
+2. the cache `$FTF_MODEL_DIR/faces-reference/<manifest sha>`. In the container `FTF_MODEL_DIR` is
+   `/opt/ftf-models`, so the cache is `/opt/ftf-models/faces-reference/<manifest sha>`; without it the
+   default is `~/.cache/ftf/models`;
+3. a fresh build from Wikimedia, unless `FTF_OFFLINE=1`.
+
+If none of these works, faces are still embedded and linked, but no `person_face` is written. Details:
+[docs/features/faces.md](docs/features/faces.md).
+
 ### Safe URL fetcher (`ftf fetch`)
 
 `ftf fetch URL --out DIR` opens a URL in a locked-down headless Chromium and saves what a visitor would receive: the network traffic (HAR), the final HTML, a full-page screenshot and the redirect chain, as one capture folder that ingestion reads like a case folder. It never fills in or submits a form and never clicks. Dead and cloaked pages are results with an outcome, not errors. A network guard refuses private and metadata addresses and checks every redirect, and the browser runs with no credentials. Details, the outcome categories, the safety model, the sandbox VM and the hardened container run are in [docs/fetcher.md](docs/fetcher.md).
@@ -382,7 +414,7 @@ The sample is small: 33 canonical captures in 26 case folders, 3 non-singleton c
 | `docs/` | `contract.md`, `methodology.md`, `container.md` (the jury run), and the details of the fetcher, scanner and enrichment |
 | `tests/` | pytest suite, run on the workbench VM |
 | `scripts/vm.sh` | cloud dev loop: sync to the workbench VM, run tests or commands there |
-| `scripts/check_no_organiser_values.py` | fails if organiser values reach tracked files or commit messages |
+| `scripts/check_no_private_data.py` | fails if personal data, secrets or raw challenge files reach tracked files or commit messages |
 | `scripts/egress.sh`, `scripts/egress_measure.py` | short-lived egress workers with fresh Google Cloud IPs (corpus building only) and the HACK-45 measurement |
 | `scripts/sandbox.sh` | sandbox VM for live fetching |
 | `scripts/scanner-sandbox.sh`, `deploy/scanner/` | scheduled ad-library scanner on the sandbox VM |
@@ -419,26 +451,30 @@ rebuilt only when `pyproject.toml` changes. Different worktrees get different di
 they can use the VM at the same time; set `FTF_VM_SLUG` to choose the name yourself. The script
 refuses to take over an existing `/work/<name>` that it did not create.
 
-### Organiser-value check
+### Private-data check
 
-`scripts/check_no_organiser_values.py` fails if a domain, host, URL, id-like indicator value or page
-title of the organiser dataset appears in a tracked file or in a commit message. The dataset exists
-only on the workbench VM, so the check runs there. Write the commit messages on the laptop, copy them
-to the VM with `gcloud compute scp`, then run:
+`scripts/check_no_private_data.py` fails on three things only: personal data of private people (e-mail
+addresses and phone numbers, including the contacts in the organiser dataset), secrets (private keys,
+cloud and forge tokens, password or API key assignments), and raw challenge files committed as files
+(HAR, MHTML, WARC, PDF, screenshots, HTML dumps, by extension or by content). Scam domains, URLs and
+tracker, account, tenant and pixel ids, and the names of public figures and brands may be in git
+(owner, 2026-11-22). The dataset exists only on the workbench VM, so the check runs there. Write the
+commit messages on the laptop, copy them to the VM with `gcloud compute scp`, then run:
 
 ```bash
 git log --all --format=%B > commit-messages.txt        # on the laptop
 scripts/vm.sh run -- true                              # sync the worktree
 gcloud compute scp commit-messages.txt ftf-workbench:/work/<slug>/ --project follow-the-fake \
   --zone europe-central2-a --tunnel-through-iap --quiet
-scripts/vm.sh run -- python3 -I scripts/check_no_organiser_values.py \
+scripts/vm.sh run -- python3 -I scripts/check_no_private_data.py \
   --dataset /data/derived/ingest/organiser/dataset.json --root . \
   --messages /work/<slug>/commit-messages.txt          # <slug> is the worktree directory name
 ```
 
-A hit prints `file:line`, the kind of value and a short hash of the match, never the value itself.
-Exit 0 means no hit, and exit 1 means at least one. Values shorter than 6 characters and a short
-allowlist of public services are ignored.
+A hit prints `file:line: class (digest)`, where class is `personal`, `secret` or `raw`, and a short hash
+of the match, never the match itself. Exit 0 means no hit, and exit 1 means at least one. Files that
+are invented test fixtures are listed by path in the script with their reason (`PERSONAL_ALLOWED`,
+`RAW_ALLOWED`); reserved domains such as `example.com` and `.test` are placeholders and never hits.
 
 ## Licences
 
