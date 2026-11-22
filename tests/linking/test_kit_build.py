@@ -78,3 +78,18 @@ def test_common_skeleton_is_no_build():
 
 def test_operator_relation_unchanged():
     assert not build_of(ctx_for([SKELETON, PHASH], [SKELETON, PHASH]), Relation.operator)
+
+
+def test_only_the_rare_value_gets_campaign_scale():
+    # the skeleton is rare and backed by the creative; the shared script is common (3 pre-groups) and keeps
+    # its template scale (3.0 × 0.5 − log2(3) < hub_bits)
+    others = [incident("c", [SCRIPT]), incident("d", [SCRIPT])]
+    ctx = ctx_for([SKELETON, SCRIPT, PHASH], [SKELETON, SCRIPT, PHASH], others)
+    assert {v[1] for v in build_of(ctx)} == {"dom_skeleton_sha256"}
+    _, kit = kit_rows(ctx)
+    assert kit == {"dom_skeleton_sha256": 2.5}
+
+
+def test_masked_text_template_is_no_corroboration():
+    tmpl = (L.creative, "text_template", "tmpl-1")
+    assert not build_of(ctx_for([SKELETON, tmpl], [SKELETON, tmpl]))
