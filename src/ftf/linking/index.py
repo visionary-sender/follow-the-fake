@@ -1,6 +1,6 @@
 """Candidate index: find the campaigns a new incident can match without rescanning the collection.
 
-Method (07 §3 D2 "Data model" and "Assignment (open set)"):
+Data model and assignment (open set):
 
 * Built once from a linked base (the output of `ftf link`): an inverted index
   (layer, kind, normalised value) -> canonical captures, over informative values only (collector
@@ -14,7 +14,7 @@ Method (07 §3 D2 "Data model" and "Assignment (open set)"):
 * The scoring context of "base plus one incident" is the base context extended by the incident
   (`extend_context`): copy-on-write overlays, so its cost is the incident's size, not the
   collection's (pre-groups are recomputed only when the incident carries a live private or owner id).
-* Vector views (HACK-24): `add_vector_view(view, capture_ids, matrix)` stores a matrix; `nearest`
+* Vector views: `add_vector_view(view, capture_ids, matrix)` stores a matrix; `nearest`
   is an exact top-k by dot product. Enough at our scale, no new dependency.
 
 Persisted as JSON (plus one `.npy` per vector view). No pickle. The scoring context itself is not
@@ -436,7 +436,7 @@ class CandidateIndex:
             _remember(base, idx)
         return idx
 
-    # --- vectors (HACK-24 hook) -------------------------------------------------------------
+    # --- vectors (hook) -------------------------------------------------------------
 
     def add_vector_view(self, view: str, capture_ids: list[str], matrix: np.ndarray) -> None:
         matrix = np.asarray(matrix)
@@ -689,7 +689,7 @@ def cached_index(base: Dataset) -> Optional[CandidateIndex]:
         return None
     ctx = hit[1]._ctx
     if ctx is not None and hit[1].default_options and ctx.brand != default_brand():
-        del _CACHE[id(base)]  # the default brand stop-list changed since indexing (HACK-66)
+        del _CACHE[id(base)]  # the default brand stop-list changed since indexing
         return None
     return hit[1]
 

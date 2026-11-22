@@ -1,4 +1,4 @@
-"""`ftf calibrate-similarity`: fit the content-view calibrations the ledger reads (HACK-24).
+"""`ftf calibrate-similarity`: fit the content-view calibrations the ledger reads.
 
 No labels are needed. Each dataset is grouped by the ledger itself (`ftf link`, identifier
 evidence only, content views off, so a view never labels its own training pairs), under the

@@ -1,4 +1,4 @@
-"""Id hierarchy discovery and the chain rule (07 §2.2 items 2 and 5, §3 D2 "Data model").
+"""Id hierarchy discovery and the chain rule.
 
 The scammers' platform exposes a chain of ids: platform ⊃ tenant ⊃ owner ⊃ campaign ⊃ landing.
 The *anchor* kinds name those levels directly (`ANCHOR_KINDS`). Every other value is placed at the
@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 
 from ftf.contract.models import EvidenceRow, EvidenceStatus, Layer, Level
 
-# Kinds that name a level of the aio chain directly (Ingestion's kinds, HACK-10).
+# Kinds that name a level of the aio chain directly (Ingestion's kinds).
 ANCHOR_KINDS: dict[str, Level] = {
     "aio_cdn_tenant": Level.tenant,
     "aio_owner": Level.operator,

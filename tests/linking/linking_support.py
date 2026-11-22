@@ -107,7 +107,7 @@ def dataset(*incidents: Incident, name: str = "synthetic") -> Dataset:
 
 
 class StubScorer:
-    """Hand-table stand-in for the HACK-21 ledger: fixed bits per shared layer, -4 per single-valued conflict."""
+    """Hand-table stand-in for the ledger: fixed bits per shared layer, -4 per single-valued conflict."""
 
     def __init__(self, ds: Dataset):
         canon = {c.id: (c.duplicate_of or c.id) for i in ds.incidents for c in i.captures}
