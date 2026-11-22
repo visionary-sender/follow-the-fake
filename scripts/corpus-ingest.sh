@@ -20,10 +20,12 @@ cd "$D"
 ftf ingest "${inputs[@]}" --root . --out ingested/dataset.json --timing ingested/timing.json
 # Label lists live in the bucket (gs://follow-the-fake-data/outputs/corpus/lists/), never in git.
 L=/data/derived/corpus/lists
-lists=()
-[ -f $L/legit-domains.txt ] && lists+=(--legit-list $L/legit-domains.txt)
-[ -f $L/person-keywords.txt ] && lists+=(--person-keywords $L/person-keywords.txt)
-[ -f $L/certpl-listed.txt ] && lists+=(--listed-domains $L/certpl-listed.txt)
+mkdir -p "$L"
+for f in legit-domains.txt person-keywords.txt certpl-listed.txt; do
+  gcloud storage cp "gs://follow-the-fake-data/outputs/corpus/lists/$f" "$L/$f" >/dev/null \
+    || { echo "label list $f missing from the bucket (outputs/corpus/lists/)" >&2; exit 1; }
+done
+lists=(--legit-list $L/legit-domains.txt --person-keywords $L/person-keywords.txt --listed-domains $L/certpl-listed.txt)
 ftf corpus tag-ingested --dataset ingested/dataset.json --manifest manifest.jsonl --out ingested/corpus_kind.jsonl "${lists[@]}" \
   | tee ingested/summary.json
 gcloud storage rsync -r --delete-unmatched-destination-objects "$D/ingested/" "gs://follow-the-fake-data/outputs/corpus/$batch/ingested/" 2>&1 | tail -1

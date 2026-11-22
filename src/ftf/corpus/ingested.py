@@ -26,12 +26,20 @@ import json
 import re
 from collections import defaultdict
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
-from ftf.corpus.build import BARE_DOMAIN, FETCHED_LANDING, MUST_NOT_LINK, MUST_NOT_LINK_BLOCKED, VICTIM_PROFILE
+from ftf.corpus.build import (
+    BARE_DOMAIN,
+    FETCHED_LANDING,
+    MUST_NOT_LINK,
+    MUST_NOT_LINK_BLOCKED,
+    VICTIM_PROFILE,
+    wayback_original,
+)
 
 EXCLUDE = "exclude"
 _FETCH_ID = re.compile(r"^fetch:([^:]+)")
+_TRACKING_PARAM = re.compile(r"^(utm_|fbclid$|gclid$)")
 
 
 def fetch_id(capture_or_incident_id: str) -> str | None:
@@ -49,9 +57,22 @@ def _registrable(host: str) -> str:
         return host
 
 
+def _unwrap(url: str | None) -> str | None:
+    """The original page behind an Internet Archive snapshot URL; any other URL unchanged."""
+    orig = wayback_original(url) if url else None
+    return orig[1] if orig else url
+
+
 def _domain(url: str | None) -> str | None:
-    host = urlsplit(url).hostname if url else None
+    host = urlsplit(_unwrap(url)).hostname if url else None
     return _registrable(host.lower()) if host else None
+
+
+def _landing_key(url: str) -> str:
+    """Identity of a landing page: host, path and query without tracking parameters."""
+    parts = urlsplit(_unwrap(url))
+    query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if not _TRACKING_PARAM.match(k.lower())]
+    return (parts.hostname or "") + parts.path + ("?" + urlencode(query) if query else "")
 
 
 def read_lines(path: Path | None) -> set[str]:
@@ -85,7 +106,8 @@ def scam_label(rows: list[dict], listed: set[str], legit: set[str], persons: set
     - `listed`: a CERT Polska list entry, or a landing domain (default or final URL) on that list;
     - `legit_suspected`: a landing domain on the regulated-broker / brand list (`legit`);
     - `suspected`: an ad found by a person's-name keyword whose landing page was cloaked for the
-      default visitor (bot wall / decoy / empty), or loaded only for another profile or egress;
+      default visitor (bot wall / decoy / empty). A dead default fetch is not evidence (the page
+      may just be down), so it stays `unknown` even if another profile or egress loaded it;
     - `unknown`: everything else. Never treat `unknown` as scam.
     """
     if any(r["corpus_kind"] in (MUST_NOT_LINK, MUST_NOT_LINK_BLOCKED) for r in rows):
@@ -101,10 +123,8 @@ def scam_label(rows: list[dict], listed: set[str], legit: set[str], persons: set
     for r in rows:
         if (r.get("query") or "").strip().lower() not in persons:
             continue
-        cats = {p: c for p, _, c, _ in _attempts(r)}
-        default = cats.get("default")
-        other_live = any(c == "live" for p, c in cats.items() if p != "default")
-        if default == "cloaked" or (default != "live" and other_live):
+        # Every attempt is checked (no dict keyed by profile, which would let a later attempt hide one).
+        if any(p == "default" and c == "cloaked" for p, _, c, _ in _attempts(r)):
             return "suspected"
     return "unknown"
 
@@ -117,7 +137,10 @@ def tag_ingested(
     persons: set[str] | None = None,
     extra_listed: set[str] | None = None,
 ) -> dict:
-    legit, persons = legit or set(), persons or set()
+    # Domain lists hold hosts too (`www.` or a subdomain): compare registrable domains only.
+    legit = {_registrable(d) for d in legit or () if d}
+    persons = persons or set()
+    extra_listed = {_registrable(d) for d in extra_listed or () if d}
     rows_all: list[dict] = []
     by_fetch: dict[str, list[tuple[dict, str]]] = defaultdict(list)  # folder -> (row, profile)
     by_item: dict[str, list[dict]] = defaultdict(list)  # scanner item key -> rows
@@ -135,7 +158,7 @@ def tag_ingested(
             if folder:
                 by_fetch[folder].append((row, profile))
     listed = {_domain(r["target_url"]) for r in rows_all if r.get("source") == "certpl" and r.get("target_url")}
-    listed = {d for d in listed if d} | (extra_listed or set())
+    listed = {d for d in listed if d} | extra_listed
 
     ds = json.loads(Path(dataset_path).read_text(encoding="utf-8"))
     counts: dict[str, int] = defaultdict(int)
@@ -155,7 +178,7 @@ def tag_ingested(
             hits = [(r, prof) for f in sorted(folders) for r, prof in by_fetch.get(f, [])]
             if item_rows:  # a scanner item itself (ad or CERT listing)
                 rows = item_rows
-                kind = item_rows[0]["corpus_kind"] if inc["id"].startswith("adlib:") else BARE_DOMAIN
+                kind = item_rows[0]["corpus_kind"]  # ad_record, or a CERT item's landing kind (build.py)
                 profiles: list[str] = []
             elif hits:
                 rows = list({id(r): r for r, _ in hits}.values())
@@ -216,7 +239,7 @@ def effective_sample(rows: list[dict], listed: set[str], legit: set[str], person
         if r["corpus_kind"] in (MUST_NOT_LINK, MUST_NOT_LINK_BLOCKED):
             continue
         finals = {
-            (urlsplit(f).hostname or "") + urlsplit(f).path for _, _, cat, f in _attempts(r) if cat == "live" and f
+            _landing_key(f) for _, _, cat, f in _attempts(r) if cat == "live" and f
         }
         if finals:
             live_by_label[scam_label([r], listed, legit, persons)] |= finals

@@ -56,7 +56,8 @@ never ground truth. First matching rule wins:
 3. `legit_suspected`: the landing domain is on `lists/legit-domains.txt` (regulated brokers, real
    brands, and platform hosts such as facebook.com where the destination is unknown).
 4. `suspected`: an ad found by a person's-name keyword (`lists/person-keywords.txt`) whose landing
-   page was cloaked for the default visitor, or loaded only for the victim profile / another egress.
+   page was cloaked for the default visitor. A dead default fetch is `unknown`, even if the victim
+   profile or another egress loaded the page (it may just have been down).
 5. `unknown`: everything else. **Never treat `unknown` as scam.**
 
 Use `listed` + `suspected` as the scam-side background, `not_scam` as must-not-link, and keep

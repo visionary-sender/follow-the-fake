@@ -15,7 +15,7 @@ Ids follow the cross-project scheme (HACK-9 `ftf.ingest.ids`, HACK-41):
   landing URL was fetched, `adlib:<id>:lander` (the fetcher's capture, re-keyed);
 - fetched pages without an ad (CERT Polska domains that loaded, must-not-link pages): the
   fetcher's own incident, ids unchanged (`fetch:<capture_id>`, capture `fetch:<capture_id>:c1`);
-- CERT Polska entries with no live page: incident `certpl:<register id>`, capture `...:c1`.
+- CERT Polska entries with no live page: incident `certpl:<registrable domain>`, capture `...:c1`.
 
 Every capture carries `corpus_kind` and `corpus_source` indicators in the collector layer: they
 describe how the corpus was gathered, not the scam, so they can never contribute to a link.

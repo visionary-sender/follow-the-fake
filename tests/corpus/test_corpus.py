@@ -109,8 +109,8 @@ def corpus(tmp_path):
     root = tmp_path / "batch"
     sc = root / "scanner"
     rows = [
-        _row("meta:1", "meta", "meta-1", url="https://shared.example/lp", keyword="Brzoska"),
-        _row("meta:2", "meta", "meta-2", url="https://shared.example/lp", keyword="Brzoska"),
+        _row("meta:1", "meta", "meta-1", url="https://shared.example/lp", keyword="jan testowy"),
+        _row("meta:2", "meta", "meta-2", url="https://shared.example/lp", keyword="jan testowy"),
         _row("google_atc:3", "google_atc", "g-3", domain="invest.example", keyword="trading"),
         _row("certpl:4", "certpl", "c-4", domain="Live.Example."),
         _row("certpl:5", "certpl", "c-5", domain="dead.example"),
@@ -214,7 +214,7 @@ def test_build(corpus):
     def tags(i, cap):
         return {x.kind: x.value for x in i.indicators if x.capture_id == cap.id and x.kind.startswith("corpus_")}
 
-    assert tags(m1, m1.captures[0]) == {"corpus_kind": "ad_record", "corpus_source": "meta:Brzoska"}
+    assert tags(m1, m1.captures[0]) == {"corpus_kind": "ad_record", "corpus_source": "meta:jan testowy"}
     assert tags(m1, m1.captures[1])["corpus_kind"] == "fetched_landing"
     g = inc["adlib:g-3"]
     assert rows["adlib:g-3"]["fetch_category"] == "cloaked" and not rows["adlib:g-3"]["has_landing_page"]
@@ -571,7 +571,7 @@ def test_labels_flags_exclude_and_egress(corpus, tmp_path):
     (tmp_path / "ing.json").write_text(json.dumps(ing))
     out = tmp_path / "k.jsonl"
     s = tag_ingested(tmp_path / "ing.json", root / "manifest.jsonl", out,
-                     legit={"shared.example"}, persons={"brzoska"})
+                     legit={"shared.example"}, persons={"jan testowy"})
     rows = {r["incident_id"]: r for r in map(json.loads, out.read_text().splitlines())}
     assert rows["certpl:dead.example"]["scam_label"] == "listed"
     assert rows["adlib:meta-1"]["scam_label"] == "legit_suspected"  # its landing domain is on the legit list
@@ -592,6 +592,68 @@ def test_scam_label_suspected():
     assert scam_label([row], set(), set(), {"person name"}) == "suspected"
     assert scam_label([row], set(), set(), set()) == "unknown"
     assert scam_label([row], {"lp.example"}, set(), set()) == "listed"
+
+
+def test_scam_label_dead_default_is_unknown():
+    from ftf.corpus.ingested import scam_label
+
+    row = {"corpus_kind": "ad_record", "source": "meta", "query": "jan testowy", "target_url": "https://lp.example/",
+           "fetch_capture_id": "a", "fetch_category": "dead", "final_url": "https://lp.example/",
+           "victim_capture_id": None,
+           "egress": [{"profile": "ftf-egress-1", "capture_id": "e", "category": "live", "final_url": "https://lp.example/"}]}
+    # The page was down for the default visitor and live via egress: not evidence of cloaking.
+    assert scam_label([row], set(), set(), {"jan testowy"}) == "unknown"
+    assert scam_label([dict(row, fetch_category="cloaked")], set(), set(), {"jan testowy"}) == "suspected"
+
+
+def test_scam_label_every_attempt_checked():
+    from ftf.corpus.ingested import scam_label
+
+    # Two attempts share the profile key "default"; the live one must not hide the cloaked default fetch.
+    row = {"corpus_kind": "ad_record", "source": "meta", "query": "jan testowy", "target_url": "https://lp.example/",
+           "fetch_capture_id": "a", "fetch_category": "cloaked", "final_url": "https://lp.example/",
+           "egress": [{"profile": "default", "capture_id": "e", "category": "live", "final_url": "https://lp.example/"}]}
+    assert scam_label([row], set(), set(), {"jan testowy"}) == "suspected"
+
+
+def test_landing_key_and_wayback_domain():
+    from ftf.corpus.ingested import _domain, _landing_key
+
+    assert _landing_key("https://lp.example/a?id=7&utm_source=x&fbclid=y&gclid=z") == _landing_key("https://lp.example/a?id=7")
+    assert _landing_key("https://lp.example/a?id=7") != _landing_key("https://lp.example/a?id=8")
+    snap = "https://web.archive.org/web/20261118061622if_/https://news-b.example/x-st1"
+    assert _domain(snap) == "news-b.example"
+    assert _landing_key(snap) == _landing_key("https://news-b.example/x-st1")
+
+
+def test_tag_ingested_cert_item_live_victim(corpus, tmp_path):
+    from ftf.corpus.ingested import tag_ingested
+
+    root, picked = corpus
+    # CERT item certpl:dead.example: default fetch dead, victim-profile fetch live.
+    _capture(root / "fetch-victim", "v-dead", "https://dead.example/", "live", "live", "2026-11-21T23:10:00Z")
+    build_corpus(root, "scanner", [RUN], ["fetch-1", "fetch-2"], None, [], "t", victim_dirs=["fetch-victim"])
+    ing = {"incidents": [{"id": "certpl:dead.example", "captures": [{"id": "certpl:dead.example:c1"}], "indicators": []}]}
+    (tmp_path / "ing.json").write_text(json.dumps(ing))
+    out = tmp_path / "k.jsonl"
+    tag_ingested(tmp_path / "ing.json", root / "manifest.jsonl", out)
+    (row,) = map(json.loads, out.read_text().splitlines())
+    assert row["corpus_kind"] == "fetched_landing"
+
+
+def test_tag_ingested_normalises_domain_lists(tmp_path):
+    from ftf.corpus.ingested import tag_ingested
+
+    # A public-suffix domain (.com): `.example` is no public suffix, so it would not reduce to a domain.
+    row = {"corpus_kind": "ad_record", "incident_id": "adlib:x1", "source": "meta", "query": "x",
+           "target_url": "https://shop.news-a.com/offer", "fetch_capture_id": None, "victim_capture_id": None}
+    (tmp_path / "manifest.jsonl").write_text(json.dumps(row) + "\n")
+    (tmp_path / "ing.json").write_text(json.dumps({"incidents": [{"id": "adlib:x1", "captures": [], "indicators": []}]}))
+    out = tmp_path / "k.jsonl"
+    # A host entry in the legit list matches its registrable domain.
+    tag_ingested(tmp_path / "ing.json", tmp_path / "manifest.jsonl", out, legit={"www.news-a.com"})
+    (out_row,) = map(json.loads, out.read_text().splitlines())
+    assert out_row["scam_label"] == "legit_suspected"
 
 
 def test_attempt_label():
