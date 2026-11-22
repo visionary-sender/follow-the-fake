@@ -37,6 +37,23 @@ def _pairs(assign: dict[str, int]) -> set[tuple[str, str]]:
     return {tuple(sorted(p)) for ms in by.values() for p in combinations(sorted(ms), 2)}  # type: ignore[misc]
 
 
+def merge_overlapping(groups: Iterable[Iterable[str]]) -> list[set[str]]:
+    """Union of groups that share any member, so the output groups are disjoint."""
+    out: list[set[str]] = []
+    for g in groups:
+        g = set(g)
+        if not g:
+            continue
+        keep = []
+        for h in out:
+            if h & g:
+                g |= h
+            else:
+                keep.append(h)
+        out = keep + [g]
+    return out
+
+
 def _ratio(num: int, den: int) -> float | None:
     return num / den if den else None
 
