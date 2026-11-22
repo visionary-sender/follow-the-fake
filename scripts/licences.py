@@ -35,7 +35,7 @@ from packaging.utils import canonicalize_name
 
 ROOT = Path(__file__).resolve().parent.parent
 TABLE = ROOT / "LICENSES-THIRD-PARTY.md"
-EXTRAS = ("app", "dev", "fetch")
+EXTRAS = ("app", "dev", "fetch", "features")
 
 # Matched against whole words of a licence name ("MIT License", "BSD-2-Clause", "PSF-2.0").
 ALLOWED_WORDS = {"MIT", "BSD", "0BSD", "APACHE", "PSF", "ISC", "HPND", "ZLIB"}
@@ -175,7 +175,7 @@ def dependencies() -> dict[str, metadata.Distribution]:
         try:
             dist = metadata.distribution(req.name)
         except metadata.PackageNotFoundError:
-            raise SystemExit(f"required package not installed: {req.name} (install .[app,dev,fetch])")
+            raise SystemExit(f"required package not installed: {req.name} (install .[app,dev,fetch,features])")
         found[name] = dist
         queue.extend((r, frozenset(req.extras)) for r in dist.requires or [])
     return found

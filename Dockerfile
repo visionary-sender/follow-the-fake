@@ -16,6 +16,8 @@ FROM python:3.11-slim@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b5
 # `features` the CPU feature models (HACK-13/14/15/16). --build-arg FTF_EXTRAS=app,fetch leaves
 # `features` out (no torch, no weights).
 ARG FTF_EXTRAS=app,fetch,features
+# torch CPU build from the PyTorch index (no CUDA wheels); used only when FTF_EXTRAS has `features`.
+ARG TORCH_VERSION=2.15.0
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -34,7 +36,10 @@ RUN useradd --create-home --uid 10001 ftf \
 COPY --from=build /wheels /wheels
 # --- Safe URL fetcher (HACK-17) --------------------------------------------------------------
 # `ftf fetch` needs Playwright and its headless Chromium (BSD) plus the system libraries it links.
-RUN pip install "$(ls /wheels/ftf-*.whl)[${FTF_EXTRAS}]" && rm -rf /wheels \
+RUN if [ "${FTF_EXTRAS#*features}" != "$FTF_EXTRAS" ]; then \
+        pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu "torch==${TORCH_VERSION}+cpu"; \
+    fi \
+    && pip install "$(ls /wheels/ftf-*.whl)[${FTF_EXTRAS}]" && rm -rf /wheels \
     && playwright install --with-deps --only-shell chromium \
     && rm -rf /var/lib/apt/lists/* \
     && chmod -R a+rX /opt/ms-playwright
