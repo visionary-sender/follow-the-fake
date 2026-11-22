@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any
 
 from ftf.contract import Dataset
+from ftf.evaluate.hidden import register as register_hidden
+from ftf.evaluate.timesplit import register as register_timesplit
 from ftf.evaluate.units import DEFAULT_SPEC, load_spec
 
 DEFAULT_OUT = Path(os.environ.get("FTF_EVAL_DIR") or "/data/derived/evaluation")
@@ -154,11 +156,13 @@ def _register_baseline(sub: argparse._SubParsersAction) -> None:
     p.set_defaults(func=run)
 
 
-# Sibling issues (HACK-27/28/29) append their register function here.
+# Sibling issues (HACK-28/29) append their register function here.
 SUBCOMMANDS: list[Callable[[argparse._SubParsersAction], None]] = [
     _register_labels,
     _register_leak,
     _register_baseline,
+    register_timesplit,
+    register_hidden,
 ]
 
 
