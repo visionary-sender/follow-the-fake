@@ -10,7 +10,7 @@ Challenge data lives in a private bucket and never in this repository.
 - Turns each capture into **indicators** (a tracking pixel, a platform tenant, a page-kit fingerprint, a landing id, a domain fact) and scores pairs of captures in **bits of evidence**: how much more likely a shared value is if the two belong to one campaign than if they do not.
 - Groups captures into campaigns, one partition per relation (same template, same tracking account, same operator, same campaign, same ecosystem), and assigns a new item to a campaign, to a new campaign, or to a review queue.
 - Explains every link with an itemised ledger, labelled with the evidence tiers that CERT Polska uses (Strong, Medium, Supplementary, insufficient alone).
-- Ships as the `ftf` command, a Streamlit demo app and a container image. Content features (text embeddings, image hashes, faces) are scaffolding only in this release; see [Limitations](#limitations).
+- Ships as the `ftf` command, a Streamlit demo app and a container image. Content features are merged and on: text (OCR, page text, masked templates, embeddings), images (perceptual hashes, embeddings), video keyframes and speech, people and brands, and faces (YuNet detection, SFace embeddings, an 11-person reference set). Calibrated content views that feed the linking ledger are off by default; see [Limitations](#limitations).
 
 ## Quick start
 
@@ -135,10 +135,10 @@ The protocol, from the method notes:
 
 The tables below are the final evaluation report (HACK-29, `report.md` in `gs://follow-the-fake-data/outputs/evaluation/report/`), copied from its file with only the heading levels changed. Each table states its evidence setting, and cases are named by folder number only. The counts are raw, so read them as counts, not as accuracy.
 
-Two results matter most for the claims above:
+Two results matter most for the claims above, and the tables below give the counts:
 
-- With platform ids hidden (E1), the Linking engine recovers 0 of 11 true campaign pairs. Its campaign gate (HACK-53) keeps those pairs unlinked rather than guessing, so recall without the platform layer is 0 of 11. Its precision is safe: 0 of 37 must-not-link pairs are violated.
-- On the distractors (E4), the Linking engine passes 43 of 43 natural must-not-link pairs, 58 of 58 brand negatives, 3 of 3 platform-only pages, 2 of 2 celebrity-only pages, 2 of 2 collector-invariance checks and 2 of 3 synthetic kit copies. One synthetic kit copy (b) still fails the check.
+- With platform ids hidden (E1), the Linking engine's campaign gate (HACK-53) trades recall for precision: it links almost no true campaign pairs, and it violates no must-not-link pair.
+- On the distractors (E4), the Linking engine passes every class except the synthetic kit copy (b), which is reported in its table rather than hidden.
 
 In the pair counts, `P` is out of the predicted pairs and `R` is out of the true pairs, as the report defines them.
 
@@ -356,16 +356,13 @@ Fragile links, by case folder (a fragile link flips under one layer moved ±2 bi
 The sample is small: 33 canonical captures in 26 case folders, 3 non-singleton campaign groups and 13 later items, so these counts are a regression check, not a benchmark. Cluster sizes are skewed: the largest campaign group holds 5 of 33 captures, so pair counts are dominated by it and macro-averages over groups are reported next to them. The E7 time split uses the organiser's source set instead of a capture date for 4 of 13 later items, so it tests organiser sets rather than dates. The reference base is not grown during E7: each later item is assigned against the reference folders alone, so later items never join one another or the base. The synthetic distractors (E4) are built from one organiser batch, so they test the engine on controlled edits rather than on other sources. The brand negatives are one batch of pages, so a clean E4 result says little about other brands or sources. Open-set assignment (E2, all evidence) gives 0 wrong-campaign assignments out of 7 assigned items for the Linking engine, against 3 of 8 for the baseline, over 8 leave-one-item and 8 leave-one-group items, so one error moves any rate by a large step. False accepts, assignments of items that should be new, are counted in E7 only. The sensitivity check moves 34 weights by ±1 and ±2 bits one at a time: 15 of 21 pair links change verdict under a single-layer ±2 move, so their verdicts depend on the hand-set priors and are flagged as fragile. With platform ids hidden (E1) the Linking engine recovers 0 of 11 true campaign pairs: recall without the platform layer is 0 of 11, while precision is safe, with 0 of 37 must-not-link pairs violated. Linking's campaign gate (HACK-53) means that with platform ids hidden it links 0 campaign pairs. The baseline recovers 11 of 11 and violates 31 of 37.
 <!-- eval:limitations end -->
 
-- **The weights are priors.** They are explicit, hand-set bits, not fitted to the data, and the case sample is 26 case folders. Its must-not-link pairs come from analysts and from synthetic distractors, not from an independent sample. Section 9 of [docs/methodology.md](docs/methodology.md) lists what that implies. A learned table (HACK-23) can be passed with `ftf link --weights`, but the default run keeps the hand-set priors.
-- **The demo base is small.** The walkthrough base is the 2026-11-22 hour-4 slice (a dated snapshot), and the scaling figures in the methodology are design estimates and have not been measured.
-- **Content features are off by default.** Text embeddings, image hashes and faces add bits only when a calibration is passed with `--content-views` (HACK-24). Without it they do not change any score.
+- **The weights are priors.** They are hand-set bits, not fitted to the data. Section 9 of [docs/methodology.md](docs/methodology.md) lists the limits. A learned table (HACK-23) can be passed with `ftf link --weights`, but the default run keeps the hand-set priors.
+- **The demo base is a slice.** The walkthrough uses the hour-4 slice (`base-h4-main`), not the full challenge base, so the demo shows the method rather than the evaluation. The scaling figures in the methodology are design estimates and have not been measured.
+- **Calibrated content views are off by default.** Text, image and face similarity add bits to the ledger only when a calibration is passed with `--content-views` (HACK-24). Without it they do not change any score.
 - **The brand stop-list is a file.** It is on by default and reads `$FTF_BRAND_STOPLIST` or its default path on the workbench. Where the file is missing, such as the jury container, the engine prints a warning and scores as if no stop-list existed.
 - **Enrichment and live fetching depend on outside services.** When a service is down, the item carries less evidence and is more likely to go to review.
 - **Campaigns rotate.** Operators change pages, pixels and ad accounts inside a campaign. The campaign relation is kept strict for that reason, so variants can end in review rather than in a campaign.
-- **The demo app's "insufficient alone" label** still uses an adapter threshold (log2 of the number of captures) until the engine publishes its threshold in the dataset.
-- **One synthetic kit copy still fails the distractor check.** E4 (b) passes 2 of 3. The other distractor classes pass in this run (E4), and the failure is reported, not hidden.
-
-The counts in the paragraph above refer to protocols: "7 assigned items" and "8 leave-one-item" are the `loo_item` rows of E2, "8 leave-one-group items" are the `loco` rows, and `loco_mixed` (2 items) appears only in the E2 table.
+- **One distractor class is still partly failing.** The synthetic kit copies (E4 b) do not all pass. The failure is reported in the E4 table, not hidden.
 
 ## Repository layout
 
@@ -378,7 +375,7 @@ The counts in the paragraph above refer to protocols: "7 assigned items" and "8 
 | `src/ftf/enrich/` | keyless domain enrichment (`ftf enrich-domain`) |
 | `src/ftf/fetch/` | safe URL fetcher (`ftf fetch`) |
 | `src/ftf/scanner/` | ad-library scanner (`ftf scan`) |
-| `src/ftf/features/` | content features (scaffolding; the Visual layer is paused) |
+| `src/ftf/features/` | content features: text, image, video, people and brands, faces (`docs/features/`) |
 | `src/ftf/pipeline/` | end-to-end analysis (`ftf analyze`) and the export (`ftf export`); stage adapters in `stages.py` |
 | `src/ftf/app/` | Streamlit demo app (`ftf serve`); evidence ledger in `ledger.py`, campaign views in `relations.py` |
 | `src/ftf/contract/` | the data contract (pydantic models); see `docs/contract.md` |
