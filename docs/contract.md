@@ -66,7 +66,7 @@ major version is 0, a **minor** bump is breaking: renamed or removed fields, cha
 members, tighter invariants. A **patch** bump is additive, such as a new optional field or a new indicator `kind` (kinds are
 free snake_case strings). New code reads older documents of the same `0.MINOR`. Unknown fields
 are rejected, so read a newer-patch document with code at least that new. Any other version
-fails validation. v0.1 is frozen. Propose changes on Linear
+fails validation. v0.1 is frozen. Propose changes
 before editing the models.
 
 ## Fixture v0 (private; not in git)
@@ -83,12 +83,12 @@ and `BACKUP` p15. The fixture exercises:
 - embedding references, typed links at three levels, two campaigns, and assignments with
   `assign` and `review` decisions.
 
-Indicators come from the raw files and the planning-stage signal outputs. Link scores use
+Indicators come from the raw files and the signal-extraction outputs. Link scores use
 illustrative prior weights, so the fixture shows the contract's shape, not a tuned model. The
 vector store it references is not shipped in v0.
 
 ```bash
-gcloud storage rsync gs://follow-the-fake-data/outputs/fixture/v0 data/fixture/v0   # on the VM
+gcloud storage rsync gs://<DATA_BUCKET>/outputs/fixture/v0 data/fixture/v0   # on the VM
 ```
 
 ```python

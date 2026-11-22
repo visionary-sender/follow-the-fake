@@ -1,6 +1,6 @@
 # Follow the Fake
 
-Follow the Fake is our tool for the HackNation challenge by NASK PIB, "Kolekcjoner fejków". Scam ads that use the faces of well-known people arrive one at a time, and each looks like a one-off. The tool turns each suspicious item into captures, compares them with everything already seen, and shows which ones were probably made by the same people, with the evidence for every link.
+Follow the Fake is a tool for the NASK PIB challenge "Kolekcjoner fejków". Scam ads that use the faces of well-known people arrive one at a time, and each looks like a one-off. The tool turns each suspicious item into captures, compares them with everything already seen, and shows which ones were probably made by the same people, with the evidence for every link.
 
 Challenge data lives in a private bucket and never in this repository.
 
@@ -244,7 +244,7 @@ Seven experiments, E1 to E7, ran in 13 steps, all `ok`. The 33 canonical capture
 
 *A link-anything-shared baseline finds all 11 campaign pairs but only 11 of its 66 links are right. The linker finds 11/11 with every link right, and under leave-one-incident-out it assigns 7 of 8 held-out items correctly with no wrong campaign.*
 
-Figures: organiser build main 8eec049 with Visual features, code main aca1f57, platform ids hidden.
+Figures: organiser build main 8eec049 with the visual features, code main aca1f57, platform ids hidden.
 
 <!-- eval:build start -->
 Dataset build: the final report ran on main 5354603.
@@ -263,20 +263,20 @@ With platform ids hidden, the engine finds 11 of 11 campaign pairs, every pair i
 <!-- eval:e1-hidden end -->
 
 <!-- eval:e1-final start -->
-E1 across the build history:
+E1 as each method component is added (platform ids hidden):
 
-| build | campaign pairs found | what changed |
+| method | campaign pairs found | what changed |
 |---|---|---|
-| 6ff9e3e | 0 of 11 | start of the push |
-| after Visual's features | 4 of 11 | face, image and text layers counted |
-| after HACK-84 | 7 of 11 | corroborated landing builds count as campaign evidence |
-| 5354603 (HACK-88) | 11 of 11 | captures of one incident on the same host form one site |
+| identifier layers only | 0 of 11 | tracking, kit and infrastructure layers |
+| + content features (faces, images, text) | 4 of 11 | face, image and text layers counted |
+| + corroborated landing build | 7 of 11 | corroborated landing builds count as campaign evidence |
+| + same-host landers form one site | 11 of 11 | captures of one incident on the same host form one site |
 <!-- eval:e1-final end -->
 
 We would not lean on the 11 of 11:
 
 - **It is in-sample.** The 11 campaign pairs come from 3 independent groups, and the rules were developed while looking at them. The honest figure is leave-one-incident-out in E2: 7 of 8 right, 0 wrong.
-- **Four pairs depend on one design choice.** Without the same-host rule (HACK-88) the engine finds 7 of 11; a reasonable change to that rule would drop them.
+- **Four pairs depend on one design choice.** In the ablation, dropping the same-host rule leaves 7 of 11; a reasonable change to that rule would drop them.
 - **Operator links are weak.** The engine finds 6 of 22 owner pairs and 6 of 23 tenant pairs. It finds campaigns, not operators.
 
 #### E2: leave one incident out
@@ -403,11 +403,11 @@ Each problem says what happened, what we did and what would work better; the las
 
 **2. Cloaking hides the scam.** A cloaked page shows a harmless white page to anyone who does not look like a Polish phone user on a home connection. A Polish mobile profile turned 56 of 235 cloaked pages on batch-0 into real scam pages. A fresh Google Cloud IP did not help: 83% of landers stayed cloaked. *Better:* a victim profile run from a home-like connection, after its own safety review.
 
-**3. No Meta developer account.** The official Meta API was not open to us, so we read the public Ad Library pages with a headless browser. Meta's terms forbid automated collection, so the Meta source is a demonstration only. On the morning of the final runs, a sandbox IP got 0 ads. *Better:* the official Ad Library API, which needs a developer account and identity confirmation.
+**3. No Meta developer account.** The official Meta API was not open to us, so we read the public Ad Library pages with a headless browser. Meta's terms forbid automated collection, so the Meta source is a demonstration only. On one run, a sandbox IP got 0 ads. *Better:* the official Ad Library API, which needs a developer account and identity confirmation.
 
 **4. Ad-library rate limits.** Google's Transparency Center answered HTTP 429 to 71% of requests from cloud IPs. *Better:* less volume per IP, or a sanctioned route as in point 3.
 
-**5. Residential proxies.** A paid rotating Polish proxy (Decodo, about 1.1 GB, under 30 PLN) unblocked the ad libraries: 148 Meta ads and 32 Google ads on the morning run, where the cloud IP got 0. It barely revived old cloaked landers (4 of 117). We use it for discovery only: it finds ads, it does not reveal the scam. *Better:* the freshness and profile work in points 1 and 2, with the proxy's cost and terms settled by the owner.
+**5. Residential proxies.** A rotating Polish residential proxy (about 1.1 GB of traffic) unblocked the ad libraries: 148 Meta ads and 32 Google ads on one run, where the cloud IP got 0. It barely revived old cloaked landers (4 of 117). We use it for discovery only: it finds ads, it does not reveal the scam. *Better:* the freshness and profile work in points 1 and 2, with the proxy's cost and terms settled before any production use.
 
 **6. Hostile pages.** Live scam pages were fetched only on an isolated sandbox VM, never on a laptop. Pages are stored as data and never run; the app shows URLs defanged. *Better:* a sandbox per batch, torn down after the run.
 
@@ -419,13 +419,13 @@ Each problem says what happened, what we did and what would work better; the las
 
 ### Features
 
-**1. OCR is slow on CPU.** Some OCR calls timed out under load on the CPU VM, which lost that text. HACK-89 made the limits configurable: `FTF_OCR_TIMEOUT` (default 600 s per Tesseract call) and `FTF_VIDEO_TIMEOUT` (default 900 s per ffmpeg call). A timed-out image or keyframe is skipped with a warning, and the rest of the item goes through. *Better:* a GPU or a larger CPU for the OCR step.
+**1. OCR is slow on CPU.** Some OCR calls timed out under load on the CPU VM, which lost that text. The limits are configurable: `FTF_OCR_TIMEOUT` (default 600 s per Tesseract call) and `FTF_VIDEO_TIMEOUT` (default 900 s per ffmpeg call). A timed-out image or keyframe is skipped with a warning, and the rest of the item goes through. *Better:* a GPU or a larger CPU for the OCR step.
 
 **2. Face references are thin.** Few public figures have an openly licensed portrait. Widening the set from 11 to 33 people raised confident matches from 15.5% to 25.1% of faces, and two people still have none. The set loads from `FTF_FACE_REFERENCE`, and no organiser image is ever used as a reference. *Better:* a licensed portrait for every impersonated person.
 
 **3. Look-alike outlet pages.** Scam pages copy outlet logos, fonts and analytics, and reuse celebrity photos. Before the brand stop-list and the gates, the baseline failed the E4 check on 49 of 58 real outlet pages, all 3 platform-only pages and both celebrity-only items; the Linking engine passes them. *Better:* a stop-list built from more outlets and batches; brand stock images still match unrelated cases.
 
-**4. Platform ids dominate the evidence.** With platform ids hidden, the engine found 0 of 11 pairs at the start of the push. The gain came from the Visual features, the corroborated landing build (HACK-84) and the same-host rule (HACK-88); in the final build, removing text or faces changes nothing (layer figure in section 1). *Better:* weights calibrated on labelled pairs, so the remaining layers are not only hand-set.
+**4. Platform ids dominate the evidence.** With platform ids hidden, the identifier layers alone find 0 of 11 pairs. The gain comes from the content features, the corroborated landing build and the same-host rule; in the final build, removing text or faces changes nothing (layer figure in section 1). *Better:* weights calibrated on labelled pairs, so the remaining layers are not only hand-set.
 
 **5. Content views are not calibrated.** Every content view has an AUC of at least 0.99, but Cllr is 0.55 to 0.64, measured in-sample on 11 positive pairs. A variant that let text support decisions made the time split worse, so content views stay opt-in. *Better:* calibration on more labelled pairs.
 
@@ -434,7 +434,7 @@ Each problem says what happened, what we did and what would work better; the las
 Beyond the limits stated with the results:
 
 - **The ground truth is ours.** The 44 must-not-link pairs and the labels come from the analysts. A different analyst might draw some groups differently.
-- **The weights are priors.** They are hand-set bits, not fitted to the data. A learned table (HACK-23) can be passed with `ftf link --weights`, but the default run keeps the hand-set priors.
+- **The weights are priors.** They are hand-set bits, not fitted to the data. A learned table can be passed with `ftf link --weights`, but the default run keeps the hand-set priors.
 - **Outside services can fail.** When a lookup or a live page is unavailable, the item carries less evidence and is more likely to go to review.
 
 Next steps, ranked by expected gain:
@@ -443,10 +443,10 @@ Next steps, ranked by expected gain:
 |---|---|---|---|
 | 1 | Get more labelled pairs from CERT (confirmed campaign and must-not-link pairs) | high: removes most of the in-sample problem in E1 | medium, depends on CERT |
 | 2 | Calibrate the content views on those pairs, so text can support a decision | high: text is our cleanest campaign signal | medium |
-| 3 | Use nameserver and registrar in the campaign gate (separability test in HACK-85) | medium to high: they split operator pairs well | low to medium |
+| 3 | Use nameserver and registrar in the campaign gate | medium to high: they split operator pairs well; a rare shared nameserver or registrar separates operators (5 vs 0 and 6 vs 1 pairs), but a copied kit keeps the original's infrastructure, so it needs a kit-copy guard first | low to medium |
 | 4 | Grow the reference base in E7, so later items can join one another | medium: tests the realistic case | low |
 | 5 | Test shared certificates once a certificate source answers reliably | medium: untested today | medium, depends on the source |
-| 6 | Get a licence answer for reading Ad Library pages and for the face reference set | high for a real deployment, no effect on the score | low, owner decision |
+| 6 | Get a licence answer for reading Ad Library pages and for the face reference set | high for a real deployment, no effect on the score | low; depends on a licence answer |
 | 7 | Re-run the evaluation on a fresh corpus; keep the evaluation blocks replaceable | medium: guards against overfitting | low |
 
 ## 4. How to run the demo
@@ -455,10 +455,12 @@ The image runs the `ftf` command. With no arguments it builds the campaign base 
 
 ### Offline, without internet, from the base bundle
 
-The offline package is an AES-256 encrypted 7z file. The link does not expire, and the password is never in the repository:
+The offline package is an AES-256 encrypted 7z file. The link does not expire, and the password is never in the repository.
+
+1.69 GB; sha256 `20ecf2e245b61645d7d5e15baefbdbf10f109f66b659e737b50a2a7229dd5dde` (check with `sha256sum`). `7z x <file>` asks for the password and unpacks to `ftf-offline-package/`.
 
 ```bash
-curl -LO <PACKAGE_LINK>
+curl -LO https://storage.googleapis.com/ftf-pkg-9d5a7a89ee6a4981/ftf-offline-6de92251feecb7ff82f64098.7z
 7z x ftf-offline-*.7z   # asks for the password: <PASSWORD>
 # the app, offline: open http://127.0.0.1:8501
 docker run --rm -e FTF_OFFLINE=1 -v "$PWD/ftf-offline-package:/data/package:ro" -e FTF_PACKAGE=/data/package -p 127.0.0.1:8501:8501 <image>
@@ -466,9 +468,11 @@ docker run --rm -e FTF_OFFLINE=1 -v "$PWD/ftf-offline-package:/data/package:ro" 
 docker run --rm --network none -v "$PWD/ftf-offline-package:/data/package:ro" -e FTF_PACKAGE=/data/package <image> analyze <INPUT>
 ```
 
-The package holds the campaign base, the enrichment cache, the models, the face reference set and the brand stop-list. `FTF_PACKAGE` support is coming in HACK-92; the command above is the intended form.
+The package holds the campaign base, the enrichment cache, the models, the face reference set and the brand stop-list. `FTF_PACKAGE` support is planned; the command above is the intended form.
 
 Docker cannot publish the app's port from a container started with `--network none`, so the app runs with `FTF_OFFLINE=1` instead, which makes no network calls. The CLI line shows the strict form, with no network device at all. Enrichment answers come from the cache in the package, and a lookup that is not cached is recorded as `unknown`.
+
+**Your own cases, offline.** Offline, a run reads only the files you give it, the campaign base and the enrichment cache. These work without a network: OCR text, image hashes, faces, the page skeleton, trackers and identifiers in the page or HAR, the redirect chain from a HAR, and linking against the base. A bare URL cannot be fetched offline, so submit the saved page (HAR or HTML) or the screenshot instead. Registry, DNS and certificate data for a domain outside the dataset comes out as `unknown`, because the cache covers only the dataset's domains. Measured with `--network none` on 4 cores: about 11 s for a screenshot, about 13 s for a HAR of one landing page, and about 2 s for a bare URL, including the network probe (about 0.02 s when there is no network).
 
 ### Online, with the base bundle
 
@@ -497,7 +501,7 @@ ftf serve --base dataset.json --port 8501
 
 ### Build the image
 
-From a clean checkout of the repository root. The brand stop-list is private, so the fetch runs on the workbench VM:
+From a clean checkout of the repository root. The brand stop-list is private, so the fetch runs on a cloud VM:
 
 ```bash
 scripts/fetch-brand-stoplist.sh   # writes docker/brand-stoplist/brand-stoplist.json (gitignored)
@@ -542,13 +546,13 @@ The code also reads settings for threads, speech-to-text, image embedding and eg
 
 ### Licences
 
-Only permissively licensed open-source dependencies are allowed (MIT, BSD, Apache, PSF, ISC, HPND). `LICENSES-THIRD-PARTY.md` is generated from installed package metadata by `scripts/vm.sh licences`, and a test fails if it is stale or lists a licence outside the allowlist. The code in this repository is not under an open licence. Under the HackNation rules the economic copyright to a winning solution transfers to NASK PIB.
+Only permissively licensed open-source dependencies are allowed (MIT, BSD, Apache, PSF, ISC, HPND). `LICENSES-THIRD-PARTY.md` is generated from installed package metadata by `scripts/vm.sh licences`, and a test fails if it is stale or lists a licence outside the allowlist. The code in this repository is not under an open licence. Under the challenge rules the economic copyright to a winning solution transfers to NASK PIB.
 
 Two named exceptions exist. `certifi` (MPL-2.0, unmodified) is pulled in through `requests` and `tldextract`. Playwright, its Chromium and its Node.js driver come only with the optional `fetch` extra. The per-package table is [LICENSES-THIRD-PARTY.md](LICENSES-THIRD-PARTY.md). System packages, models and outside services, with their licences and limits, are in [docs/licences.md](docs/licences.md).
 
 ### Data and sources
 
-The challenge data (the case folders, the BACKUP archive and the link list) belongs to the organiser. It lives in the bucket `gs://follow-the-fake-data` and on the workbench VM, never in this repository. Derived outputs go to the bucket under `outputs/`.
+The challenge data (the case folders, the BACKUP archive and the link list) belongs to the organiser. It lives in a private bucket (`gs://<DATA_BUCKET>`) and on a cloud VM, never in this repository. Derived outputs go to the bucket under `outputs/`.
 
 | Source | What we take | Terms and limits |
 |---|---|---|
@@ -573,13 +577,13 @@ The challenge data (the case folders, the BACKUP archive and the link list) belo
 | `src/ftf/pipeline/`, `src/ftf/app/` | `ftf analyze` and `ftf export`; the Streamlit demo app |
 | `src/ftf/contract/` | the data contract (pydantic models); see [docs/contract.md](docs/contract.md) |
 | `docs/` | methodology, linking decisions, container run, evaluation, and the details of each service |
-| `tests/` | pytest suite, run on the workbench VM |
-| `scripts/` | `vm.sh` (the cloud dev loop), `check_no_private_data.py`, `licences.py`, `spend.py`, the sandbox and scanner scripts |
+| `tests/` | pytest suite, run on the cloud VM |
+| `scripts/` | `vm.sh` (the cloud dev loop), `check_no_private_data.py`, `licences.py`, the sandbox and scanner scripts |
 | `Dockerfile`, `.dockerignore` | the container image that runs the `ftf` command |
 
 ### Tests and checks on the VM
 
-All computation runs on the workbench VM, not on the laptop. You need `gcloud` with the configuration `follow-the-fake`, IAP SSH access to `ftf-workbench` (`europe-central2-a`), and a running VM.
+All computation runs on the cloud VM, not on the laptop. You need `gcloud` with a configured project, IAP SSH access to the VM, and a running VM. `scripts/vm.sh` reads the VM name, zone and project from `FTF_VM`, `FTF_VM_ZONE` and `FTF_VM_PROJECT`; set them to your own values.
 
 ```bash
 scripts/vm.sh test                 # the whole suite on the VM; exits with pytest's code
@@ -595,8 +599,8 @@ Each call copies the worktree's tracked files to `/work/<worktree-dir-name>/src`
 ```bash
 git log --all --format=%B > commit-messages.txt          # on the laptop
 scripts/vm.sh run -- true                                # sync the worktree
-gcloud compute scp commit-messages.txt ftf-workbench:/work/<slug>/ --project follow-the-fake \
-  --zone europe-central2-a --tunnel-through-iap --quiet
+gcloud compute scp commit-messages.txt <VM>:/work/<slug>/ --project <GCP_PROJECT> \
+  --zone <ZONE> --tunnel-through-iap --quiet
 scripts/vm.sh run -- python3 -I scripts/check_no_private_data.py \
   --dataset /data/derived/ingest/organiser/dataset.json --root . \
   --messages /work/<slug>/commit-messages.txt            # <slug> is the worktree directory name
@@ -608,8 +612,7 @@ Exit 0 means no hit and exit 1 means at least one. A hit prints `file:line: clas
 
 ```bash
 scripts/vm.sh run -- env FTF_FIXTURE_DIR=/data/derived/fixture-v0 ftf serve --port 8501
-gcloud compute ssh ftf-workbench --project follow-the-fake --zone europe-central2-a \
+gcloud compute ssh <VM> --project <GCP_PROJECT> --zone <ZONE> \
   --tunnel-through-iap -- -N -L 8501:127.0.0.1:8501     # then open http://localhost:8501
 ```
 
-**Cloud spend.** `python3 -I scripts/spend.py` is a read-only report of what GCP records for `follow-the-fake` and `attic-212115`, with estimated cost against the caps. It never creates, changes or deletes anything.

@@ -1,10 +1,10 @@
 # Licences of what ships in the container
 
-The jury runs the image built from [`Dockerfile`](../Dockerfile) on `main`. Only what is in that
-image counts (owner, 2026-11-21). Tools used only to build or collect data are not covered.
+The image built from [`Dockerfile`](../Dockerfile) on `main`. Only what is in that
+image counts. Tools used only to build or collect data are not covered.
 This page lists what the image carries, with licences and usage limits. The Python package table
 is generated: [`LICENSES-THIRD-PARTY.md`](../LICENSES-THIRD-PARTY.md) (`scripts/vm.sh licences`,
-checked by the licence test). Licences were checked on 2026-11-22.
+checked by the licence test). Licences were checked on <YYYY-MM-DD>.
 
 ## 1. Python packages
 
@@ -18,24 +18,24 @@ Base: `python:3.11-slim` pinned by digest (`sha256:07d4824036af…`), Debian 13 
 packages. Each keeps its Debian licence, which its `copyright` file states. The slim image has
 these files removed, so read them from the Debian archive. **Not covered by a named exception:**
 the base packages include GPL and LGPL ones (for example `bash` and `coreutils`, GPL-3+, and
-`libc6`, LGPL-2.1+). Owner decision needed; this HACK-68 change does not touch them.
+`libc6`, LGPL-2.1+). They are not covered by a named exception, and this is still open.
 
 Added by the Dockerfile's `playwright install --with-deps --only-shell chromium`: 112 Debian
 packages, plus the Chromium headless shell `chromium_headless_shell-1248` and `ffmpeg-1013` under
 `/opt/ms-playwright`. The list is the difference between the base image and the built `ftf:dev`
-image (`dpkg-query`), built on the workbench VM on 2026-11-22.
+image (`dpkg-query`), built on the cloud VM.
 
-### 2a. Debian system libraries of Chromium (HACK-68 named exception)
+### 2a. Debian system libraries of Chromium (named exception)
 
-Owner decision (HACK-68, 2026-11-22): the Debian system libraries that Chromium needs, installed
+Named exception: the Debian system libraries that Chromium needs, installed
 by `playwright install --with-deps`, are allowed in the image even where they are LGPL, MPL or GPL
 in part. They are unmodified Debian packages, and no package is patched. The list is every package
 that the `--with-deps` step adds, as the issue defines it: some are not linked by Chromium itself
-(X11 utilities, fonts, Xvfb). Narrowing the list is an owner question. This is the only exception
+(X11 utilities, fonts, Xvfb). Narrowing the list is still open. This is the only exception
 for system packages; it does not extend to other packages. In
 `scripts/licences.py` a package is accepted only if `scripts/chromium-debian-packages.tsv` lists
 it with exactly the licence recorded there. `scripts/licences.py --audit-image FILE` checks the
-packages of a built image against that list; the image built on 2026-11-22 gives 0 errors. It is
+packages of a built image against that list; the last audited image gives 0 errors. It is
 run by hand on the VM, not by the licence test.
 Licence names come from each copyright file's `License:` fields, or from its notice phrases
 where the file is free-form. That is a keyword check, not a legal review.
@@ -167,7 +167,7 @@ licences must be added here before that slot is used.
 
 ## 3. Named exceptions
 
-Owner rules, the only exceptions to the permissive-only policy:
+The only exceptions to the permissive-only policy:
 
 | Component | Licence | Terms we keep |
 |---|---|---|
@@ -175,8 +175,8 @@ Owner rules, the only exceptions to the permissive-only policy:
 | Playwright (Python package and driver) | Apache-2.0 | Keep the licence and notices. Optional `fetch` extra only. |
 | Chromium headless shell | BSD-3-Clause | Keep the notices. Bundles unmodified FFmpeg (LGPL-2.1): ship it unmodified, keep the LGPL text, and point to the upstream FFmpeg source. |
 | Node.js runtime (inside Playwright) | MIT | Keep the notices. |
-| Debian ffmpeg (features slot, `FTF_WITH_FFMPEG`; HACK-80) | GPL-2+ and GPL-3+ parts, LGPL-2.1+ parts, and permissive parts (the exact licence string is in `scripts/licences.py`, `SYSTEM_EXCEPTIONS`) | Named exception, pending owner decision (HACK-74). Used unmodified, run as a separate program. Only this exact licence string is accepted; GPL is not allowed in general. |
-| Debian system libraries of Chromium, 112 packages (HACK-68, section 2a) | LGPL, MPL, GPL and others, per package | Unmodified Debian packages, installed by `playwright install --with-deps`. Keep each package's copyright notices (`/usr/share/doc/<package>/copyright`). Recorded in `scripts/chromium-debian-packages.tsv`. |
+| Debian ffmpeg (features slot, `FTF_WITH_FFMPEG`) | GPL-2+ and GPL-3+ parts, LGPL-2.1+ parts, and permissive parts (the exact licence string is in `scripts/licences.py`, `SYSTEM_EXCEPTIONS`) | Named exception. Used unmodified, run as a separate program. Only this exact licence string is accepted; GPL is not allowed in general. |
+| Debian system libraries of Chromium, 112 packages (section 2a) | LGPL, MPL, GPL and others, per package | Unmodified Debian packages, installed by `playwright install --with-deps`. Keep each package's copyright notices (`/usr/share/doc/<package>/copyright`). Recorded in `scripts/chromium-debian-packages.tsv`. |
 
 ## 4. Models
 
@@ -188,6 +188,7 @@ fails if the flag is set. Each row links to its model card or licence file.
 | multilingual-e5-small (text) | https://huggingface.co/intfloat/multilingual-e5-small | MIT (card field `license: mit`) | None stated beyond the licence. |
 | siglip2-base-patch16-224 (image) | https://huggingface.co/google/siglip2-base-patch16-224 | Apache-2.0 (card field `license: apache-2.0`) | None stated beyond the licence. |
 | OpenCV SFace (face recognition, ONNX) | https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface (licence: https://github.com/opencv/opencv_zoo/blob/main/models/face_recognition_sface/LICENSE) | Apache-2.0 (the directory README says all its files are Apache 2.0) | None stated beyond the licence. |
+| Face reference images (public figures, `FTF_FACE_REFERENCE`) | Wikidata and Wikimedia Commons, one or more portraits per listed figure | CC0 or CC BY, per image (recorded in the manifest) | Reference images of public figures used for demonstration. Not in git. |
 
 ## 5. Outside services used at runtime
 
@@ -198,12 +199,12 @@ BigQuery, which needs a Google Cloud project to bill.
 | Service | Used by | Key | Terms (as recorded in the docs) | Limits |
 |---|---|---|---|---|
 | RDAP: IANA bootstrap `data.iana.org/rdap/dns.json`, then each registry's RDAP server | `ftf enrich-domain`: registrar, creation date | No | The IANA terms page returned 404, so no terms text was confirmed. Each registry sets its own policy. | Bootstrap: one request per run, cached 30 days. Registries: 1 request/s per host; retry 429 and 5xx with backoff, honouring `Retry-After`; cached 30 days. |
-| DNS over HTTPS: `dns.google/resolve` (Google Public DNS) | `ftf enrich-domain`: A, NS, MX | No | Bound to the Google APIs Terms of Service. The page gives no numeric limit. The resolver queries the domain's nameservers, not the workbench. | 1 request/s; A, NS, MX per domain; cached 1 day. |
+| DNS over HTTPS: `dns.google/resolve` (Google Public DNS) | `ftf enrich-domain`: A, NS, MX | No | Bound to the Google APIs Terms of Service. The page gives no numeric limit. The resolver queries the domain's nameservers, not the cloud VM. | 1 request/s; A, NS, MX per domain; cached 1 day. |
 | crt.sh (`crt.sh/?q=…&output=json`) | `ftf enrich-domain`: issuers, first `not_before`, sibling names | No | No terms of use stated. Returns 429 and 502 under load. | 1 request per 5 s; 150 s timeout; 3 retries; cached 7 days. |
 | CERT Polska warning list (`hole.cert.pl/domains/v2/domains.json`, about 22 MB) | `ftf enrich-domain` and `ftf scan --source certpl` | No | Usage rules at cert.pl/lista-ostrzezen: anyone may use the list for any purpose, commercial use included; no attribution required; no warranty. | No download limit stated. One download per run; cached 1 day. |
-| Meta Ad Library search page (logged out, headless Chromium) | `ftf scan --source meta` (demonstration only; needs the optional `fetch` extra) | No key, no login | Meta's Automated Data Collection Terms (`facebook.com/robots.txt`) forbid automated collection without written permission. The source is a demonstration, not a production setup. The production route is the official Meta Ad Library API, which needs a developer account and identity confirmation; not used. | Observed from a cloud IP (2026-11-21): HTTP 403 JavaScript challenge, then the first page (about 30 ads per keyword); scrolling gets `Rate limit exceeded` (code 1675004). Scanner: `--delay` 5 s, `--max-ads` 150 per source per run, `--max-per-keyword` 50. |
-| Google Ads Transparency Center RPC (`ftf scan --source google_atc`) | Scanner: creatives Google shows in Poland | No key; plain HTTPS | The docs record no terms text for this endpoint. Check before any production use. | Observed from a cloud IP (2026-11-21): HTTP 429 after about 59 creatives; the scanner marks the query `blocked` and skips the rest of the run. Scanner: `--delay` 5 s, `--max-ads` 150. |
-| Google BigQuery public dataset `bigquery-public-data.google_ads_transparency_center.removed_creative_stats` (`ftf scan --source google_bq`) | Scanner: creatives Google removed in Poland | Needs a Google Cloud project to bill (`--bq-project`) and a token (`gcloud auth print-access-token`); no API key | Google's public dataset, the sanctioned bulk route. No rate limit stated. | One run scans about 3.4 GB (about 0.02 USD on demand; inside the free monthly terabyte). `maximumBytesBilled` caps a run at 10 GB. |
+| Meta Ad Library search page (logged out, headless Chromium) | `ftf scan --source meta` (demonstration only; needs the optional `fetch` extra) | No key, no login | Meta's Automated Data Collection Terms (`facebook.com/robots.txt`) forbid automated collection without written permission. The source is a demonstration, not a production setup. The production route is the official Meta Ad Library API, which needs a developer account and identity confirmation; not used. | Observed from a cloud IP: HTTP 403 JavaScript challenge, then the first page (about 30 ads per keyword); scrolling gets `Rate limit exceeded` (code 1675004). Scanner: `--delay` 5 s, `--max-ads` 150 per source per run, `--max-per-keyword` 50. |
+| Google Ads Transparency Center RPC (`ftf scan --source google_atc`) | Scanner: creatives Google shows in Poland | No key; plain HTTPS | The docs record no terms text for this endpoint. Check before any production use. | Observed from a cloud IP: HTTP 429 after about 59 creatives; the scanner marks the query `blocked` and skips the rest of the run. Scanner: `--delay` 5 s, `--max-ads` 150. |
+| Google BigQuery public dataset `bigquery-public-data.google_ads_transparency_center.removed_creative_stats` (`ftf scan --source google_bq`) | Scanner: creatives Google removed in Poland | Needs a Google Cloud project to bill (`--bq-project`) and a token (`gcloud auth print-access-token`); no API key | Google's public dataset, the sanctioned bulk route. No rate limit stated. | One run scans about 3.4 GB (inside the free monthly terabyte). `maximumBytesBilled` caps a run at 10 GB. |
 
 Services that need no key or account: RDAP, DNS over HTTPS, crt.sh, the CERT Polska list, the Meta
 Ad Library page and the Google Ads Transparency Center RPC.
