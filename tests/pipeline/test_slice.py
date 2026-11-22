@@ -6,6 +6,7 @@ All values are invented (`.example` domains, made-up ids); no organiser data.
 import json
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -92,20 +93,8 @@ def test_har_page_url_is_enriched_offline(tmp_path, monkeypatch):
     assert not (tmp_path / "data").exists()
 
 
-def test_enrichment_looks_up_own_domains_not_shared_hops(tmp_path, monkeypatch):
-    """Landing and tracker hop are enriched; the stop-listed platform hop that starts the chain is not."""
-    from ftf.enrich import Enricher
-
-    monkeypatch.chdir(tmp_path)  # no enrichment cache here
-    looked_up: list[str] = []
-    enrich = Enricher.enrich
-
-    def spy(self, name, *args, **kwargs):
-        looked_up.append(name)
-        return enrich(self, name, *args, **kwargs)
-
-    monkeypatch.setattr(Enricher, "enrich", spy)
-
+def _chain_har(tmp_path) -> Path:
+    """Platform hop (stop-listed) -> tracker hop -> landing; the synthetic domains are `.example`."""
     def entry(url, status=200, location=None):
         resp = {"status": status, "headers": [], "content": {"mimeType": "text/html", "text": ""}}
         if location:
@@ -122,8 +111,43 @@ def test_enrichment_looks_up_own_domains_not_shared_hops(tmp_path, monkeypatch):
     }}
     src = tmp_path / "chain.har"
     src.write_text(json.dumps(har))
+    return src
+
+
+def _record_lookups(monkeypatch) -> list[str]:
+    from ftf.enrich import Enricher
+
+    looked_up: list[str] = []
+    enrich = Enricher.enrich
+
+    def spy(self, name, *args, **kwargs):
+        looked_up.append(name)
+        return enrich(self, name, *args, **kwargs)
+
+    monkeypatch.setattr(Enricher, "enrich", spy)
+    return looked_up
+
+
+def test_enrichment_looks_up_own_domains_not_shared_hops(tmp_path, monkeypatch):
+    """Landing and tracker hop are enriched; the stop-listed platform hop that starts the chain is not."""
+    monkeypatch.chdir(tmp_path)  # no enrichment cache here
+    looked_up = _record_lookups(monkeypatch)
+    src = _chain_har(tmp_path)
     res = analyze(AnalysisInput(kind="har", path=src, name="chain.har"), synthetic_base(), run_dir=tmp_path / "run", offline=True)
     assert next(s for s in res.stages if s.name == "enrichment").status == "ok", res.stages
+    assert sorted(set(looked_up)) == ["example.com", "example.net"]
+
+
+def test_enrichment_of_har_survives_failed_ingestion(tmp_path, monkeypatch):
+    """Fallback incident (ingestion returned nothing): own domains are still found and looked up."""
+    monkeypatch.chdir(tmp_path)  # no enrichment cache here
+    looked_up = _record_lookups(monkeypatch)
+    real_optional = S._optional
+    empty = lambda *args, **kwargs: Dataset(name="empty")  # noqa: E731
+    monkeypatch.setattr(S, "_optional", lambda module, name: empty if (module, name) == ("ftf.ingest", "ingest") else real_optional(module, name))
+    src = _chain_har(tmp_path)
+    res = analyze(AnalysisInput(kind="har", path=src, name="chain.har"), synthetic_base(), run_dir=tmp_path / "run", offline=True)
+    assert next(s for s in res.stages if s.name == "ingest").status == "error", res.stages
     assert sorted(set(looked_up)) == ["example.com", "example.net"]
 
 
