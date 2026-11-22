@@ -9,7 +9,8 @@ checked by the licence test). Licences were checked on 2026-11-22.
 ## 1. Python packages
 
 Generated: [`LICENSES-THIRD-PARTY.md`](../LICENSES-THIRD-PARTY.md). Permissive licences only, plus
-the named exceptions in section 3.
+the named exceptions in section 3. The Python table is the only part held to that rule; section 2
+lists system packages that include copyleft parts, pending the owner decision below.
 
 ## 2. System packages in the image
 
@@ -40,8 +41,8 @@ the licence names found in it. That is a keyword check, not a legal review.
 | libpango-1.0-0 | LGPL-2+ and LGPL-2.1+; Apache-2.0; OFL-1.1 fonts |
 | libx11-6, libxcb1, libxcomposite1, libxdamage1, libxext6, libxfixes3, libxkbcommon0, libxrandr2 | free-form: X11 / MIT |
 
-**Owner decision needed.** Several of these are LGPL or MPL (libasound2t64, libatk*, libcairo2,
-libdbus-1-3, libglib2.0-0t64, libnspr4, libnss3, libpango-1.0-0). The owner's rule names only
+**Owner decision needed.** Several of these are LGPL, MPL or GPL in part (libasound2t64, libatk*,
+libcairo2, libdbus-1-3, libgbm1, libglib2.0-0t64, libnspr4, libnss3, libpango-1.0-0). The owner's rule names only
 certifi, Playwright, Chromium and its Node driver, so these system libraries are not covered yet.
 Either name them as unmodified dynamically linked Debian libraries of Chromium, or change the
 dependency set.
