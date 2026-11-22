@@ -80,7 +80,7 @@ from ftf.linking.grouping import CANNOT_LINK_RELATIONS, MIN_LAYERS, SINGLE_VALUE
 from ftf.linking.index import CandidateIndex, cached_index, dataset_digest, modalities_of
 from ftf.linking.ledger import ScoringContext, is_content_row, with_content
 from ftf.linking.similarity import Calibration, DatasetVectorStore, VectorStore, content_views
-from ftf.linking.types import METHOD, PairScore
+from ftf.linking.types import METHOD, PairScore, decision_bits
 from ftf.linking.weights import WeightTable
 
 NEW_MARGIN = 3.0  # bits below tau at which an item is declared new
@@ -150,8 +150,11 @@ def link_incident(
         raise ValueError("the index belongs to another base dataset; build or load it for this one")
     content = content_views(dict(calibrations) if calibrations else None, vector_store or _store(base_dir, incident_dir, incident))
     if content is not None:
-        if index is not None and backend is None:
-            base, backend = index.linear_view()  # what the index stands for, with its options
+        if index is not None:
+            # what the index stands for (base plus incidents added since), scored with its options
+            # unless the caller brought its own scorer
+            base, factory = index.linear_view()
+            backend = backend or factory
         index = None
     if index is not None and backend is None and weights is not None and index.drops_bits_of(weights):
         # `weights` gives bits to a kind the index kept no postings for: candidate search would miss
@@ -185,7 +188,7 @@ def _store(base_dir: Optional[Path], incident_dir: Optional[Path], incident: Inc
     if base_dir is None and incident_dir is None:
         return None
     dirs = {c.id: incident_dir for c in incident.captures} if incident_dir is not None else None
-    return DatasetVectorStore(base_dir if base_dir is not None else incident_dir, dirs)
+    return DatasetVectorStore(base_dir, dirs)  # no base_dir: the collection's vectors read as missing
 
 
 @dataclass
@@ -280,7 +283,7 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
                 if blocks_on_conflict and has_conflict(ps):
                     conflicted.add(camp.id)
                 prev = by_probe[x].get(camp.id)
-                if ps.bits >= bar and qualifies(ps, tau, min_layers) and (prev is None or ps.bits > prev.bits):
+                if decision_bits(ps) >= bar and qualifies(ps, tau, min_layers) and (prev is None or ps.bits > prev.bits):
                     by_probe[x][camp.id] = ps
                 if best_m is None or _rank(ps) > _rank(best_m):
                     best_m = ps
@@ -339,7 +342,7 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
     # The assign target is the best campaign that clears the bar with a qualifying ledger,
     # not necessarily the top-scoring one (that one may rest on a single layer).
     target = next(
-        (camp for camp, ps, _ in scored if ps is not None and ps.bits >= bar and qualifies(ps, tau, min_layers)),
+        (camp for camp, ps, _ in scored if ps is not None and decision_bits(ps) >= bar and qualifies(ps, tau, min_layers)),
         None,
     )
 
@@ -352,12 +355,14 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
             (
                 (camp, ps)
                 for camp, ps, _ in scored
-                if camp.id != target.id and camp.id not in conflicted and ps is not None and ps.bits >= bar and qualifies(ps, tau, min_layers)
+                if camp.id != target.id and camp.id not in conflicted and ps is not None and decision_bits(ps) >= bar and qualifies(ps, tau, min_layers)
             ),
             None,
         )
     target_bits = next((ps.bits for camp, ps, _ in scored if target is not None and camp.id == target.id), 0.0)
-    tie = rival is not None and target_bits - rival[1].bits < TIE_MARGIN - 1e-9
+    target_id_bits = next((decision_bits(ps) for camp, ps, _ in scored if target is not None and camp.id == target.id), 0.0)
+    # the lead is measured without content views: a similar creative must not break a tie either
+    tie = rival is not None and target_id_bits - decision_bits(rival[1]) < TIE_MARGIN - 1e-9
 
     missing_reach = _missing_could_reach_bar(best, bar, gains, missing_bits)
     held_back = False
@@ -710,7 +715,10 @@ def _note(
         f"evidence capacity {capacity:.1f} bits",
     ]
     if best_ps is not None and best >= bar and not qualifies(best_ps, tau, min_layers):
-        parts.append("best match rests on one layer only")
+        if decision_bits(best_ps) >= tau:
+            parts.append("best match rests on one layer only")
+        else:
+            parts.append("best match clears the bar only with content-view bits (similar content, no shared identifiers)")
     if capacity < tau:
         parts.append("capacity below tau: the inputs present cannot prove a new campaign")
     if gains:

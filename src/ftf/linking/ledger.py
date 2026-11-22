@@ -72,7 +72,7 @@ from ftf.contract.models import (
 from ftf.linking.background import BackgroundCounts
 from ftf.linking.hierarchy import ANCHOR_KINDS, ChainRow, Hierarchy, apply_chain_rule
 from ftf.linking.similarity import OPERATOR_FACTOR, ContentViews, view_evidence
-from ftf.linking.types import METHOD, PairScore
+from ftf.linking.types import METHOD, PairScore, decision_bits
 from ftf.linking.weights import HAND_TABLE, IGNORED_VALUES, WeightTable, is_campaign_evidence
 
 # Typical campaign size m (in captures) per relation, for the prior log-odds −log2(n/m) (07 §2.4).
@@ -434,6 +434,7 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
     slots = _chain_slots(ctx) if relation in CHAIN_RELATIONS else {}
     rows: list[EvidenceRow] = []
     total = 0.0
+    id_total = 0.0  # the same without content rows
     layers_positive = 0
     for layer in Layer:
         layer_bits = 0.0
@@ -466,6 +467,7 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
         total += layer_bits
         # positive layers count identifier evidence only; without content rows id_tops is tops
         id_bits = sum(c.bits for c in id_tops.values()) + (confs[0].bits if confs else 0.0)
+        id_total += id_bits
         if id_bits > 0:
             own = [c for c in id_tops.values() if c.bits > 0 and (layer, c.row.kind) not in chain_kinds]
             if own or not any(c.bits > 0 for c in id_tops.values()):
@@ -483,6 +485,7 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
     return PairScore(
         a=ca, b=cb, relation=relation, bits=round(total, 3), rows=rows,
         layers_positive=layers_positive, live_private=live_private,
+        id_bits=round(id_total, 3) if any(is_content_row(r) and r.bits > 0 for r in rows) else None,
     )
 
 
@@ -500,12 +503,12 @@ def verdict(score: PairScore, ctx: ScoringContext) -> str:
     """D1 edge rule: `link` if bits ≥ τ and (≥2 positive layers or a live operator-private id);
     a tenant/owner conflict under campaign/operator is a cannot-link (at most `review`);
     `review` if it clears τ without the gate, or lies within REVIEW_BAND below τ (and above 0
-    bits); else `no link`."""
+    bits); else `no link`. A `link` must clear τ without content-view bits (`decision_bits`)."""
     tau = threshold(ctx, score.relation)
     if score.bits >= tau:
         cannot_link = score.relation in ctx.weights.conflict_relations and _private_conflict(score)
         gated = score.layers_positive >= 2 or score.live_private
-        return "link" if gated and not cannot_link else "review"
+        return "link" if gated and not cannot_link and decision_bits(score) >= tau else "review"
     return "review" if score.bits > 0 and score.bits >= tau - REVIEW_BAND else "no link"
 
 

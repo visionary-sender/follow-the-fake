@@ -60,7 +60,7 @@ from ftf.contract.models import (
 )
 from ftf.linking.backend import Backend
 from ftf.linking.ledger import has_private_conflict, normalise
-from ftf.linking.types import PairScore
+from ftf.linking.types import PairScore, decision_bits
 from ftf.linking.weights import IGNORED_VALUES
 
 ALL_RELATIONS: tuple[Relation, ...] = tuple(Relation)
@@ -83,7 +83,7 @@ HUB_POSTINGS = 500
 
 
 def qualifies(ps: PairScore, tau: float, min_layers: int = 2) -> bool:
-    return ps.bits >= tau and ps.layers_positive >= 1 and (ps.layers_positive >= min_layers or ps.live_private)
+    return decision_bits(ps) >= tau and ps.layers_positive >= 1 and (ps.layers_positive >= min_layers or ps.live_private)
 
 
 def has_conflict(ps: PairScore) -> bool:
@@ -159,7 +159,7 @@ def cluster(
 
     # Unit-to-unit weight: the best capture pair between them (D1: max over members).
     def weight(ps: PairScore) -> float:
-        w = ps.bits - tau
+        w = decision_bits(ps) - tau  # content views (HACK-24) never move cluster weights
         return w if qualifies(ps, tau, min_layers) else min(w, 0.0)
 
     uw: dict[tuple[int, int], float] = {}
@@ -255,10 +255,11 @@ def must_link_groups(ds: Dataset, by_pair: dict[frozenset[str], PairScore]) -> l
             best: Optional[tuple[float, str]] = None
             for e in ends:
                 ps = by_pair.get(_pair(x, e))
-                if ps is None or ps.bits <= 0 or (ps.relation in CANNOT_LINK_RELATIONS and has_conflict(ps)):
+                bits = decision_bits(ps) if ps is not None else 0.0  # content views never attach a capture
+                if ps is None or bits <= 0 or (ps.relation in CANNOT_LINK_RELATIONS and has_conflict(ps)):
                     continue
-                if best is None or (-ps.bits, e) < (-best[0], best[1]):
-                    best = (ps.bits, e)
+                if best is None or (-bits, e) < (-best[0], best[1]):
+                    best = (bits, e)
             if best is not None:
                 groups.append([best[1], x])
     return groups

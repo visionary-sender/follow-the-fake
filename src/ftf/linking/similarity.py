@@ -233,7 +233,7 @@ class DatasetVectorStore:
                 continue
             v = np.asarray(matrix[row], dtype=np.float64)
             if v.shape != (ref.dim,) or not np.all(np.isfinite(v)):
-                return None
+                continue
             return v
         return None
 
@@ -525,9 +525,12 @@ def save_calibrations(cals: dict[str, Calibration], path: Union[str, Path]) -> N
 def load_calibrations(path: Union[str, Path]) -> dict[str, Calibration]:
     """Calibrations keyed by view kind, from `save_calibrations` (or `ftf calibrate-similarity`)."""
     doc = json.loads(Path(path).read_text(encoding="utf-8"))
-    if doc.get("format") != CALIBRATION_FORMAT or not isinstance(doc.get("views"), dict):
+    if not isinstance(doc, dict) or doc.get("format") != CALIBRATION_FORMAT or not isinstance(doc.get("views"), dict):
         raise ValueError(f"{path}: not a calibration file")
-    return {k: Calibration.from_dict(v) for k, v in doc["views"].items()}
+    try:
+        return {str(k): Calibration.from_dict(v) for k, v in doc["views"].items()}
+    except (AttributeError, KeyError, TypeError) as exc:
+        raise ValueError(f"{path}: malformed calibration entry ({exc})") from None
 
 
 # --------------------------------------------------------------------------- comparison

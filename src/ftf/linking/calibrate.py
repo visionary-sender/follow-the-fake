@@ -14,8 +14,10 @@ the two samples into a capped similarity-to-bits map (logistic with enough posit
 otherwise). The output holds every view's calibration and its quality (AUC, Cllr, Cllr_min and the
 similarity that earns 1, 2 and 4 bits); the same quality figures go to a separate report.
 
-A dataset that is already linked (has campaigns of both relations) is used as it is. The null is
-sampled (`--max-null`, seeded) when a view has more pairs than that.
+The dataset is always re-linked here, with content views off and every view kind at 0 bits (an
+equal perceptual hash is a campaign-evidence kind of the hand table), so neither a view nor an
+earlier content-view run helps form the groups that label its pairs. The null is sampled
+(`--max-null`, seeded) when a view has more pairs than that.
 """
 
 from __future__ import annotations
@@ -25,13 +27,17 @@ import json
 import random
 import sys
 from collections import defaultdict
+from dataclasses import replace
 from pathlib import Path
 from typing import Optional
 
 from pydantic import ValidationError
 
-from ftf.contract.models import Dataset, Relation, linkable
+from ftf.contract.models import Dataset, Layer, Relation, linkable
+from ftf.linking.backend import Backend
 from ftf.linking.grouping import canonical_map, link_dataset
+from ftf.linking.ledger import ScoringContext
+from ftf.linking.weights import HAND_TABLE, KindWeight, WeightTable
 from ftf.linking.similarity import (
     CALIBRATION_FORMAT,
     DEFAULT_CAP_BITS,
@@ -48,10 +54,18 @@ DEFAULT_MAX_NULL = 50_000
 GROUP_RELATIONS = (Relation.campaign, Relation.operator)
 
 
+def _blind_table() -> WeightTable:
+    """The hand table with every content-view kind at 0 bits."""
+    kinds = dict(HAND_TABLE.kinds)
+    for kind in VIEWS:
+        layer = kinds[kind].layer if kind in kinds else Layer.creative
+        kinds[kind] = KindWeight(layer, 0.0)
+    return replace(HAND_TABLE, kinds=kinds)
+
+
 def _groups(ds: Dataset) -> tuple[Dataset, dict[Relation, dict[str, str]]]:
-    """(linked dataset, relation -> canonical capture -> group id), linking with the ledger if needed."""
-    if not all(any(c.relation is r for c in ds.campaigns) for r in GROUP_RELATIONS):
-        ds = link_dataset(ds, GROUP_RELATIONS)
+    """(linked dataset, relation -> canonical capture -> group id), grouped blind to the content views."""
+    ds = link_dataset(ds, GROUP_RELATIONS, backend=Backend.from_context(ScoringContext.from_dataset(ds, _blind_table())))
     canon = canonical_map(ds)
     out: dict[Relation, dict[str, str]] = {r: {} for r in GROUP_RELATIONS}
     for camp in ds.campaigns:
@@ -189,6 +203,7 @@ def run_calibrate(args: argparse.Namespace) -> int:
         "views": {k: c.quality for k, c in sorted(cals.items())},
         "skipped": skipped,
     }
+    report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(f"{len(cals)} views -> {args.out} (quality: {report_path})")
     for k, c in sorted(cals.items()):

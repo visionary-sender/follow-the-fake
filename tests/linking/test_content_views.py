@@ -13,7 +13,8 @@ from ftf.features.common import VectorStore as VectorWriter
 from ftf.linking.assign import combine, link_incident
 from ftf.linking.grouping import link_dataset
 from ftf.linking.index import CandidateIndex
-from ftf.linking.ledger import ScoringContext, is_content_row, score_pair, threshold, with_content
+from ftf.linking.grouping import qualifies
+from ftf.linking.ledger import ScoringContext, is_content_row, score_pair, threshold, verdict, with_content
 from ftf.linking.similarity import FACE_CAP_BITS, Calibration, ContentViews, DatasetVectorStore, content_views, save_calibrations
 
 from linking_support import cap, dataset, incident
@@ -299,3 +300,54 @@ def test_cli_calibrate_then_assign(world, tmp_path):
     # score and link take the switch too
     assert cli.main(["score", str(base_dir / "dataset.json"), "a0-ad", "a1-ad", "--content-views", str(tmp_path / "cal2.json")]) == 0
     assert cli.main(["link", str(base_dir / "dataset.json"), "-o", str(tmp_path / "l.json"), "--content-views", str(tmp_path / "cal2.json")]) == 0
+
+
+def test_content_never_lifts_a_pair_over_tau(tmp_path):
+    """Three identifier layers just under tau plus a near-identical creative: review, never link or assign."""
+    d = tmp_path / "u"
+    d.mkdir()
+    r = rng(2)
+    incs, vecs = [], {}
+    for n in ("p", "q"):
+        c = f"{n}-l"
+        inc = incident(n, [cap(c, "lander")], {c: [(L.landing, "landing-pq"), (L.infrastructure, "host-pq"), (L.offer, "offer-pq")]})
+        incs.append(with_inds(inc, [vec_ind(c)]))
+        vecs[f"{c}/image_embedding/0"] = unit(A + 0.01 * r.normal(size=DIM))
+    for i in range(46):  # unrelated captures raise tau above the pair's identifier bits
+        c = f"f{i}-l"
+        incs.append(with_inds(incident(f"f{i}", [cap(c, "lander")], {c: [(L.landing, f"landing-f{i}")]}), [vec_ind(c)]))
+        vecs[f"{c}/image_embedding/0"] = unit(r.normal(size=DIM))
+    write_vectors(d, vecs)
+    ds = dataset(*incs)
+    off = ScoringContext.from_dataset(ds)
+    on = ScoringContext.from_dataset(ds, content=ContentViews(calibrations(), DatasetVectorStore(d)))
+    tau = threshold(off, Relation.campaign)
+    ps_off, ps_on = score_pair(off, "p-l", "q-l"), score_pair(on, "p-l", "q-l")
+    assert ps_off.bits < tau <= ps_on.bits and ps_on.layers_positive >= 2
+    assert ps_on.id_bits == ps_off.bits
+    assert not qualifies(ps_on, tau) and verdict(ps_on, on) == "review"
+    # the partition is the same with content views on, for every relation
+    from ftf.linking.backend import Backend
+
+    parts = lambda x: sorted((c.relation.value, sorted(c.capture_ids)) for c in x.campaigns)
+    linked_on = link_dataset(ds, backend=Backend.from_context(on))
+    assert parts(linked_on) == parts(link_dataset(ds))
+    # assigning a third copy of the pair: never assign on the content bits
+    c = "n-l"
+    new = with_inds(incident("n", [cap(c, "lander")], {c: [(L.landing, "landing-pq"), (L.infrastructure, "host-pq"), (L.offer, "offer-pq")]}), [vec_ind(c)])
+    nd = tmp_path / "n"
+    nd.mkdir()
+    write_vectors(nd, {"n-l/image_embedding/0": unit(A)})
+    plain = link_incident(link_dataset(ds), new).assignment
+    res = link_incident(link_dataset(ds), new, base_dir=d, incident_dir=nd, calibrations=calibrations()).assignment
+    assert plain.decision is Decision.new
+    assert res.decision is Decision.review  # similar content lifts new to review, never to assign
+
+
+def test_world_partitions_equal_on_and_off(world):
+    ds, linked, base_dir = world
+    from ftf.linking.backend import Backend
+
+    on = ScoringContext.from_dataset(ds, content=ContentViews(calibrations(), DatasetVectorStore(base_dir)))
+    parts = lambda x: sorted((c.relation.value, sorted(c.capture_ids)) for c in x.campaigns)
+    assert parts(link_dataset(ds, backend=Backend.from_context(on))) == parts(linked)
