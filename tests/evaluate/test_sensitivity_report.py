@@ -161,7 +161,7 @@ def _steps() -> dict:
 
 
 def test_report_tables_hold_raw_counts_for_both_engines_and_never_print_capture_keys():
-    report = build_report(_results(), _steps(), build="abc1234")
+    report = build_report(_results(), _steps(), build="build: main abc1234")
     md = render_markdown(report)
     assert "P 1 of 2 pairs, R 1 of 1 pairs" in md  # baseline
     assert "P 1 of 1 pairs, R 1 of 1 pairs" in md  # linking
