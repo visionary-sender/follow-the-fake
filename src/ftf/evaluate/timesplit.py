@@ -22,7 +22,7 @@ from typing import Any
 
 from ftf.contract import Dataset, Relation
 from ftf.evaluate.engine import get_engine
-from ftf.evaluate.hidden import hidden_dataset
+from ftf.evaluate.hidden import dataset_build, hidden_dataset
 from ftf.evaluate.labels import build_labels
 from ftf.evaluate.metrics import openset_counts
 from ftf.evaluate.units import GroundTruthSpec
@@ -192,6 +192,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     def run(args: argparse.Namespace) -> int:
         ds = load_dataset(args)
         result = run_timesplit(ds, load_spec(args.spec), args.engine, hide=args.hide)
+        result["dataset_build"] = dataset_build(args.dataset)
         out = Path(args.out_dir) / "timesplit"
         mode = "hidden" if args.hide else "visible"
         write_json(out / f"timesplit-{args.engine}-{mode}.json", result)
