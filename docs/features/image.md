@@ -85,7 +85,10 @@ These are in the `features` extra, not in `LICENSES-THIRD-PARTY.md`.
 | pHash + dHash + PDQ | 0.107 s (CPU) |
 | SigLIP 2 embedding | 0.18 s wall, 1.08 s CPU summed over 4 threads |
 
-COVERAGE_PLACEHOLDER
+**Coverage** over the ingested organiser dataset (34 captures): 420 images in 29 captures get
+all three hashes and an embedding (`image_phash`, `image_dhash`, `image_pdq`: 420 each;
+`image_embedding`: 420 vectors, 768-d). The five captures without images hold no image
+artefacts. Output: `gs://follow-the-fake-data/outputs/visual/hack-14/organiser-v2/`.
 
 ## Evaluation (acceptance)
 
@@ -114,7 +117,18 @@ both the positives and the negatives.
 **Negatives:** 2,000 random cross-case pairs of page assets, plus 500 random cross-case
 pairs of ad screenshots (cases differ, bytes differ, seed 14).
 
-EVAL_PLACEHOLDER
+Distances on 14 positives vs 2,500 negatives (full report:
+`gs://follow-the-fake-data/outputs/visual/hack-14/eval/report.json`):
+
+| Signal | Positives median / max | Negatives min / p1 / median | AUC |
+|---|---|---|---|
+| `image_phash` (Hamming, 64 bits) | 2 / 8 | 14 / 20 / 32 | 1.0 |
+| `image_dhash` (Hamming, 64 bits) | 1 / 4 | 8 / 19 / 32 | 1.0 |
+| `image_pdq` (Hamming, 256 bits) | 5 / 40 | 78 / 108 / 128 | 1.0 |
+| `image_embedding` (cosine) | 0.986 / min 0.956 | max 0.934 / p99 0.792 / 0.572 | 1.0 |
+
+No negative falls at or below the largest positive distance for any hash. These are raw
+distances; the linking engine calibrates them into evidence.
 
 ## Known limits
 
