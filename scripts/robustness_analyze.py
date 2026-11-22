@@ -24,6 +24,7 @@ import json
 import os
 import random
 import re
+import signal
 import statistics
 import subprocess
 import sys
@@ -122,24 +123,32 @@ def run_one(item: Item, args: argparse.Namespace, ftf: str) -> dict:
     if item.kind:
         cmd += ["--kind", item.kind]
     env = {**os.environ, "FTF_OFFLINE": "1", "FTF_RUN_DIR": str(run_dir)}
-    rec: dict = {"id": item.id, "group": item.group, "name": item.name, "exit": None, "timed_out": False,
+    rec: dict = {"id": item.id, "group": item.group, "exit": None, "timed_out": False,
                  "crash": False, "traceback": [], "exception": "", "stage_errors": [], "kind": None,
                  "decision": None, "candidates": 0, "links": 0, "indicators": 0, "layers": {}, "kinds": {},
                  "seconds": 0.0}
     start = time.monotonic()
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, errors="replace", env=env,
-                              timeout=args.timeout, stdin=subprocess.DEVNULL)
-    except subprocess.TimeoutExpired:
-        rec.update(timed_out=True, crash=True, seconds=round(time.monotonic() - start, 2))
+        # A new session lets a timeout kill the whole group (tesseract, ffmpeg), not just ftf.
+        proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, errors="replace", env=env, start_new_session=True)
+        try:
+            stdout, stderr = proc.communicate(timeout=args.timeout)
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, signal.SIGKILL)
+            proc.communicate()
+            rec.update(timed_out=True, crash=True, seconds=round(time.monotonic() - start, 2))
+            return rec
+    except OSError as exc:  # missing binary and the like: a crash record, not an aborted run
+        rec.update(crash=True, exception=redact(f"{exc.__class__.__name__}: {exc}", item.arg)[:NOTE_CHARS])
         return rec
     rec["seconds"] = round(time.monotonic() - start, 2)
     rec["exit"] = proc.returncode
-    tb, exc = traceback_head(proc.stderr, item.arg)
+    tb, exc = traceback_head(stderr, item.arg)
     rec["traceback"], rec["exception"] = tb, exc
     rec["crash"] = bool(tb) or proc.returncode not in (0, 1, 2)
     try:
-        summary = json.loads(proc.stdout)
+        summary = json.loads(stdout)
     except json.JSONDecodeError:
         rec["crash"] = True
         rec["exception"] = rec["exception"] or "no JSON summary on stdout"
@@ -156,6 +165,17 @@ def run_one(item: Item, args: argparse.Namespace, ftf: str) -> dict:
     else:
         rec["indicators"] = summary.get("indicators", 0)
     return rec
+
+
+def run_safe(item: Item, args: argparse.Namespace, ftf: str) -> dict:
+    """One unexpected failure in a parser or a missing file is a crash record, never an aborted run."""
+    try:
+        return run_one(item, args, ftf)
+    except Exception as exc:  # noqa: BLE001 - the driver must reach every input
+        return {"id": item.id, "group": item.group, "exit": None, "timed_out": False, "crash": True,
+                "traceback": [], "exception": redact(f"{exc.__class__.__name__}: {exc}", item.arg)[:NOTE_CHARS],
+                "stage_errors": [], "kind": None, "decision": None, "candidates": 0, "links": 0,
+                "indicators": 0, "layers": {}, "kinds": {}, "seconds": 0.0}
 
 
 def aggregate(records: list[dict]) -> dict:
@@ -218,7 +238,7 @@ def main() -> int:
     records = []
     with (args.out / "results.jsonl").open("w", encoding="utf-8") as fh, \
             ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        for rec in pool.map(lambda it: run_one(it, args, ftf), items):  # keeps input order
+        for rec in pool.map(lambda it: run_safe(it, args, ftf), items):  # keeps input order
             records.append(rec)
             fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
             fh.flush()

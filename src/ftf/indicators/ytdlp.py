@@ -29,7 +29,7 @@ EXTRACTOR = f"ytdlp@{__version__}"
 MAX_BYTES = 4 * 1024 * 1024
 UPLOADER_FIELDS = ("playlist_uploader_id", "uploader_id", "channel_id")
 MEDIA_FIELD = "id"
-IDENT = re.compile(r"[A-Za-z0-9._:-]{1,200}")
+IDENT = re.compile(r"@?[A-Za-z0-9._:-]{1,200}")  # "@handle" is a YouTube channel name
 
 _KINDS: dict[str, tuple[Layer, Level]] = {
     "video_uploader_id": (Layer.distribution_account, Level.operator),
@@ -45,14 +45,15 @@ def _record(capture: Capture, root: Path) -> tuple[str, dict] | None:
             continue
         path = file_under(root, a.path)
         if path is None:
-            return None
+            continue
         try:
             if path.stat().st_size > MAX_BYTES:
-                return None
+                continue
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, ValueError):
-            return None
-        return (a.id, data) if isinstance(data, dict) else None
+            continue
+        if isinstance(data, dict):
+            return a.id, data
     return None
 
 

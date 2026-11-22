@@ -95,3 +95,11 @@ def test_bad_or_oversized_records_give_nothing(tmp_path):
     assert run(capture(Artefact(id="v:big", type=ArtefactType.ad_library, path=big)), tmp_path) == []
     missing = Artefact(id="v:none", type=ArtefactType.ad_library, path="v/absent.info.json")
     assert run(capture(missing), tmp_path) == []
+
+
+def test_handles_are_ids_and_a_bad_record_does_not_hide_a_good_one(tmp_path):
+    bad = Artefact(id="v:bad", type=ArtefactType.ad_library, path=write(tmp_path, "v/a.info.json", "[1]"))
+    good = info_artefact(tmp_path, record(playlist_uploader_id="@synthetic-channel"), rel="v/b.info.json")
+    inds = {i.kind: i.value for i in run(capture(bad, good), tmp_path)}
+    assert inds["video_uploader_id"] == "@synthetic-channel"
+    assert inds["video_media_id"] == "1234567890123"
