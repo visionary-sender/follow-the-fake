@@ -19,6 +19,7 @@ from typing import Any
 
 from ftf.contract import Dataset
 from ftf.evaluate.hidden import register as register_hidden
+from ftf.evaluate.report import register as register_report
 from ftf.evaluate.timesplit import register as register_timesplit
 from ftf.evaluate.units import DEFAULT_SPEC, load_spec
 
@@ -303,6 +304,7 @@ SUBCOMMANDS: list[Callable[[argparse._SubParsersAction], None]] = [
     _register_distractors,
     register_timesplit,
     register_hidden,
+    register_report,
 ]
 
 
