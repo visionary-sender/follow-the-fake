@@ -244,6 +244,10 @@ Seven experiments, E1 to E7, ran in 13 steps, all `ok`. The 33 canonical capture
 
 *A link-anything-shared baseline finds all 11 campaign pairs but only 11 of its 66 links are right. The linker finds 11/11 with every link right, and under leave-one-incident-out it assigns 7 of 8 held-out items correctly with no wrong campaign.*
 
+![One organiser campaign as a graph of shared evidence](docs/figures/campaign_graph.png)
+
+*One organiser campaign: four incidents linked pairwise by the same platform tenant and owner ids (about 16 bits per pair, well above the threshold); a fifth incident of the campaign shares no evidence with them and is not drawn.*
+
 Figures: organiser build main 8eec049 with the visual features, code main aca1f57, platform ids hidden.
 
 <!-- eval:build start -->
@@ -457,7 +461,7 @@ The image runs the `ftf` command. With no arguments it builds the campaign base 
 
 The offline package is an AES-256 encrypted 7z file. The link does not expire, and the password is never in the repository.
 
-1.69 GB; sha256 `20ecf2e245b61645d7d5e15baefbdbf10f109f66b659e737b50a2a7229dd5dde` (check with `sha256sum`). `7z x <file>` asks for the password and unpacks to `ftf-offline-package/`.
+1.69 GB; sha256 `c61b56dfd1f03c1309f79c9022094f41e22e0b32efcf8b1e88d076e8a02bc521` (check with `sha256sum`). `7z x <file>` asks for the password and unpacks to `ftf-offline-package/`.
 
 ```bash
 curl -LO https://storage.googleapis.com/ftf-pkg-9d5a7a89ee6a4981/ftf-offline-6de92251feecb7ff82f64098.7z
@@ -468,13 +472,28 @@ docker run --rm -e FTF_OFFLINE=1 -v "$PWD/ftf-offline-package:/data/package:ro" 
 docker run --rm --network none -v "$PWD/ftf-offline-package:/data/package:ro" -e FTF_PACKAGE=/data/package <image> analyze <INPUT>
 ```
 
-The package holds the campaign base, the enrichment cache, the models, the face reference set and the brand stop-list. `FTF_PACKAGE` support is planned; the command above is the intended form.
+The entry point reads the package through `FTF_PACKAGE`; its contents are described in [Data you receive](#data-you-receive).
 
 Docker cannot publish the app's port from a container started with `--network none`, so the app runs with `FTF_OFFLINE=1` instead, which makes no network calls. The CLI line shows the strict form, with no network device at all. Enrichment answers come from the cache in the package, and a lookup that is not cached is recorded as `unknown`.
 
 **Your own cases, offline.** Offline, a run reads only the files you give it, the campaign base and the enrichment cache. These work without a network: OCR text, image hashes, faces, the page skeleton, trackers and identifiers in the page or HAR, the redirect chain from a HAR, and linking against the base. A bare URL cannot be fetched offline, so submit the saved page (HAR or HTML) or the screenshot instead. Registry, DNS and certificate data for a domain outside the dataset comes out as `unknown`, because the cache covers only the dataset's domains. Measured with `--network none` on 4 cores: about 11 s for a screenshot, about 13 s for a HAR of one landing page, and about 2 s for a bare URL, including the network probe (about 0.02 s when there is no network).
 
+### Data you receive
+
+The offline package is one folder of 331 files, about 2.0 GB in total. Nothing in it is personal data of private people.
+
+| Folder | Files | Size | What it is for |
+|---|---|---|---|
+| `base/` | 209 | 20.3 MB | the campaign base built from the challenge cases, with the extracted indicators and keyframes |
+| `enrichment/` | 1 | 0.4 MB | cached RDAP, DNS and certificate answers for the dataset's domains |
+| `models/` | 20 | 2.0 GB | the CPU feature models: text and image embeddings, face detection and face embedding |
+| `face-reference/` | 99 | 8.2 MB | public-figure reference portraits, used to name faces that match them |
+| `brand-stoplist/` | 1 | 0.2 MB | hashed outlet fingerprints, with no page content |
+| `README.txt` | 1 | under 1 KB | what is inside and how to mount it |
+
 ### Online, with the base bundle
+
+The online path (live lookups with the automatic fallback to the cache) is covered by the test suite with a mocked network; the container itself was checked end to end offline, with `--network none`.
 
 ```bash
 docker run --rm -p 127.0.0.1:8501:8501 -v "$PWD/base-bundle:/base:ro" ftf
@@ -497,14 +516,15 @@ ftf serve --base dataset.json --port 8501
 
 `ftf analyze` prints the verdict (assign, new or review) and exits 0 for all three. Inputs are copied to a per-run directory and hashed, never executed. Captured HTML is never rendered, and URLs are shown defanged.
 
-`ftf export` writes `incidents.csv`, `captures.csv`, `indicators.csv`, `links.csv`, `evidence.csv` (one row per ledger row), `campaigns.csv`, a validated `dataset.json`, and `campaign_patterns.md`, which defangs every value. An export built from organiser data belongs in the private bucket.
+An input already in the base shows its stored analysis, so after changing an extractor or feature, rebuild the base with `ftf build-base … --force`.
+
+`ftf export` writes `incidents.csv`, `captures.csv`, `indicators.csv`, `links.csv`, `evidence.csv` (one row per ledger row), `campaigns.csv`, a validated `dataset.json`, and `campaign_patterns.md`, which defangs every value. An export built from organiser data is never committed to the repository.
 
 ### Build the image
 
-From a clean checkout of the repository root. The brand stop-list is private, so the fetch runs on a cloud VM:
+From a clean checkout of the repository root:
 
 ```bash
-scripts/fetch-brand-stoplist.sh   # writes docker/brand-stoplist/brand-stoplist.json (gitignored)
 docker build -t ftf .
 docker run --rm ftf --help
 docker run --rm ftf --version
@@ -514,7 +534,7 @@ Without the stop-list file the build still works, and the engine warns and score
 
 ### Walkthrough
 
-The walkthrough uses a slice of the challenge base (`base-h4-main`), with case 1 held out. Cases are named by their folder number.
+The walkthrough uses a slice of the campaign base in the offline package, with case 1 held out. Cases are named by their folder number.
 
 1. **A known variant.** `do_udostepnienia:1`, held out, is assigned to the 7-capture campaign it belongs to. The best candidate scores 18.7 bits and the evidence capacity is 48.4 bits.
 2. **A new campaign.** An unrelated saved page with no shared value against any campaign is declared **new**. Its evidence capacity is 44.9 bits.
@@ -546,13 +566,13 @@ The code also reads settings for threads, speech-to-text, image embedding and eg
 
 ### Licences
 
-Only permissively licensed open-source dependencies are allowed (MIT, BSD, Apache, PSF, ISC, HPND). `LICENSES-THIRD-PARTY.md` is generated from installed package metadata by `scripts/vm.sh licences`, and a test fails if it is stale or lists a licence outside the allowlist. The code in this repository is not under an open licence. Under the challenge rules the economic copyright to a winning solution transfers to NASK PIB.
+Only permissively licensed open-source dependencies are allowed (MIT, BSD, Apache, PSF, ISC, HPND). `LICENSES-THIRD-PARTY.md` is generated from installed package metadata by `python3 scripts/licences.py`, and a test fails if it is stale or lists a licence outside the allowlist. The code in this repository is not under an open licence. Under the challenge rules the economic copyright to a winning solution transfers to NASK PIB.
 
 Two named exceptions exist. `certifi` (MPL-2.0, unmodified) is pulled in through `requests` and `tldextract`. Playwright, its Chromium and its Node.js driver come only with the optional `fetch` extra. The per-package table is [LICENSES-THIRD-PARTY.md](LICENSES-THIRD-PARTY.md). System packages, models and outside services, with their licences and limits, are in [docs/licences.md](docs/licences.md).
 
 ### Data and sources
 
-The challenge data (the case folders, the BACKUP archive and the link list) belongs to the organiser. It lives in a private bucket (`gs://<DATA_BUCKET>`) and on a cloud VM, never in this repository. Derived outputs go to the bucket under `outputs/`.
+The challenge data (the case folders, the BACKUP archive and the link list) belongs to the organiser. It is kept in private cloud storage, never in this repository, and derived outputs are kept there too.
 
 | Source | What we take | Terms and limits |
 |---|---|---|
@@ -564,6 +584,10 @@ The challenge data (the case folders, the BACKUP archive and the link list) belo
 **Brand stop-list (`FTF_BRAND_STOPLIST`).** The linking engine reads hashed values (digests only) seen on real outlet pages in our public corpus, batch 1. A stop-listed value is the impersonated outlet's own skin, so it never links a campaign below the ecosystem relation. The file is built with `ftf brand-stoplist`.
 
 **Face reference set (`FTF_FACE_REFERENCE`).** The 33 public figures are listed in `src/ftf/features/faces/reference_manifest.json`; each face gets the top three candidates by cosine similarity of SFace embeddings. Only CC0 and CC BY images with exactly one clear face are used. The set is built on a VM with `python -m ftf.features.faces.reference build` from Wikidata and Wikimedia Commons. The images and embeddings are not in git, and nothing is downloaded at scan time. Details: [docs/features/faces.md](docs/features/faces.md).
+
+### How cloud was used in the project
+
+Heavy processing ran on cloud virtual machines: OCR, embeddings, the ingestion of the corpus, and the test suite. Live scam pages were fetched only on an isolated sandbox machine, never on a laptop. Collected data was kept in private cloud storage and is not in this repository. Nothing in the tool needs that cloud: the container runs on any machine, online or offline.
 
 ### Repository layout
 
@@ -577,42 +601,26 @@ The challenge data (the case folders, the BACKUP archive and the link list) belo
 | `src/ftf/pipeline/`, `src/ftf/app/` | `ftf analyze` and `ftf export`; the Streamlit demo app |
 | `src/ftf/contract/` | the data contract (pydantic models); see [docs/contract.md](docs/contract.md) |
 | `docs/` | methodology, linking decisions, container run, evaluation, and the details of each service |
-| `tests/` | pytest suite, run on the cloud VM |
-| `scripts/` | `vm.sh` (the cloud dev loop), `check_no_private_data.py`, `licences.py`, the sandbox and scanner scripts |
+| `tests/` | pytest suite |
+| `scripts/` | `check_no_private_data.py`, `licences.py`, the sandbox and scanner scripts |
 | `Dockerfile`, `.dockerignore` | the container image that runs the `ftf` command |
 
-### Tests and checks on the VM
-
-All computation runs on the cloud VM, not on the laptop. You need `gcloud` with a configured project, IAP SSH access to the VM, and a running VM. `scripts/vm.sh` reads the VM name, zone and project from `FTF_VM`, `FTF_VM_ZONE` and `FTF_VM_PROJECT`; set them to your own values.
+### Tests
 
 ```bash
-scripts/vm.sh test                 # the whole suite on the VM; exits with pytest's code
-scripts/vm.sh test -k cli -x       # extra arguments go to pytest
-scripts/vm.sh run -- ftf --help    # any command in the synced checkout, venv active
-scripts/vm.sh licences             # regenerate LICENSES-THIRD-PARTY.md
+pip install -e ".[dev]"
+pytest
 ```
 
-Each call copies the worktree's tracked files to `/work/<worktree-dir-name>/src` on the VM. The venv is rebuilt only when `pyproject.toml` changes.
+Tests that need the challenge fixture skip when it is absent.
 
-**Private-data check.** `scripts/check_no_private_data.py` fails on three things: personal data of private people (e-mail addresses, phone numbers, including the contacts in the organiser dataset), secrets (private keys, tokens, password or API key assignments), and raw challenge files committed as files (HAR, MHTML, WARC, PDF, screenshots, HTML dumps). Scam domains, URLs, tracker, account, tenant and pixel ids, and the names of public figures and brands may be in git. The dataset exists only on the VM, so the check runs there. Write the commit messages on the laptop, copy them over, then run:
+**Private-data check.** `scripts/check_no_private_data.py` fails on three things: personal data of private people (e-mail addresses, phone numbers, including the contacts in the organiser dataset), secrets (private keys, tokens, password or API key assignments), and raw challenge files committed as files (HAR, MHTML, WARC, PDF, screenshots, HTML dumps). Scam domains, URLs, tracker, account, tenant and pixel ids, and the names of public figures and brands may be in git. The check needs the organiser's dataset, so it runs only where that dataset is available:
 
 ```bash
-git log --all --format=%B > commit-messages.txt          # on the laptop
-scripts/vm.sh run -- true                                # sync the worktree
-gcloud compute scp commit-messages.txt <VM>:/work/<slug>/ --project <GCP_PROJECT> \
-  --zone <ZONE> --tunnel-through-iap --quiet
-scripts/vm.sh run -- python3 -I scripts/check_no_private_data.py \
-  --dataset /data/derived/ingest/organiser/dataset.json --root . \
-  --messages /work/<slug>/commit-messages.txt            # <slug> is the worktree directory name
+python3 -I scripts/check_no_private_data.py --dataset <dataset.json> --root .
 ```
+
+To scan commit messages as well, write them with `git log --all --format=%B > commit-messages.txt` and add `--messages commit-messages.txt`.
 
 Exit 0 means no hit and exit 1 means at least one. A hit prints `file:line: class (digest)`, never the matched value.
-
-**The demo app on the VM.** Bind it to the VM and tunnel the port:
-
-```bash
-scripts/vm.sh run -- env FTF_FIXTURE_DIR=/data/derived/fixture-v0 ftf serve --port 8501
-gcloud compute ssh <VM> --project <GCP_PROJECT> --zone <ZONE> \
-  --tunnel-through-iap -- -N -L 8501:127.0.0.1:8501     # then open http://localhost:8501
-```
 

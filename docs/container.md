@@ -10,7 +10,7 @@ or, with no arguments, builds the base if needed and serves the app.
 ## 1. Build
 
 Building needs internet access for pip, apt and Playwright's Chromium. It takes about 5 minutes and
-the image is 5.57 GB (5,568,573,805 bytes, measured on a cloud VM; it was 7.60 GB before, with the models stored twice). It holds the CPU torch build, the CPU feature models, tesseract, ffmpeg and Chromium. The image
+the image is 5.57 GB (5,568,573,805 bytes). It holds the CPU torch build, the CPU feature models, tesseract, ffmpeg and Chromium. The image
 includes Playwright's headless Chromium (`/opt/ms-playwright/chromium_headless_shell-1248`) with
 its Debian system libraries, which `ftf fetch` needs; their licences are in
 [`licences.md`](licences.md) section 2a.
@@ -18,21 +18,20 @@ its Debian system libraries, which `ftf fetch` needs; their licences are in
 The build needs BuildKit (the Dockerfile uses `COPY --chmod`): Docker 23 and later enables it by
 default; on older clients set `DOCKER_BUILDKIT=1` (tested on Docker 20.10.24 with that variable).
 
-Before the build, fetch the brand stop-list. It is built from our own public corpus
-(batch 1, the pages tagged as real outlets) and holds hashed values only. It lives in the private
-bucket, so run the fetch on a cloud VM, where the bucket is reachable:
+The build takes two inputs from the build context: the brand stop-list in `docker/brand-stoplist/`
+and the face reference set in `docker/build-context/faces-reference/`. Both folders are gitignored.
+If the offline package is unpacked, copy its `brand-stoplist/` and `face-reference/` folders into
+them before the build. Then build:
 
 ```bash
-scripts/fetch-brand-stoplist.sh     # writes docker/brand-stoplist/brand-stoplist.json (gitignored)
 docker build -t ftf .
 ```
 
-The Dockerfile copies that folder to `/opt/ftf-brand/` and sets `FTF_BRAND_STOPLIST` to the file.
+The Dockerfile copies the stop-list folder to `/opt/ftf-brand/` and sets `FTF_BRAND_STOPLIST` to the file.
 The folder always exists (it holds a `.gitkeep`), so the build does not fail when the file is
 missing. The image then runs without the stop-list: `ftf build-base` prints
 `brand stop-list not loaded` and scores as before, and the brand-negative result still holds
-through the platform/creative gate. Fetch and build in the same VM call, because `scripts/vm.sh`
-replaces the synced worktree on every call and removes the fetched file.
+through the platform/creative gate.
 
 ## 2. First run with the organiser's dataset folder
 
@@ -109,7 +108,7 @@ build-report.json        which build stages ran or were skipped
 The enrichment cache is derived from organiser domains, so it is never baked into the image; it
 travels only inside a privately handed-over base bundle.
 
-The final base bundle is `<BASE_BUNDLE_DIR>`, handed over privately; its export tables are in `<EXPORT_DIR>`.
+The final campaign base ships in the offline package (`base/`). `ftf export` produces the export tables from it.
 
 An input that is already in the base shows its stored analysis: `ftf analyze` returns the base's
 incident for it, so an extractor or feature change shows for that input only after the base is
@@ -179,9 +178,9 @@ both). It then runs only under the hardened flags above; the fetcher refuses to 
 Chromium's sandbox on. A dead or cloaked page is a normal result, not an error. Building the base
 makes no network requests.
 
-On a cloud VM the same image runs with `--network none` or `-e FTF_OFFLINE=1`: analyze and
-enrichment make no lookups there. `ftf fetch` and the scanner do not read `FTF_OFFLINE`; live fetching
-stays off the cloud VM by rule.
+With `--network none` or `-e FTF_OFFLINE=1` the image makes no lookups: analyze and enrichment stay
+offline. `ftf fetch` and the scanner do not read `FTF_OFFLINE`; live fetching is not part of an
+offline run.
 
 ## Resources
 
@@ -190,10 +189,9 @@ challenge set takes about 2 minutes. Disk: the image (5.57 GB) plus a few MB of 
 families on 2 CPUs the slowest organiser input took about 263 s, so expect a few minutes for one input;
 the OCR and video timeouts above bound a single slow call.
 
-## Verified on a cloud VM
+## Verified checks
 
-Built on a cloud VM from the branch with `sudo docker build -t ftf:dev .` (1.63 GB in an earlier build, Chromium
-present as above). Checks, run with the hardening flags of section 2 (`--memory=4g --cpus=2`):
+Built with `docker build -t ftf:dev .` (Chromium present as above). Checks, run with the hardening flags of section 2 (`--memory=4g --cpus=2`):
 
 - **App:** `docker run -d` with `-e FTF_OFFLINE=1`, no organiser folder and no base (the entry point
   then starts the app without a base). `/_stcore/health` answers HTTP 200, the app page answers
@@ -205,7 +203,7 @@ present as above). Checks, run with the hardening flags of section 2 (`--memory=
 
 ## Checks with the offline package
 
-Image built from this branch with DOCKER_BUILDKIT=1; its entry point matches
+Image built with DOCKER_BUILDKIT=1; its entry point matches
 `docker/entrypoint.sh` byte for byte. The package folder holds 331 files, 2.0 GB (base 209 files,
 models 20, face reference 99, enrichment 1, stop-list 1, README 1).
 Checks with the package mounted and `--network none` and `-e FTF_OFFLINE=1`:
@@ -217,18 +215,17 @@ Checks with the package mounted and `--network none` and `-e FTF_OFFLINE=1`:
   skipped with a reason.
 - **Enrichment from the cache** is not exercised by these inputs; the offline URL check stopped at
   "no registrable domain" (the invented name used the reserved `.invalid` TLD).
-- **Run with network on** (sandbox host): not done. The sandbox host has no container runtime set up,
-  and the image is 5.57 GB (5,568,589,990 bytes), too large to move there quickly.
+- **Run with network on:** not checked yet.
 
 ## Checking the image before handing it over
 
-Scan the image on the VM. It exits 1 on any hit and prints paths only, never contents:
+Scan the image before handing it over. It exits 1 on any hit and prints paths only, never contents:
 
 ```bash
-python3 -I scripts/image_leak_check.py ftf:dev --raw /data/raw --docker "sudo docker"
+python3 -I scripts/image_leak_check.py ftf:dev --raw <organiser-folder>
 ```
 
 It flags `.git`, capture formats, base files (`dataset.json`, `cache.json`, `vectors/`), credential
 files, files under `/data` or `/base`, stray images, key and token patterns, organiser case folder
 names, and byte copies of organiser files (512 bytes or larger). Afterwards remove dangling images
-with `sudo docker image prune -f`.
+with `docker image prune -f`.
