@@ -11,12 +11,20 @@ answer against the reference only. The expected answer comes from the ground-tru
 groups (platform ids and analyst verdicts, merged where they share a folder): assign to the
 reference folders in the same group, or new when no reference folder is in it.
 
+Two checks on that truth and on the method, both in the output:
+- `bridging_folders`: folders whose captures sit in two or more ground-truth campaign groups. The
+  truth merges those groups, so each such folder is listed with the number of groups it bridges.
+- `fragmentation`: the number of truth groups with two or more later items that all came out new.
+  Because the base is not grown, those items are never joined to each other, so a group counted here
+  was split into several new campaigns.
+
 Folders are the scoring unit (`do_udostepnienia:61`), so the output never prints a domain.
 """
 
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +32,7 @@ from ftf.contract import Dataset, Relation
 from ftf.evaluate.engine import get_engine
 from ftf.evaluate.hidden import dataset_build, hidden_dataset
 from ftf.evaluate.labels import build_labels
-from ftf.evaluate.metrics import openset_counts
+from ftf.evaluate.metrics import merge_overlapping, openset_counts
 from ftf.evaluate.units import GroundTruthSpec
 
 REFERENCE_DATE = "2026-10-08"
@@ -62,26 +70,30 @@ def _subset(ds: Dataset, ids: list[str]) -> Dataset:
     return Dataset.model_validate(data.model_dump(mode="json"))
 
 
-def _merge_overlapping(groups: list[set[str]]) -> list[set[str]]:
-    """Union of sets that share any member (the output sets are disjoint)."""
-    out: list[set[str]] = []
-    for g in groups:
-        g = set(g)
-        keep = []
-        for h in out:
-            if h & g:
-                g |= h
-            else:
-                keep.append(h)
-        out = keep + [g]
-    return out
-
-
 def campaign_truth(labels: dict[str, Any], folder: dict[str, str]) -> list[set[str]]:
     """Ground-truth campaign groups as sets of folder ids (platform-id and analyst campaign groups merged)."""
     groups = [{folder[m] for m in g["members"] if m in folder}
               for g in labels["groups"] if g["relation"] == RELATION.value]
-    return _merge_overlapping([g for g in groups if g])
+    return merge_overlapping(groups)
+
+
+def bridging_folders(labels: dict[str, Any], folder: dict[str, str]) -> list[dict[str, Any]]:
+    """Folders in two or more ground-truth campaign groups; campaign_truth merges those groups."""
+    count: Counter[str] = Counter()
+    for g in labels["groups"]:
+        if g["relation"] == RELATION.value:
+            count.update({folder[m] for m in g["members"] if m in folder})
+    return [{"folder": f, "groups": n} for f, n in sorted(count.items()) if n > 1]
+
+
+def fragmented_groups(truth: list[set[str]], later_ids: list[str], decision: dict[str, str]) -> list[list[str]]:
+    """Truth groups with two or more later items, all of which came out new (sorted by item order)."""
+    out = []
+    for group in truth:
+        members = [i for i in later_ids if i in group]
+        if len(members) >= 2 and all(decision[i] == "new" for i in members):
+            out.append(members)
+    return out
 
 
 def _verdict(decision: str, expected: list[str], assigned: list[str] | None) -> str:
@@ -108,6 +120,7 @@ def run_timesplit(ds: Dataset, spec: GroundTruthSpec, engine_name: str, hide: bo
         for c in base.campaigns if c.relation == RELATION
     }
     truth = campaign_truth(labels, folder)
+    bridging = bridging_folders(labels, folder)
     ref_set = set(ref_ids)
 
     items: list[dict[str, Any]] = []
@@ -137,6 +150,7 @@ def run_timesplit(ds: Dataset, spec: GroundTruthSpec, engine_name: str, hide: bo
             "why": why,
             "verdict": verdict,
         })
+    frag = fragmented_groups(truth, later_ids, {it["item"]: it["decision"] for it in items})
     return {
         "experiment": "E7 time split",
         "engine": engine_name,
@@ -149,6 +163,10 @@ def run_timesplit(ds: Dataset, spec: GroundTruthSpec, engine_name: str, hide: bo
         "counts": openset_counts(outcomes),
         "items": items,
         "wrong_or_false": [i for i in items if i["verdict"] in ("wrong assignment", "false accept")],
+        "truth_groups": len(truth),
+        "bridging_folders": bridging,
+        "fragmentation": len(frag),
+        "fragmented_groups": frag,
     }
 
 
@@ -158,6 +176,8 @@ def _value(x: Any) -> Any:
 
 def render_markdown(result: dict[str, Any]) -> str:
     c = result["counts"]
+    bridging = ", ".join(f"{b['folder']} ({b['groups']} groups)" for b in result["bridging_folders"]) or "none"
+    frag = "; ".join(", ".join(g) for g in result["fragmented_groups"]) or "none"
     lines = [
         f"# E7 time split, engine `{result['engine']}`, platform ids {result['platform_ids']}",
         "",
@@ -168,6 +188,14 @@ def render_markdown(result: dict[str, Any]) -> str:
         f"Counts: items {c.get('items', 0)}, correct assignments {c.get('correct', 0)}, "
         f"wrong assignments {c.get('wrong', 0)}, false accepts {c.get('false_accepts', 0)}, "
         f"new {c.get('new', 0)} (correct new {c.get('new_correct', 0)}), review {c.get('review', 0)}.",
+        "",
+        f"Truth groups: {result['truth_groups']}. Bridging folders (in two or more campaign groups, which the "
+        f"truth merges): {bridging}.",
+        "",
+        f"Fragmentation: {result['fragmentation']} truth group(s) with two or more later items that all came out "
+        f"new ({frag}). Limitation: the base is not grown between items, so each later item is decided against "
+        "the reference only. Two items of one campaign can both score correct new, and a correct new does not "
+        "show that the campaign was recognised.",
         "",
         "| item | date | decision | assigned to | expected | why | verdict |",
         "|---|---|---|---|---|---|---|",
@@ -205,6 +233,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         print(f"items {c.get('items', 0)} correct {c.get('correct', 0)} wrong {c.get('wrong', 0)} "
               f"false_accepts {c.get('false_accepts', 0)} new {c.get('new', 0)} new_correct {c.get('new_correct', 0)} "
               f"review {c.get('review', 0)}")
+        print(f"bridging folders {len(result['bridging_folders'])}, fragmentation {result['fragmentation']}")
         for it in result["items"]:
             print(f"  {it['item']}: {it['decision']} (expected {it['expected']}) -> {it['verdict']}")
         return 0
