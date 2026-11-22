@@ -15,9 +15,12 @@ from pydantic import ValidationError
 
 from ftf.contract.models import Dataset, Relation
 from ftf.linking.assign import combine, link_incident
+from ftf.linking.backend import Backend
 from ftf.linking.grouping import ALL_RELATIONS, link_dataset
+from ftf.linking.learn_commands import add_weights_argument, context_from_args, load_weights_arg
 from ftf.linking.ledger import ScoringContext, level_of, score_pair, threshold, verdict
 from ftf.linking.types import PairScore
+from ftf.linking.weights import HAND_TABLE, warn_unknown_kinds
 
 
 def register_score(subparsers: argparse._SubParsersAction) -> None:
@@ -34,13 +37,15 @@ def register_score(subparsers: argparse._SubParsersAction) -> None:
         "--relation", choices=[r.value for r in Relation], default=Relation.campaign.value,
         help="relation to score (default: %(default)s)",
     )
+    add_weights_argument(parser)
     parser.set_defaults(func=run_score)
 
 
 def run_score(args: argparse.Namespace) -> int:
     try:
         ds = Dataset.from_json(args.dataset.read_bytes())
-        ctx = ScoringContext.from_dataset(ds)
+        ctx = context_from_args(ds, args)
+        warn_unknown_kinds(ds, ctx.weights, "score")
         score = score_pair(ctx, args.a, args.b, Relation(args.relation))
     except (OSError, ValidationError, KeyError, ValueError) as exc:
         msg = exc.args[0] if isinstance(exc, KeyError) and exc.args else exc
@@ -87,6 +92,7 @@ def register_link(subparsers: argparse._SubParsersAction) -> None:
         choices=[r.value for r in Relation],
         help="relation to group under (repeatable; default: all)",
     )
+    add_weights_argument(parser)
     parser.set_defaults(func=run_link)
 
 
@@ -102,7 +108,20 @@ def register_assign(subparsers: argparse._SubParsersAction) -> None:
     parser.add_argument("new", type=Path, metavar="NEW.json")
     parser.add_argument("-o", "--out", type=Path, required=True, metavar="OUT.json")
     parser.add_argument("--relation", choices=[r.value for r in Relation], default=Relation.campaign.value)
+    add_weights_argument(parser)
     parser.set_defaults(func=run_assign)
+
+
+def _backend_factory(args: argparse.Namespace, prog: str):
+    """A backend factory for `--weights` (file read once), None without it, or an int exit code on a bad file."""
+    if not args.weights:
+        return None
+    try:
+        loaded = load_weights_arg(args)
+    except ValueError as exc:
+        print(f"ftf {prog}: {exc}", file=sys.stderr)
+        return 2
+    return lambda ds: Backend.from_context(context_from_args(ds, args, loaded))
 
 
 def _load(path: Path) -> Dataset:
@@ -115,9 +134,14 @@ def _write(ds: Dataset, path: Path) -> None:
 
 
 def run_link(args: argparse.Namespace) -> int:
+    factory = _backend_factory(args, "link")
+    if isinstance(factory, int):
+        return factory
     ds = _load(args.input)
     relations = list(dict.fromkeys(Relation(r) for r in args.relation)) if args.relation else list(ALL_RELATIONS)
-    out = link_dataset(ds, relations)
+    backend = factory(ds) if factory else None
+    warn_unknown_kinds(ds, backend.context.weights if backend else HAND_TABLE, "link")
+    out = link_dataset(ds, relations, backend=backend)
     _write(out, args.out)
     n_caps = sum(len(i.captures) for i in out.incidents)
     print(f"{len(out.incidents)} incidents, {n_caps} captures -> {args.out}")
@@ -132,6 +156,9 @@ def run_link(args: argparse.Namespace) -> int:
 
 
 def run_assign(args: argparse.Namespace) -> int:
+    factory = _backend_factory(args, "assign")
+    if isinstance(factory, int):
+        return factory
     base = _load(args.collection)
     new = _load(args.new)
     relation = Relation(args.relation)
@@ -151,7 +178,7 @@ def run_assign(args: argparse.Namespace) -> int:
             print(f"ftf assign: duplicate_of points at unknown captures: {', '.join(missing)}", file=sys.stderr)
             return 2
         for inc in ready:
-            res = link_incident(current, inc, relation)
+            res = link_incident(current, inc, relation, backend=factory)
             results.append(res)
             data = combine(current, [inc]).model_dump(mode="json")
             data["links"] += [l.model_dump(mode="json") for l in res.links]
