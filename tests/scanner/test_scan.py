@@ -183,7 +183,7 @@ def test_cli_scan_fails_when_every_source_fails(tmp_path, monkeypatch):
         scan_run, "scan",
         lambda out, sources, **kw: {"run_id": "r", "new": 0, "sources": {"meta": {"collected": 0, "new": 0, "queries": [{"status": "blocked"}]}}},
     )
-    assert main(["scan", "--source", "meta", "--out", str(tmp_path)]) == 1
+    assert main(["scan", "--source", "meta", "--keywords", "alpha", "--out", str(tmp_path)]) == 1
 
 
 def test_cli_rejects_bad_date(capsys):
@@ -280,4 +280,4 @@ def test_cli_fails_when_only_skipped(tmp_path, monkeypatch):
         scan_run, "scan",
         lambda out, sources, **kw: {"run_id": "r", "new": 0, "sources": {"google_atc": {"collected": 0, "new": 0, "queries": [{"status": "blocked"}, {"status": "skipped"}]}}},
     )
-    assert main(["scan", "--source", "google_atc", "--out", str(tmp_path)]) == 1
+    assert main(["scan", "--source", "google_atc", "--keywords", "alpha", "--out", str(tmp_path)]) == 1
