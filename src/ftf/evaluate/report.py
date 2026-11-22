@@ -1,11 +1,11 @@
 """`ftf eval report`: the README-ready evaluation report, regenerated on the workbench.
 
-Runs labels, leak, hidden and timesplit (each for both engines), sensitivity, and the open-set,
-degrade and distractor commands when they are registered (skipped with a note otherwise). Writes
-`report.md` and `report.json` to `<out-dir>/report/`; each test keeps its own output folder beside
-it. Every table holds raw counts, macro scores average over label groups, and the two engines sit
-side by side. The report names case folders (incident ids), kinds and layers. It never prints
-capture ids or organiser values, and it reads only the JSON that the sub-commands wrote.
+Runs labels, leak, hidden and timesplit (each for both engines), sensitivity (E6), and openset (E2),
+degrade (E3) and distractors (E4) for both engines. Writes `report.md` and `report.json` to
+`<out-dir>/report/`; each test keeps its own output folder beside it. Every table holds raw counts,
+macro scores average over label groups, and the two engines sit side by side. The report names case
+folders (incident ids), kinds and layers. It never prints capture ids, distractor names or organiser
+values, and it reads only the JSON that the sub-commands wrote.
 """
 
 from __future__ import annotations
@@ -19,7 +19,19 @@ from typing import Any
 
 REPORT_SCHEMA = "ftf-eval-report@0.1"
 ENGINES = ("baseline", "linking")
+SUB_TESTS = ("openset", "degrade", "distractors")  # E2, E3, E4
 MOVE_ORDER = ("-2", "-1", "+1", "+2")
+
+# Distractor name prefix (the part before ':' or '-') -> label for the table. Names themselves carry
+# capture ids, so they are never printed.
+DISTRACTOR_LABELS = {
+    "natural": "natural must-not-link pair",
+    "kit_copy": "synthetic kit copy",
+    "platform_only": "platform-only page",
+    "collector_injection": "collector invariance (injected fingerprint)",
+    "brand_negative": "brand negative",
+    "celebrity_only": "celebrity-only context",
+}
 
 # step name -> (sub-command, extra argv)
 STEP_ARGS: dict[str, tuple[str, list[str]]] = {
@@ -30,9 +42,9 @@ STEP_ARGS: dict[str, tuple[str, list[str]]] = {
     "timesplit baseline": ("timesplit", ["--engine", "baseline"]),
     "timesplit linking": ("timesplit", ["--engine", "linking"]),
     "sensitivity": ("sensitivity", []),
+    **{f"{sub} {e}": (sub, ["--engine", e]) for sub in SUB_TESTS for e in ENGINES},
 }
 REQUIRED_STEPS = tuple(STEP_ARGS)
-OPTIONAL_STEPS = ("openset", "degrade", "distractors")
 
 # step name -> result file, relative to the output root
 RESULT_FILES: dict[str, str] = {
@@ -43,6 +55,7 @@ RESULT_FILES: dict[str, str] = {
     "timesplit baseline": "timesplit/timesplit-baseline-hidden.json",
     "timesplit linking": "timesplit/timesplit-linking-hidden.json",
     "sensitivity": "sensitivity/sensitivity-linking.json",
+    **{f"{sub} {e}": f"{sub}/{e}.json" for sub in SUB_TESTS for e in ENGINES},
 }
 
 
@@ -89,19 +102,10 @@ def _run_step(top: argparse.ArgumentParser, name: str, sub: str, extra: list[str
 
 def run_steps(args: argparse.Namespace, out: Path, logs: Path) -> dict[str, dict[str, Any]]:
     top = _eval_parser()
-    available = registered_eval_commands(top)
     status: dict[str, dict[str, Any]] = {}
     for name, (sub, extra) in STEP_ARGS.items():
         status[name] = _run_step(top, name, sub, extra, args, out, logs)
         print(f"{name}: {status[name]['status']} (exit {status[name]['exit']})")
-    for sub in OPTIONAL_STEPS:
-        if sub not in available:
-            status[sub] = {"status": "skipped", "exit": None, "log": None,
-                           "note": f"`ftf eval {sub}` is not registered on this build"}
-            print(f"{sub}: skipped (not registered)")
-            continue
-        status[sub] = _run_step(top, sub, sub, [], args, out, logs)
-        print(f"{sub}: {status[sub]['status']} (exit {status[sub]['exit']})")
     return status
 
 
@@ -214,6 +218,46 @@ def _e6_section(s: dict[str, Any] | None, folder: dict[str, str]) -> dict[str, A
     }
 
 
+def _open_set_rows(results: dict[str, Any]) -> list[dict[str, Any]]:
+    """E2 (openset) and E3 (degrade) summary rows, both engines. Counts are per item, not per group."""
+    rows: list[dict[str, Any]] = []
+    for sub in ("openset", "degrade"):
+        for e in ENGINES:
+            data = results.get(f"{sub} {e}")
+            if data is None:
+                rows.append({"test": sub, "engine": e, "run": False})
+                continue
+            for s in data["summary"]:
+                rows.append({
+                    "test": sub, "engine": e, "run": True, "protocol": s["protocol"], "mode": s["mode"],
+                    "items": s["items"], "correct": s["correct"], "wrong": s["wrong"], "new": s["new"],
+                    "review": s["review"],
+                    # `wrong` is a false accept: an assignment into a campaign the item does not belong to.
+                    "assigned": s["correct"] + s["wrong"], "false_accepts": s["wrong"],
+                    "median_evidence_capacity_bits": s["median_evidence_capacity_bits"],
+                })
+    return rows
+
+
+def _distractor_section(results: dict[str, Any]) -> dict[str, Any]:
+    """E4: per distractor code and label, passed counts for both engines; must-not-link counts."""
+    per: dict[tuple[str, str], dict[str, Any]] = {}
+    mnl: dict[str, dict[str, int] | None] = {}
+    for e in ENGINES:
+        data = results.get(f"distractors {e}")
+        mnl[e] = None if data is None else {"pairs": data["must_not_link"]["pairs"],
+                                            "violated": data["must_not_link"]["violated"]}
+        if data is None:
+            continue
+        for r in data["results"]:
+            prefix = re.split(r"[:\-]", r["name"], maxsplit=1)[0]
+            label = DISTRACTOR_LABELS.get(prefix, "other distractor")
+            rec = per.setdefault((r["code"], label), {"code": r["code"], "label": label, "expected": r["expected"]})
+            rec[e] = {"n": rec.get(e, {}).get("n", 0) + 1,
+                      "passed": rec.get(e, {}).get("passed", 0) + (1 if r["passed"] else 0)}
+    return {"rows": [per[k] for k in sorted(per)], "must_not_link": mnl}
+
+
 def limitations(report: dict[str, Any]) -> list[str]:
     """README-ready limitations, 5 to 8 sentences, with the numbers this run produced."""
     d, e1, e7, e6 = report["dataset"], report["e1"], report["e7"], report["e6"]
@@ -231,6 +275,27 @@ def limitations(report: dict[str, Any]) -> list[str]:
     campaign_groups = d["groups_per_level"].get("campaign", {}).get("non_singleton", 0)
     later = e7["linking"]["later_items"] if e7.get("linking") else (e7.get("baseline") or {}).get("later_items", 0)
     fallback = e7["linking"]["fallback_items"] if e7.get("linking") else 0
+    loo = {e: next((r for r in report["open_set"] if r["run"] and r["test"] == "openset" and r["engine"] == e
+                    and r["protocol"] == "loo_item" and r["mode"] == "full"), None) for e in ENGINES}
+    if loo["linking"]:
+        n_loo, n_loco = loo["linking"]["items"], next(
+            (r["items"] for r in report["open_set"] if r["run"] and r["test"] == "openset" and r["engine"] == "linking"
+             and r["protocol"] == "loco" and r["mode"] == "full"), 0)
+        open_text = (
+            f"Open-set assignment (E2) makes {loo['linking']['false_accepts']} false accepts out of "
+            f"{loo['linking']['assigned']} assigned items for the Linking engine, against "
+            f"{loo['baseline']['false_accepts'] if loo['baseline'] else 'n/a'} of "
+            f"{loo['baseline']['assigned'] if loo['baseline'] else 'n/a'} for the baseline, over {n_loo} "
+            f"leave-one-item and {n_loco} leave-one-group items, so one error moves any rate by a large step."
+        )
+    else:
+        open_text = "The open-set test (E2) did not run, so no false-accept claim is made."
+    e4 = report["distractors"]
+    neg_rows = [r for r in e4["rows"] if r["label"] == "brand negative"]
+    brand_text = (
+        "The brand negatives are one batch of pages, so a clean E4 result says little about other brands or sources."
+        if neg_rows else "No brand negatives ran, so no claim is made about brand-level pages."
+    )
     sentences = [
         f"The sample is small: {d['canonical_captures']} canonical captures in {d['incidents']} case folders, "
         f"{campaign_groups} non-singleton campaign groups and {later} later items, so these counts are a "
@@ -242,11 +307,9 @@ def limitations(report: dict[str, Any]) -> list[str]:
         "later items, so it tests organiser sets rather than dates.",
         "The reference base is not grown during E7: each later item is assigned against the reference folders "
         "alone, so later items never join one another or the base.",
-        "The negative controls come from one batch, so a clean result says little about other sources; "
-        + ("the open-set, degrade and distractor outputs are in their own folders and are not tabulated here."
-           if report["optional"] and any(v["status"] == "ok" for v in report["optional"].values())
-           else "the open-set, degrade and distractor tests (E2 to E4) are not in this report, so no "
-                "assignment-rate, false-accept or negative-control claim is made."),
+        "The synthetic distractors (E4) are built from one organiser batch, so they test the engine on controlled "
+        "edits rather than on other sources. " + brand_text,
+        open_text,
         f"The sensitivity check moves {e6['weights_tested']} weights by ±1 and ±2 bits one at a time: "
         f"{e6['fragile_links_total']} of {e6['links_total']} pair links change verdict under a single-layer ±2 "
         "move, so their verdicts depend on the hand-set priors and are flagged as fragile."
@@ -280,7 +343,8 @@ def build_report(results: dict[str, Any], steps: dict[str, dict[str, Any]], buil
         "e1": _e1_section({e: results.get(f"hidden {e}") for e in ENGINES}),
         "e7": {e: _e7_section(results.get(f"timesplit {e}")) for e in ENGINES},
         "e6": _e6_section(results.get("sensitivity"), folder),
-        "optional": {s: {"status": steps[s]["status"], "exit": steps[s]["exit"]} for s in OPTIONAL_STEPS if s in steps},
+        "open_set": _open_set_rows(results),
+        "distractors": _distractor_section(results),
     }
     report["limitations"] = limitations(report)
     return report
@@ -306,6 +370,23 @@ def _mnl_row(rec: dict[str, Any] | None) -> str:
     if rec is None:
         return "not run"
     return f"{rec['must_not_link']['violated']} of {rec['must_not_link']['pairs']} pairs"
+
+
+def _open_set_md(rows: list[dict[str, Any]], test: str, title: str) -> list[str]:
+    lines = ["", f"## {title}", "",
+             "| engine | protocol | mode | items | correct | wrong | new | review | assigned | false accepts | "
+             "median capacity (bits) |", "|---|---|---|---|---|---|---|---|---|---|---|"]
+    mine = [r for r in rows if r["test"] == test]
+    for e in ENGINES:
+        got = [r for r in mine if r["engine"] == e]
+        if not got or not any(r["run"] for r in got):
+            lines.append(f"| {e} | not run | | | | | | | | | |")
+            continue
+        for r in got:
+            lines.append(f"| {e} | {r['protocol']} | {r['mode']} | {r['items']} | {r['correct']} | {r['wrong']} | "
+                         f"{r['new']} | {r['review']} | {r['assigned']} | {r['false_accepts']} | "
+                         f"{_f(r['median_evidence_capacity_bits'])} |")
+    return lines
 
 
 def render_markdown(report: dict[str, Any]) -> str:
@@ -363,6 +444,27 @@ def render_markdown(report: dict[str, Any]) -> str:
                       "not run")
             lines.append(f"| {i['item']} | {i['date'] or '-'} | {i['expected']} | {bv} | {lv} |")
 
+    lines += _open_set_md(report["open_set"], "openset", "E2 leave-one-out open-set assignment")
+    lines += ["", "Counts are per item; a leave-one-group item stands for one whole group."]
+    lines += _open_set_md(report["open_set"], "degrade", "E3 degraded inputs (the held-out item loses one modality)")
+
+    e4 = report["distractors"]
+    lines += ["", "## E4 distractors", "",
+              "| distractor | expected | baseline passed | linking passed |", "|---|---|---|---|"]
+    if not e4["rows"]:
+        lines.append("| not run | | | |")
+    for r in e4["rows"]:
+        def cell(e: str) -> str:
+            c = r.get(e)
+            return "not run" if c is None else f"{c['passed']} of {c['n']}"
+        lines.append(f"| {r['label']} ({r['code']}) | {r['expected']} | {cell('baseline')} | {cell('linking')} |")
+    mnl = e4["must_not_link"]
+    mnl_text = ", ".join(
+        f"{e} {('not run' if mnl[e] is None else str(mnl[e]['violated']) + ' of ' + str(mnl[e]['pairs']))}"
+        for e in ENGINES
+    )
+    lines += ["", f"Must-not-link pairs violated: {mnl_text}."]
+
     e6 = report["e6"]
     lines += ["", "## E6 sensitivity (linking table, moves of −2, −1, +1, +2 bits)", ""]
     if e6 is None:
@@ -389,12 +491,11 @@ def render_markdown(report: dict[str, Any]) -> str:
         if len(e6["fragile_list"]) > 40:
             lines.append(f"| ... | {len(e6['fragile_list']) - 40} more in sensitivity-linking.json | | | |")
 
-    lines += ["", "## Open-set, degrade and distractors (E2 to E4)", "", "| command | status |", "|---|---|"]
-    for name in OPTIONAL_STEPS:
-        s = report["steps"].get(name, {"status": "not registered"})
-        code = s.get("exit")
-        suffix = "" if code in (None, 0) else f" (exit {code})"
-        lines.append(f"| {name} | {s['status']}{suffix} |")
+    failed = [n for n, s in report["steps"].items() if s["status"] != "ok"]
+    lines += ["", "## Run status", "", "| step | status |", "|---|---|"]
+    lines += [f"| {n} | {s['status']} |" for n, s in report["steps"].items()]
+    if failed:
+        lines += ["", f"Steps that did not finish cleanly: {', '.join(failed)}."]
 
     lines += ["", "## Limitations", "", " ".join(report["limitations"]), ""]
     return "\n".join(lines)

@@ -146,18 +146,35 @@ def _results() -> dict:
                                  "flips": [{"layer": "tracking_account", "delta": -2.0, "to": "review"}],
                                  "worst_case": None}]},
     }
+    open_set = {"summary": [_summary("loo_item", "full", 1, 0, 0), _summary("loco", "full", 0, 0, 2)]}
     return {"labels": _labels(), "leak": {"hidden_indicators": 4, "remaining_indicators": 9, "hits": 0},
             "hidden baseline": _hidden(1, 2, 1), "hidden linking": _hidden(1, 1, 0),
-            "timesplit baseline": timesplit, "timesplit linking": timesplit, "sensitivity": sensitivity}
+            "timesplit baseline": timesplit, "timesplit linking": timesplit, "sensitivity": sensitivity,
+            "openset baseline": open_set, "openset linking": open_set,
+            "degrade baseline": open_set, "degrade linking": open_set,
+            "distractors baseline": _distractors(passed=False), "distractors linking": _distractors(passed=True)}
 
 
 def _steps() -> dict:
     ok = {"status": "ok", "exit": 0, "log": None}
-    steps = {name: dict(ok) for name in REQUIRED_STEPS}
-    steps.update({"openset": {"status": "skipped", "exit": None, "note": "not registered"},
-                  "degrade": {"status": "skipped", "exit": None, "note": "not registered"},
-                  "distractors": {"status": "skipped", "exit": None, "note": "not registered"}})
-    return steps
+    return {name: dict(ok) for name in REQUIRED_STEPS}
+
+
+def _summary(protocol: str, mode: str, correct: int, wrong: int, new: int) -> dict:
+    n = correct + wrong + new
+    return {"protocol": protocol, "mode": mode, "items": n, "correct": correct, "wrong": wrong, "new": new,
+            "review": 0, "assigned": correct + wrong, "assign_rate": (correct + wrong) / n,
+            "false_accepts": wrong, "false_accept_rate": wrong / n, "median_evidence_capacity_bits": 2.5}
+
+
+def _distractors(passed: bool) -> dict:
+    # `name` carries capture-like values on purpose: the report must never print it.
+    rows = [
+        {"code": "a", "name": "natural-1", "passed": True, "expected": "no link between the subjects"},
+        {"code": "b", "name": "kit_copy:SECRET-NAME.example", "passed": passed, "expected": "never assigned"},
+        {"code": "e", "name": "brand_negative:SECRET-NAME.example", "passed": True, "expected": "never assigned"},
+    ]
+    return {"results": rows, "must_not_link": {"pairs": 2, "violated": 0 if passed else 1, "violations": []}}
 
 
 def test_report_tables_hold_raw_counts_for_both_engines_and_never_print_capture_keys():
@@ -186,13 +203,30 @@ def test_report_limitations_are_five_to_eight_sentences_with_run_numbers():
     assert limitations(report) == sentences
 
 
-def test_report_marks_absent_engine_and_optional_commands_as_not_run():
+def test_report_marks_missing_engine_results_as_not_run_and_lists_failed_steps():
     results = _results()
     results.pop("hidden baseline")
     results.pop("timesplit baseline")
-    md = render_markdown(build_report(results, _steps(), build=None))
+    results.pop("distractors baseline")
+    steps = _steps()
+    steps["degrade linking"] = {"status": "failed", "exit": 2, "log": None}
+    md = render_markdown(build_report(results, steps, build=None))
     assert "not run" in md
-    assert "| openset | skipped |" in md
+    assert "Steps that did not finish cleanly: degrade linking." in md
+
+
+def test_distractor_names_and_capture_keys_never_reach_the_markdown():
+    md = render_markdown(build_report(_results(), _steps(), build=None))
+    assert "SECRET-NAME" not in md and "natural-1" not in md
+    assert "synthetic kit copy (b)" in md and "brand negative (e)" in md
+    assert "| synthetic kit copy (b) | never assigned | 0 of 1 | 1 of 1 |" in md
+
+
+def test_open_set_section_has_both_engines_and_per_item_counts():
+    md = render_markdown(build_report(_results(), _steps(), build=None))
+    assert "## E2 leave-one-out open-set assignment" in md
+    assert "| linking | loo_item | full | 1 | 1 | 0 | 0 | 0 | 1 | 0 |" in md
+    assert "| baseline | loco | full | 2 | 0 | 0 | 2 | 0 | 0 | 0 |" in md
 
 
 def test_registered_commands_include_every_required_step_and_the_report():
