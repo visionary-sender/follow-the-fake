@@ -249,9 +249,33 @@ def registered_domains(dataset: Dataset, include_shared: bool = False) -> list[s
     return sorted(out)
 
 
+def shared_category(domain: str) -> str:
+    """Stop-list group a shared registered domain falls in (first match), or `other`."""
+    for name, entries in _stoplist.groups().items():
+        if domain in entries or (name != "bare_domain" and _stoplist.host_stopped(domain, entries)):
+            return name
+    return "other"
+
+
+def shared_dropped(dataset: Dataset) -> dict[str, int]:
+    """Count of shared enrichment candidates `registered_domains` leaves out, by stop-list group.
+
+    Counts and categories only: the domain names themselves are never returned, because the
+    organiser's data names must not leave the outputs bucket."""
+    kept = set(registered_domains(dataset, include_shared=False))
+    roles = domain_roles(dataset)
+    dropped = [d for d in registered_domains(dataset, include_shared=True)
+               if d not in kept and roles.get(d, set()) & _ENRICH_ROLES]
+    counts: dict[str, int] = {}
+    for d in dropped:
+        cat = shared_category(d)
+        counts[cat] = counts.get(cat, 0) + 1
+    return dict(sorted(counts.items()))
+
+
 def kinds() -> dict[str, tuple[Layer, Level]]:
     """Kind -> (layer, level) for every kind this module emits (chain kinds may also be tracker_instance/operator)."""
     return dict(_KINDS)
 
 
-__all__ = ["extract", "kinds", "registered_domains", "domain_roles", "is_shared", "EXTRACTOR"]
+__all__ = ["extract", "kinds", "registered_domains", "domain_roles", "is_shared", "shared_category", "shared_dropped", "EXTRACTOR"]

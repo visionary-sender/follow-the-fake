@@ -1,4 +1,4 @@
-"""`ftf analyze` (one input through the pipeline) and `ftf serve` (the Streamlit demo app)."""
+"""`ftf analyze` (one input through the pipeline), `ftf export` and `ftf serve` (the Streamlit demo app)."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 from ftf.pipeline.analyze import INPUT_KINDS, AnalysisInput, analyze, guess_kind
+from ftf.pipeline.export import export
 
 ERROR_EXIT = 1
 USAGE_EXIT = 2
@@ -49,6 +50,39 @@ def register_serve(subparsers: argparse._SubParsersAction) -> None:
     parser.add_argument("--address", default="127.0.0.1", help="bind address (default: %(default)s)")
     parser.add_argument("--base", type=Path, help="campaign base, a contract dataset.json (default: $FTF_BASE, else the fixture)")
     parser.set_defaults(func=run_serve)
+
+
+def register_export(subparsers: argparse._SubParsersAction) -> None:
+    parser = subparsers.add_parser(
+        "export",
+        help="write a linked dataset as flat tables, a validated copy and a campaign-pattern report",
+        description=(
+            "Write incidents, captures, indicators, links, evidence and campaigns as CSV files, a "
+            "validated copy of the dataset (dataset.json) and campaign_patterns.md (one section per "
+            "campaign) into --out. Existing files there are overwritten. Exit 0 on success; 2 if the "
+            "dataset cannot be loaded; 1 if the output cannot be written. Outputs built from organiser data belong in the private bucket."
+        ),
+    )
+    parser.add_argument("--base", type=Path, help="linked contract dataset.json (default: $FTF_BASE, else the fixture)")
+    parser.add_argument("--out", type=Path, required=True, metavar="DIR", help="output folder")
+    parser.set_defaults(func=run_export)
+
+
+def run_export(args: argparse.Namespace) -> int:
+    from ftf.app.base import load_base
+
+    try:
+        dataset = load_base(args.base)
+    except (OSError, ValueError) as exc:
+        print(f"ftf export: cannot load the dataset: {exc}", file=sys.stderr)
+        return USAGE_EXIT
+    try:
+        counts = export(dataset, args.out)
+    except OSError as exc:
+        print(f"ftf export: cannot write the output: {exc.strerror or exc}", file=sys.stderr)
+        return ERROR_EXIT
+    print(json.dumps({"out": str(args.out), "files": counts}, indent=2, ensure_ascii=False))
+    return 0
 
 
 def run_analyze(args: argparse.Namespace) -> int:

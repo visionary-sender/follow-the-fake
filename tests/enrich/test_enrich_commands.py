@@ -1,9 +1,10 @@
 import json
+from pathlib import Path
 
 import pytest
 
 from ftf.cli import main
-from ftf.contract import Dataset
+from ftf.contract import Capture, Dataset, Incident, Indicator, Layer, Level, Observed, Provenance, Stage
 
 
 def test_help_lists_the_subcommand(capsys):
@@ -37,15 +38,56 @@ def test_offline_run_writes_unknown_dataset_and_summary(tmp_path, capsys):
     assert [i.source_ref for i in dataset.incidents] == ["example.com"]
 
 
-def test_from_raw_scope_feeds_the_run(tmp_path, capsys):
-    raw = tmp_path / "raw"
-    raw.mkdir()
-    (raw / "scam_links.txt").write_text("https://scam-target.top/a\n", encoding="utf-8")
-    code = main(["enrich-domain", "--from-raw", str(raw), "--offline", "--cache", str(tmp_path / "c.json"), "--tld-cache", str(tmp_path)])
+def _dataset_file(tmp_path):
+    """A contract Dataset with a landing domain, a shared SDK domain and an ad display domain."""
+    cap = Capture(id="case:c1", stage=Stage.unknown, artefacts=[])
+
+    def ind(n, kind, value, layer, level):
+        return Indicator(id=f"case:c1:i{n}", capture_id="case:c1", layer=layer, kind=kind, level=level, value=value,
+                         observed=Observed.live, provenance=Provenance(artefact_id=None, locator="test"), extractor="domains@test")
+
+    inc = Incident(id="case", source="synthetic", captures=[cap], indicators=[
+        ind(1, "landing_domain", "scam-target.top", Layer.landing, Level.landing),
+        ind(2, "chain_domain", "facebook.com", Layer.infrastructure, Level.campaign),  # SDK host: shared
+        ind(3, "ad_display_domain", "brand-shown.example", Layer.creative, Level.campaign),  # not a page domain
+    ])
+    path = tmp_path / "ds.json"
+    path.write_text(Dataset(name="test", incidents=[inc]).to_json(), encoding="utf-8")
+    return path
+
+
+def test_from_dataset_takes_registered_domains_without_shared_ones(tmp_path):
+    summary = tmp_path / "s.json"
+    code = main(["enrich-domain", "--from-dataset", str(_dataset_file(tmp_path)), "--offline",
+                 "--cache", str(tmp_path / "c.json"), "--tld-cache", str(tmp_path), "--summary", str(summary)])
+    assert code == 0
+    report = json.loads(summary.read_text(encoding="utf-8"))
+    assert [d["domain"] for d in report["domain_details"]] == ["scam-target.top"]
+    (scope,) = report["scopes"]
+    assert (scope["domains"], scope["shared_dropped"]) == (1, {"count": 1, "by_category": {"sdk": 1}})
+
+
+def test_from_raw_ingests_the_folder_and_takes_its_domains(tmp_path, capsys):
+    case = tmp_path / "raw" / "case1"
+    case.mkdir(parents=True)
+    page = "https://scam-target.top/a"
+    har = {"log": {"pages": [{"id": "p0", "title": page}], "entries": [
+        {"pageref": "p0", "_resourceType": "document", "request": {"method": "GET", "url": page},
+         "response": {"status": 200, "headers": [], "content": {"mimeType": "text/html", "text": "<html></html>"}}}]}}
+    (case / "page.har").write_text(json.dumps(har), encoding="utf-8")
+    code = main(["enrich-domain", "--from-raw", str(tmp_path / "raw"), "--offline", "--cache", str(tmp_path / "c.json"),
+                 "--tld-cache", str(tmp_path)])
     assert code == 0
     report = json.loads(capsys.readouterr().out)
-    assert report["scope"]["domains"] == 1
     assert [d["domain"] for d in report["domain_details"]] == ["scam-target.top"]
+
+
+def test_unreadable_dataset_is_a_usage_error(tmp_path, capsys):
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not a dataset", encoding="utf-8")
+    code = main(["enrich-domain", "--from-dataset", str(bad), "--offline", "--cache", str(tmp_path / "c.json")])
+    assert code == 2
+    assert "not a readable contract Dataset" in capsys.readouterr().err
 
 
 def test_duplicate_registrable_domain_is_reported_not_enriched_twice(tmp_path, capsys):
@@ -82,3 +124,45 @@ def test_duplicate_is_skipped_before_any_lookup(tmp_path, capsys, monkeypatch):
     assert report["domains_enriched"] == 1
     assert report["invalid_inputs"][0]["input"] == "https://www.example.com/x"
     assert len([u for u in net.calls if "example.com" in u and "dns.google" in u]) == 3  # one lookup set, not two
+
+
+def test_shared_ad_display_domain_is_not_counted_as_dropped(tmp_path):
+    from ftf.indicators import domains as domain_indicators
+
+    cap = Capture(id="case:c1", stage=Stage.unknown, artefacts=[])
+    ad_only = Indicator(id="case:c1:i1", capture_id="case:c1", layer=Layer.creative, kind="ad_display_domain",
+                        level=Level.campaign, value="facebook.com", observed=Observed.static,
+                        provenance=Provenance(artefact_id=None, locator="test"), extractor="domains@test")
+    ds = Dataset(name="test", incidents=[Incident(id="case", source="synthetic", captures=[cap], indicators=[ad_only])])
+    assert domain_indicators.shared_dropped(ds) == {}  # a brand shown in an ad is never an enrichment candidate
+
+
+def test_from_raw_skips_an_unreadable_input_with_a_warning(tmp_path, capsys, monkeypatch):
+    from ftf.enrich import commands
+
+    real_ingest = commands.ingest_run
+
+    def ingest_with_one_unreadable_entry(inputs, **kwargs):
+        # Ingest refuses the folder as one input, and refuses the entry named "bad".
+        if any(Path(i).name in ("raw", "bad") for i in inputs):
+            raise ValueError(f"cannot read {Path(inputs[0]).name}")
+        return real_ingest(inputs, **kwargs)
+
+    monkeypatch.setattr(commands, "ingest_run", ingest_with_one_unreadable_entry)
+    raw = tmp_path / "raw"
+    case = raw / "case1"
+    case.mkdir(parents=True)
+    (raw / "bad").mkdir()
+    page = "https://scam-target.top/a"
+    har = {"log": {"pages": [{"id": "p0", "title": page}], "entries": [
+        {"pageref": "p0", "_resourceType": "document", "request": {"method": "GET", "url": page},
+         "response": {"status": 200, "headers": [], "content": {"mimeType": "text/html", "text": "<html></html>"}}}]}}
+    (case / "page.har").write_text(json.dumps(har), encoding="utf-8")
+    summary = tmp_path / "s.json"
+    code = main(["enrich-domain", "--from-raw", str(raw), "--offline", "--cache", str(tmp_path / "c.json"),
+                 "--tld-cache", str(tmp_path), "--summary", str(summary)])
+    assert code == 0
+    assert "skipped unreadable input bad" in capsys.readouterr().err
+    report = json.loads(summary.read_text(encoding="utf-8"))
+    assert report["scopes"][0]["skipped_inputs"] == ["bad"]
+    assert [d["domain"] for d in report["domain_details"]] == ["scam-target.top"]
