@@ -198,8 +198,68 @@ def test_big_campaign_ids_not_punished():
     assert row(s, "aio_cdn_tenant").bits == pytest.approx(5.0)  # 6 − 1 static copy prior, k = 1 group
     assert "log2(1) rarity" in row(s, "aio_landing").note and row(s, "aio_landing").bits > 0  # no rarity loss
     assert row(s, "meta_pixel").bits == pytest.approx(3.0)
+    assert row(score_pair(ctx, "n/lander", "a0/lander", Relation.operator), "meta_pixel").bits == pytest.approx(3.0)
     assert s.bits >= threshold(ctx, Relation.campaign) + 3
     assert verdict(s, ctx) == "link"
+
+
+def _owner_campaigns() -> Dataset:
+    """One owner, two of its campaigns, platform ids hidden (E1): only the owner's live CAPI gateway, its kit
+    asset, a foreign host and the platform SDK are shared; plus unrelated fillers so the threshold is realistic."""
+    owner = [
+        ind(L.tracking_account, "capi_gateway", "gateway-1", live=True),
+        ind(L.kit, "asset_norm_sha256", "asset-1", live=True),
+        ind(L.infrastructure, "third_party_host", "host-1", live=True),
+        ind(L.platform, "aio_sdk_asset", "sdk-1", live=True),
+    ]
+    fillers = [incident(f"f{i}", [ind(L.landing, "aio_landing", f"landing-f{i}")]) for i in range(10)]
+    return Dataset(name="owner-campaigns", incidents=[
+        incident("c1", owner + [ind(L.landing, "aio_landing", "landing-1"), ind(L.creative, "ad_caption", "Caption one")]),
+        incident("c2", owner + [ind(L.landing, "aio_landing", "landing-2"), ind(L.creative, "ad_caption", "Caption two")]),
+        # a second capture of campaign 1: same live pixel and gateway, same landing
+        incident("c1b", owner + [ind(L.landing, "aio_landing", "landing-1")]),
+    ] + fillers)
+
+
+def test_owner_accounts_and_kit_do_not_make_a_campaign():
+    """HACK-53: two campaigns of one owner sharing only the CAPI gateway and kit: operator link, never a campaign link."""
+    ctx = ScoringContext.from_dataset(_owner_campaigns())
+    camp = score_pair(ctx, "c1/lander", "c2/lander", Relation.campaign)
+    op = score_pair(ctx, "c1/lander", "c2/lander", Relation.operator)
+    assert row(camp, "capi_gateway").bits == pytest.approx(3.0)  # full bits: the gate, not the scale, keeps it apart
+    assert row(op, "capi_gateway").bits == pytest.approx(3.0)
+    assert not camp.live_private and camp.layers_positive == 1  # campaign gate: no campaign-level row
+    assert verdict(camp, ctx) != "link"
+    assert to_link(camp, "L", ctx).level is LinkLevel.loose
+    assert op.live_private
+    assert verdict(op, ctx) == "link"
+    # even with ample bits, operator-level layers alone stay in review under campaign
+    from ftf.linking.types import PairScore
+    rich = PairScore(**{**camp.__dict__, "bits": 50.0})
+    assert verdict(rich, ctx) == "review"
+
+
+def test_same_campaign_pixel_and_landing_links():
+    """HACK-53: a shared live CAPI gateway plus the same landing is a campaign link."""
+    ctx = ScoringContext.from_dataset(_owner_campaigns())
+    s = score_pair(ctx, "c1/lander", "c1b/lander", Relation.campaign)
+    assert row(s, "aio_landing").bits > 0
+    assert s.live_private and s.layers_positive >= 2
+    assert verdict(s, ctx) == "link"
+
+
+def test_owner_campaigns_grouping():
+    """End to end: the two campaigns of one owner are one operator group and two campaign groups."""
+    from ftf.linking import link_dataset
+
+    out = link_dataset(_owner_campaigns(), relations=[Relation.campaign, Relation.operator])
+
+    def together(relation, a, b):
+        return any(a in c.capture_ids and b in c.capture_ids for c in out.campaigns if c.relation is relation)
+
+    assert together(Relation.campaign, "c1/lander", "c1b/lander")
+    assert not together(Relation.campaign, "c1/lander", "c2/lander")
+    assert together(Relation.operator, "c1/lander", "c2/lander")
 
 
 def test_verdict_needs_two_layers_or_live_private():

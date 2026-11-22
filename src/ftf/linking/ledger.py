@@ -23,6 +23,13 @@ Rules (07 §2.2, §3 D1):
 - Within a layer only the best shared kind counts (layers are dependent inside); across layers
   the bits add. A conflict on a single-valued, campaign-stable field (platform / tenant / owner)
   adds `conflict_bits` once per layer (the worst one).
+- Campaign gate (HACK-53): under the campaign relation the D1 gate (≥2 positive layers or a live
+  operator-private id) also needs one positive row of campaign-level evidence
+  (`weights.is_campaign_evidence`: creative, ad account campaign or ad set, landing or own domain, aio
+  campaign, offer id). Without it `layers_positive` is capped at 1 and `live_private` is false, so
+  every consumer of the gate (verdict, grouping, assignment, link level) sees at most a review: one
+  operator's pixel, CAPI gateway and kit span several of its campaigns (07 §2.2, §2.3). The bits
+  are untouched.
 - Missing data is 0, never negative. A `missing` row appears only when one side lacks the layer.
 - Collector indicators never contribute: a shared collector value is a `collector_excluded` row
   with 0 bits.
@@ -53,7 +60,7 @@ from ftf.contract.models import (
 from ftf.linking.background import BackgroundCounts
 from ftf.linking.hierarchy import ANCHOR_KINDS, ChainRow, Hierarchy, apply_chain_rule
 from ftf.linking.types import METHOD, PairScore
-from ftf.linking.weights import HAND_TABLE, IGNORED_VALUES, WeightTable
+from ftf.linking.weights import HAND_TABLE, IGNORED_VALUES, WeightTable, is_campaign_evidence
 
 # Typical campaign size m (in captures) per relation, for the prior log-odds −log2(n/m) (07 §2.4).
 # Hand-set: an aio campaign in the sample spans ~3 captures; a tracking account or operator spans
@@ -366,6 +373,13 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
             else:
                 chain_positive = True
     layers_positive += chain_positive
+    if relation is Relation.campaign and not any(
+        r.bits > 0 and is_campaign_evidence(r.layer, r.kind) for r in rows
+    ):
+        # campaign gate (HACK-53): operator-level evidence alone (accounts, kit, hosting) never makes a campaign
+        # link; the pair stays in review at most
+        layers_positive = min(layers_positive, 1)
+        live_private = False
     rows += other_rows
     order = list(Layer)
     rows.sort(key=lambda r: (order.index(r.layer), r.kind))
