@@ -13,10 +13,10 @@ sandboxed URL fetcher.
 | `certpl` | CERT Polska warning list (`hole.cert.pl/domains/v2/domains.json`), public and keyless | Register id, newly listed domain, listing date |
 
 ```bash
-ftf scan --keywords-file keywords.txt                 # all sources, last 7 days
+ftf scan --keywords-file config/scanner-keywords.txt  # all sources, last 7 days
 ftf scan --source meta --keywords "term one,term two" --since 2026-11-14
 ftf scan --source certpl --cert-filter invest,inwest  # only CERT domains containing a filter word
-ftf scan --source google_atc --keywords-file keywords.txt --max-ads 50 --delay 3 --out scan
+ftf scan --source google_atc --keywords-file config/scanner-keywords.txt --max-ads 50 --delay 3 --out scan
 ftf scan --source google_bq --bq-project my-gcp-project --since 2026-10-22   # run on the workbench
 ```
 
@@ -24,10 +24,16 @@ ftf scan --source google_bq --bq-project my-gcp-project --since 2026-10-22   # r
   list to both, `--keywords-file` one list per source (the two are exclusive). Without terms the
   run stops with exit 2; `certpl` and `google_bq` need none. There are no built-in terms.
   The file has a `[meta]` and/or `[google_atc]` heading, then one term per line; `#` starts a
-  comment line. `config/scanner-keywords.example.txt` shows the format with invented terms.
-  The list in use is private: it lives in `gs://follow-the-fake-data/config/scanner-keywords.txt`
-  and the sandbox reads a copy at `/opt/hack-20/config/scanner-keywords.txt`. Real terms never go
-  into git, a PR, a tracker or a doc.
+  comment line. `config/scanner-keywords.txt` is the public list: public figures, TV and news
+  brands that the scam ads impersonate, and multi-word scam phrases. It holds no domains,
+  URLs, ids, advertiser or page names, and no private people. Pass it with
+  `--keywords-file config/scanner-keywords.txt`. There is no default path, so `meta` and
+  `google_atc` need that flag or `--keywords`. `config/scanner-keywords.example.txt` shows the
+  format with invented terms.
+  The list in use may be longer. It lives in `gs://follow-the-fake-data/config/scanner-keywords.txt`
+  and the sandbox reads a copy at `/opt/hack-20/config/scanner-keywords.txt`. Organiser values
+  (domains, URLs, ids, advertiser or page names, private people) never go into git, a PR, a
+  tracker or a doc.
 
 - **Output** (`--out`, default `./scan`), in the same per-capture folder layout as the URL
   fetcher, so one ingestion adapter reads both. One folder per new ad,

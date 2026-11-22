@@ -1,6 +1,5 @@
 # Example of the scanner keyword file (`ftf scan --keywords-file`). Every term here is invented.
-# The list in use is private: the sandbox reads /opt/hack-20/config/scanner-keywords.txt, which
-# is copied from gs://follow-the-fake-data/config/ (see docs/scanner.md). Keep real terms out of git.
+# It shows the format only. The list in use may be longer; see docs/scanner.md.
 [meta]
 placeholder term one
 placeholder term two

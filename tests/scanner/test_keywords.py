@@ -23,6 +23,13 @@ def test_example_file_loads_and_is_invented():
     assert all(term.startswith("placeholder") for terms in loaded.values() for term in terms)
 
 
+def test_public_keyword_file_loads_and_holds_no_organiser_shapes():
+    loaded = scan_run.load_keywords(REPO / "config" / "scanner-keywords.txt")
+    assert set(loaded) == {"meta", "google_atc"}
+    assert all(loaded[s] for s in loaded)
+    assert all(not re.search(r"https?:|/|\.(pl|com|net|org|eu)\b|\d{5,}", term) for terms in loaded.values() for term in terms)
+
+
 def test_keyword_file_sections_comments_and_duplicates(tmp_path):
     f = tmp_path / "kw.txt"
     f.write_text("# note\n\n[meta]\nalpha beta\n  gamma  \nalpha beta\n[google_atc]\ndelta\n", encoding="utf-8")
