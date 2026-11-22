@@ -248,7 +248,7 @@ def brand_stoplist_doc(brand: frozenset[str] | set[str], n_pages: int) -> dict:
 def read_brand_stoplist(path: str | os.PathLike) -> frozenset[str]:
     """Digests from a brand stop-list file, or from the `brand` field of a background counts file."""
     doc = json.loads(Path(path).read_text(encoding="utf-8"))
-    if doc.get("format") not in (BRAND_FORMAT, FORMAT):
+    if not isinstance(doc, dict) or doc.get("format") not in (BRAND_FORMAT, FORMAT):
         raise ValueError(f"{path}: not an {BRAND_FORMAT} or {FORMAT} document")
     return frozenset(str(x) for x in doc.get("brand", []))
 

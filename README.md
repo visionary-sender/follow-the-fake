@@ -24,15 +24,18 @@ Without `--base`, the commands use `$FTF_BASE`, and otherwise the private fixtur
 
 ## Container
 
-The image contains only the installed `ftf` package (no data, no secrets, no git metadata; the
-build context is default-deny in `.dockerignore`). It runs as a non-root user, and the
+The image contains the installed `ftf` package and the hashed brand stop-list from
+`docker/brand-stoplist/` (see the data section above), but no organiser data, no secrets and no git
+metadata; the build context is default-deny in `.dockerignore`. It runs as a non-root user, and the
 entry point is `ftf`. Building needs internet access, because pip and apt fetch the dependencies.
 The image is 1.63 GB and includes Playwright's headless Chromium with its Debian system libraries,
 which `ftf fetch` needs. Run it with the hardening flags in [docs/container.md](docs/container.md).
 
-For the jury, from a clean checkout of the repository root:
+For the jury, from a clean checkout of the repository root (fetch the brand stop-list first, see
+the data section below and [docs/container.md](docs/container.md)):
 
 ```bash
+scripts/fetch-brand-stoplist.sh   # on the workbench VM; the bucket is private
 docker build -t ftf .
 docker run --rm ftf --help
 docker run --rm ftf --version
@@ -93,6 +96,17 @@ Metadata sources considered but not used in this release:
 - **urlscan.io** hit counts for hashes and file names, to estimate background frequencies. Its queries are built from organiser data, so they need the owner's approval first.
 - **Public library hash lists** (cdnjs, jsDelivr), as an extension of the stop list of shared public libraries.
 - **The Meta Ad Library API**, the production route for ads, which needs a developer account and identity confirmation.
+
+### Brand stop-list (`FTF_BRAND_STOPLIST`)
+
+The linking engine reads a brand stop-list: hashed values (digests only) seen on real outlet pages of
+our public corpus, batch 1. A stop-listed value is the impersonated outlet's own skin (logo, fonts,
+favicon, its analytics or CDN), so it never links a campaign below the ecosystem relation. The file
+is built with `ftf brand-stoplist` and lives in the private bucket under `outputs/linking/brand-stoplist/`.
+The image ships it: `scripts/fetch-brand-stoplist.sh` copies it into the build context before
+`docker build`, and the container sets `FTF_BRAND_STOPLIST` to the copied file. Without the file the
+build still works and the engine warns and scores without the stop-list. Details:
+[docs/container.md](docs/container.md) and [docs/linking-decisions.md](docs/linking-decisions.md).
 
 ### Safe URL fetcher (`ftf fetch`)
 

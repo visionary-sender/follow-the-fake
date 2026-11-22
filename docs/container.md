@@ -15,9 +15,21 @@ includes Playwright's headless Chromium (`/opt/ms-playwright/chromium_headless_s
 its Debian system libraries, which `ftf fetch` needs; their licences are in
 [`licences.md`](licences.md) section 2a.
 
+Before the build, fetch the brand stop-list (HACK-75). It is built from our own public corpus
+(batch 1, the pages tagged as real outlets) and holds hashed values only. It lives in the private
+bucket, so run the fetch on the workbench VM, where the bucket is reachable:
+
 ```bash
+scripts/fetch-brand-stoplist.sh     # writes docker/brand-stoplist/brand-stoplist.json (gitignored)
 docker build -t ftf .
 ```
+
+The Dockerfile copies that folder to `/opt/ftf-brand/` and sets `FTF_BRAND_STOPLIST` to the file.
+The folder always exists (it holds a `.gitkeep`), so the build does not fail when the file is
+missing. The image then runs without the stop-list: `ftf build-base` prints
+`brand stop-list not loaded` and scores as before, and the brand-negative result still holds
+through the platform/creative gate. Fetch and build in the same VM call, because `scripts/vm.sh`
+replaces the synced worktree on every call and removes the fetched file.
 
 ## 2. First run with the organiser's dataset folder
 
@@ -105,6 +117,7 @@ travels only inside a privately handed-over base bundle.
 | `FTF_FETCH` | unset | `1` lets the app fetch a submitted URL live with the safe fetcher, only while "Online enrichment" is ticked and `FTF_OFFLINE` is not set |
 | `FTF_ENRICH_CACHE` | `/base/enrichment/cache.json` if present | enrichment cache file |
 | `FTF_PORT` | `8501` | app port inside the container |
+| `FTF_BRAND_STOPLIST` | `/opt/ftf-brand/brand-stoplist.json` | brand stop-list (hashed values of real outlet pages, from the build's `docker/brand-stoplist/` folder); `off` switches it off, a missing file warns and scores without it |
 
 ## Offline and online
 

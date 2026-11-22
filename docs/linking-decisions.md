@@ -122,7 +122,7 @@ and domains at platform level.
   ecosystem only. Without the file the engine warns and scores as before.
 
 **Not circular.** The stop-list is built from the same real pages that E4 (e) uses. With the stop-list
-switched off (`FTF_BRAND_STOPLIST=off`, as in the jury container), (e) is still 0 of 58, so the gate
+switched off (`FTF_BRAND_STOPLIST=off`), (e) is still 0 of 58, so the gate
 alone carries the result. The stop-list matters for kinds the gate does not cover, for example an
 outlet's analytics id below platform level.
 
