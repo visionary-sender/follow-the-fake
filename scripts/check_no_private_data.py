@@ -2,7 +2,7 @@
 """Fail if private data, secrets or raw challenge files reach tracked files or commit messages.
 
 Scam infrastructure (domains, URLs, tracker, account, tenant and pixel ids) and the names of public
-figures and brands are public and may be in git (owner, 2026-11-22 08:10). The check fails only on:
+figures and brands are public and may be in git. The check fails only on:
 
 1. personal data of private individuals: e-mail addresses and phone numbers, including the ones in
    the organiser dataset (their digits are searched for; the value is never printed);

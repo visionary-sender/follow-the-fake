@@ -1,4 +1,4 @@
-"""HACK-93 extra README charts: rarity rank-frequency and E6 sensitivity by layer.
+"""extra README charts: rarity rank-frequency and E6 sensitivity by layer.
 
 Run on the workbench VM (needs matplotlib and the ftf package in the venv):
 

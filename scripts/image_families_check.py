@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Container check: do the baked feature families load with the network off (HACK-80).
+"""Container check: do the baked feature families load with the network off.
 
-Run inside the jury image with --network none and FTF_OFFLINE unset (the image sets only the
+Run inside the release image with --network none and FTF_OFFLINE unset (the image sets only the
 Hugging Face offline variables):
 
     docker run --rm --network none -v "$PWD/scripts:/check:ro" --entrypoint python3 IMAGE -I /check/image_families_check.py

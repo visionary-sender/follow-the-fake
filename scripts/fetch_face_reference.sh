@@ -1,6 +1,6 @@
 #!/bin/sh
 # Fill docker/build-context/faces-reference/ with the face reference set (manifest.json, images/,
-# embeddings.npy, build-report.json, HACK-83) so the jury image can bake it as-is (Dockerfile; the
+# embeddings.npy, build-report.json) so the release image can bake it as-is (Dockerfile; the
 # image reads it from FTF_FACE_REFERENCE). Runs only
 # on the workbench VM: it refuses anywhere else, so the set never reaches the laptop. The folder is
 # gitignored. An empty or missing bucket folder is not an error: the folder stays empty and the
@@ -14,10 +14,10 @@ if [ "$(uname -s)" != Linux ]; then
 fi
 host=$(hostname 2>/dev/null || echo unknown)
 case "$host" in
-  ftf-workbench|ftf-workbench-*) ;;
-  *) echo "fetch_face_reference: runs only on ftf-workbench VMs (this host is $host)" >&2; exit 2 ;;
+  "${FTF_VM:-workbench}"|"${FTF_VM:-workbench}"-*) ;;
+  *) echo "fetch_face_reference: runs only on workbench VMs (this host is $host)" >&2; exit 2 ;;
 esac
-uri=${FTF_FACES_REFERENCE_URI:-gs://follow-the-fake-data/outputs/visual/face-reference}
+uri=${FTF_FACES_REFERENCE_URI:-gs://${FTF_BUCKET:?set FTF_BUCKET}/outputs/visual/face-reference}
 dest=${1:-docker/build-context/faces-reference}
 mkdir -p "$dest"
 # Only "not found" or an empty folder continues with a warning. Auth, permission or network

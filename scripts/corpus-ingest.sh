@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run `ftf ingest` over a corpus batch's fetcher folders and tag the result (HACK-18).
+# Run `ftf ingest` over a corpus batch's fetcher folders and tag the result.
 # Runs on the workbench, inside the synced checkout:  scripts/vm.sh run -- bash scripts/corpus-ingest.sh batch-0
 # Re-run whenever new indicator extractors merge: it overwrites <batch>/ingested/ and re-syncs it.
 set -euo pipefail
@@ -18,14 +18,14 @@ rm -rf "$D/ingested"
 mkdir -p "$D/ingested"
 cd "$D"
 ftf ingest "${inputs[@]}" --root . --out ingested/dataset.json --timing ingested/timing.json
-# Label lists live in the bucket (gs://follow-the-fake-data/outputs/corpus/lists/), never in git.
+# Label lists live in the bucket (gs://$FTF_BUCKET/outputs/corpus/lists/), never in git.
 L=/data/derived/corpus/lists
 mkdir -p "$L"
 for f in legit-domains.txt person-keywords.txt certpl-hosts.txt; do
-  gcloud storage cp "gs://follow-the-fake-data/outputs/corpus/lists/$f" "$L/$f" >/dev/null \
+  gcloud storage cp "gs://$FTF_BUCKET/outputs/corpus/lists/$f" "$L/$f" >/dev/null \
     || { echo "label list $f missing from the bucket (outputs/corpus/lists/)" >&2; exit 1; }
 done
 lists=(--legit-list $L/legit-domains.txt --person-keywords $L/person-keywords.txt --listed-domains $L/certpl-hosts.txt)
 ftf corpus tag-ingested --dataset ingested/dataset.json --manifest manifest.jsonl --out ingested/corpus_kind.jsonl "${lists[@]}" \
   | tee ingested/summary.json
-gcloud storage rsync -r --delete-unmatched-destination-objects "$D/ingested/" "gs://follow-the-fake-data/outputs/corpus/$batch/ingested/" 2>&1 | tail -1
+gcloud storage rsync -r --delete-unmatched-destination-objects "$D/ingested/" "gs://$FTF_BUCKET/outputs/corpus/$batch/ingested/" 2>&1 | tail -1

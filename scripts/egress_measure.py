@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""HACK-45 measurement: does Google Cloud egress rotation get past rate limits and cloaking?
+"""measurement: does Google Cloud egress rotation get past rate limits and cloaking?
 
 Standard library only. Three steps, each on the machine the rules allow:
 
   lists   (workbench)  cloaked batch-0 landers -> URL lists, sharded per egress worker
       python3 -I scripts/egress_measure.py lists --manifest M --out DIR --shards 3
-  probe   (egress worker, as user ftf)  run HACK-20's scanner once per keyword and source
+  probe   (egress worker, as user ftf)  run the scanner once per keyword and source
       python3 -I scripts/egress_measure.py probe --scanner /opt/scan/venv/bin/ftf --out DIR
   report  (workbench)  join probes, egress captures and baselines -> report.json + report.md
       python3 -I scripts/egress_measure.py report --egress DIR --manifest M [--baseline DIR ...]
@@ -27,7 +27,7 @@ from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 CLOAKED = ("bot_wall", "decoy", "empty")
-# No built-in search terms (HACK-60): pass them with --atc-keywords and --meta-keywords.
+# No built-in search terms: pass them with --atc-keywords and --meta-keywords.
 EGRESS_FILE = Path("/etc/ftf/egress.json")
 
 
@@ -258,7 +258,7 @@ def render_md(probes: dict, landers: dict) -> str:
               "| | Live | Share |", "|---|---|---|",
               f"| Warsaw egress, all re-fetched | {L['egress_live']} / {L['refetched']} | {_pct(L['egress_live'], L['refetched'])} |",
               f"| Same URLs, egress (where the sandbox victim run exists) | {L['egress_live_on_compared']} / {L['compared_with_sandbox_victim']} | {_pct(L['egress_live_on_compared'], L['compared_with_sandbox_victim'])} |",
-              f"| Same URLs, ftf-sandbox victim run (HACK-18) | {L['sandbox_victim_live']} / {L['compared_with_sandbox_victim']} | {_pct(L['sandbox_victim_live'], L['compared_with_sandbox_victim'])} |",
+              f"| Same URLs, sandbox VM victim run | {L['sandbox_victim_live']} / {L['compared_with_sandbox_victim']} | {_pct(L['sandbox_victim_live'], L['compared_with_sandbox_victim'])} |",
               "", "Egress outcomes: " + ", ".join(f"{k} {v}" for k, v in sorted(L["egress_outcomes"].items()))]
     for s, c in L["egress_outcomes_by_source"].items():
         lines.append(f"- {s}: " + ", ".join(f"{k} {v}" for k, v in sorted(c.items())))
@@ -301,7 +301,7 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(func=cmd_probe)
     p = sub.add_parser("report")
     p.add_argument("--egress", type=Path, required=True, help="the run directory pulled to the workbench")
-    p.add_argument("--manifest", type=Path, required=True, help="HACK-18 batch-0 manifest.jsonl")
+    p.add_argument("--manifest", type=Path, required=True, help="batch-0 manifest.jsonl")
     p.add_argument("--baseline", type=Path, action="append", default=[], help="fetcher output dir of a sandbox victim run")
     p.set_defaults(func=cmd_report)
     args = ap.parse_args(argv)

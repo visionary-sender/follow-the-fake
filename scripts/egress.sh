@@ -18,7 +18,7 @@
 #   scripts/egress.sh flags                    dry run: print the create command (no cloud call)
 #
 # Workers are named ftf-egress-<n>; worker n goes to zone n of $EGRESS_ZONES (cycled; default: the
-# three Warsaw zones, then Frankfurt, Eemshaven, Hamina). Each one has ftf-sandbox's safety model:
+# three Warsaw zones, then Frankfurt, Eemshaven, Hamina). Each one has sandbox VM's safety model:
 # no service account and no scopes, no firewall rule of its own (SSH only through IAP), an
 # ephemeral external IP, the fetcher runs as user `ftf`, captures leave only to the workbench over
 # the VPC through a forced-command key. Workers delete themselves after $EGRESS_MAX_RUN (2h).
@@ -27,21 +27,18 @@
 # its external IP (salt in the VM metadata only, shared by one rollout). `ftf fetch` copies it into
 # every capture manifest (collector data). The raw IP is never written anywhere.
 #
-# Cost (on-demand): e2-medium ~0.20 PLN/h incl. the ephemeral IP, 15 GB pd-balanced ~0.01 PLN/h.
-# Six workers for 2 h: ~2.5 PLN plus a little internet egress.
 set -euo pipefail
 
-PROJECT=follow-the-fake
-ISSUE_LABEL=ftf-issue=hack-45
+PROJECT=${FTF_GCP_PROJECT:?set FTF_GCP_PROJECT}
+FLEET_LABEL=ftf-fleet=egress
 PREFIX=ftf-egress-
 MACHINE=${EGRESS_MACHINE:-e2-medium}
 MAX_RUN=${EGRESS_MAX_RUN:-2h}
 read -r -a ZONES <<< "${EGRESS_ZONES:-europe-central2-a europe-central2-b europe-central2-c europe-west3-a europe-west4-a europe-north1-a}"
-WORKBENCH=${FTF_VM:-ftf-workbench}
+WORKBENCH=${FTF_VM:-workbench}
 WORKBENCH_ZONE=europe-central2-a
-export CLOUDSDK_ACTIVE_CONFIG_NAME=${CLOUDSDK_ACTIVE_CONFIG_NAME:-follow-the-fake}
 WB_DEST=/data/derived/egress
-BUCKET_DEST=gs://follow-the-fake-data/outputs/egress/
+BUCKET_DEST=gs://$FTF_BUCKET/outputs/egress/
 MAX_WORKERS=12
 
 usage() { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
@@ -51,9 +48,9 @@ mode=$1; shift
 
 name_ok() { case "$1" in ''|.*|*[!A-Za-z0-9._-]*) return 1 ;; *) return 0 ;; esac; }
 
-# "<name> <zone> <status>" for every worker of this issue.
+# "<name> <zone> <status>" for every worker of this fleet.
 workers() {
-  gcloud compute instances list --project "$PROJECT" --filter="labels.${ISSUE_LABEL%%=*}=${ISSUE_LABEL#*=} AND name~^${PREFIX}" \
+  gcloud compute instances list --project "$PROJECT" --filter="labels.${FLEET_LABEL%%=*}=${FLEET_LABEL#*=} AND name~^${PREFIX}" \
     --format='value(name,zone.basename(),status)' | sort -t- -k3,3n
 }
 zone_of() {
@@ -95,7 +92,7 @@ create_args() {  # create_args <name> <zone> <salt>: the full create command, on
     --create-disk "boot=yes,auto-delete=yes,image-family=debian-12,image-project=debian-cloud,size=15GB,type=pd-balanced" \
     --provisioning-model STANDARD \
     --no-service-account --no-scopes \
-    --labels "$ISSUE_LABEL,purpose=egress" \
+    --labels "$FLEET_LABEL,purpose=egress" \
     --tags ftf-egress \
     --metadata "ftf-egress-salt=$3" \
     --max-run-duration "$MAX_RUN" --instance-termination-action DELETE \
@@ -107,7 +104,7 @@ create_vm() {
   "${args[@]}"
 }
 
-# Provisioning, run as root on a worker. Idempotent. Same users and transfer command as ftf-sandbox.
+# Provisioning, run as root on a worker. Idempotent. Same users and transfer command as sandbox VM.
 read -r -d '' SETUP <<'EOF' || true
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
@@ -212,7 +209,7 @@ provision() {  # provision <vm> <zone>: setup + workbench transfer key
   hostkey=$(ssh_to "$1" "$2" 'cat /etc/ssh/ssh_host_ed25519_key.pub' | awk '{print $1" "$2}')
   ip=$(internal_ip "$1" "$2")
   # Host keys learnt over IAP; one line per internal IP (a recreated worker replaces its line).
-  pub=$(wb "set -e; mkdir -p ~/.ssh; chmod 700 ~/.ssh; [ -f ~/.ssh/ftf_egress ] || ssh-keygen -q -t ed25519 -N '' -C ftf-workbench-to-egress -f ~/.ssh/ftf_egress; touch ~/.ssh/ftf_egress_known_hosts; flock ~/.ssh/ftf_egress_known_hosts sh -c \"grep -v '^$ip ' ~/.ssh/ftf_egress_known_hosts > ~/.ssh/ftf_egress_known_hosts.new || true; echo '$ip $hostkey' >> ~/.ssh/ftf_egress_known_hosts.new; mv ~/.ssh/ftf_egress_known_hosts.new ~/.ssh/ftf_egress_known_hosts\"; cat ~/.ssh/ftf_egress.pub")
+  pub=$(wb "set -e; mkdir -p ~/.ssh; chmod 700 ~/.ssh; [ -f ~/.ssh/ftf_egress ] || ssh-keygen -q -t ed25519 -N '' -C workbench-to-egress -f ~/.ssh/ftf_egress; touch ~/.ssh/ftf_egress_known_hosts; flock ~/.ssh/ftf_egress_known_hosts sh -c \"grep -v '^$ip ' ~/.ssh/ftf_egress_known_hosts > ~/.ssh/ftf_egress_known_hosts.new || true; echo '$ip $hostkey' >> ~/.ssh/ftf_egress_known_hosts.new; mv ~/.ssh/ftf_egress_known_hosts.new ~/.ssh/ftf_egress_known_hosts\"; cat ~/.ssh/ftf_egress.pub")
   line="restrict,command=\"/usr/local/bin/ftf-transfer\" $pub"
   ssh_to "$1" "$2" "echo $(printf '%q' "$line") | sudo tee /home/ftfxfer/.ssh/authorized_keys >/dev/null && sudo chown ftfxfer:ftfxfer /home/ftfxfer/.ssh/authorized_keys && sudo chmod 600 /home/ftfxfer/.ssh/authorized_keys"
   echo "provisioned"
@@ -255,8 +252,8 @@ case "$mode" in
       else
         echo "egress.sh: creating $vm in $z ($MACHINE, no service account, deleted after $MAX_RUN)" >&2
         create_vm "$vm" "$z" "$salt" >/dev/null
-        # Disks do not inherit instance labels: label the boot disk too, for cost attribution.
-        gcloud compute disks add-labels "$vm" --project "$PROJECT" --zone "$z" --labels "$ISSUE_LABEL,purpose=egress" >/dev/null
+        # Disks do not inherit instance labels: label the boot disk too.
+        gcloud compute disks add-labels "$vm" --project "$PROJECT" --zone "$z" --labels "$FLEET_LABEL,purpose=egress" >/dev/null
       fi
       new+=("$vm")
     done
@@ -275,7 +272,7 @@ case "$mode" in
     each sync_one $mapfile_vms
     ;;
   status)
-    gcloud compute instances list --project "$PROJECT" --filter="labels.${ISSUE_LABEL%%=*}=${ISSUE_LABEL#*=}" \
+    gcloud compute instances list --project "$PROJECT" --filter="labels.${FLEET_LABEL%%=*}=${FLEET_LABEL#*=}" \
       --format='table(name,zone.basename(),status,machineType.basename(),scheduling.maxRunDuration.seconds:label=MAX_RUN_S,scheduling.instanceTerminationAction:label=ON_LIMIT,serviceAccounts.len():label=SA,lastStartTimestamp)'
     for vm in $(targets all); do
       echo "$vm: $(ssh_to "$vm" "$(zone_of "$vm")" 'cat /etc/ftf/egress.json 2>/dev/null || echo no egress record')"
@@ -356,9 +353,9 @@ case "$mode" in
           --project "$PROJECT" --zone "$z" --quiet
       done
     fi
-    left=$(gcloud compute instances list --project "$PROJECT" --filter="labels.${ISSUE_LABEL%%=*}=${ISSUE_LABEL#*=}" --format='value(name)')
+    left=$(gcloud compute instances list --project "$PROJECT" --filter="labels.${FLEET_LABEL%%=*}=${FLEET_LABEL#*=}" --format='value(name)')
     [ -z "$left" ] || die "still present: $left"
-    echo "egress.sh: no instance labelled $ISSUE_LABEL is left" >&2
+    echo "egress.sh: no instance labelled $FLEET_LABEL is left" >&2
     ;;
   *) usage ;;
 esac

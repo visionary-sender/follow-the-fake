@@ -1,4 +1,4 @@
-"""README figure for HACK-93: leave-one-layer-out ablation of the Linking engine on E1.
+"""README figure: leave-one-layer-out ablation of the Linking engine on E1.
 
 Needs matplotlib (not in the project venv): `pip install matplotlib`. Run on the workbench VM.
 
