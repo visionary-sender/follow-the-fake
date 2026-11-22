@@ -107,14 +107,14 @@ Scam ads borrow the faces of public figures. Two captures that use the same peop
 
 | Signal | Example | Strength | Why |
 | -- | -- | -- | -- |
-| Confident face match (cosine at least 0.40) | 117 of 626 faces (19%) in 16 incidents | medium, in combination | says "same celebrity", not "same campaign" |
+| Confident face match (cosine 0.40 or more, an analysis cut, not a code threshold) | 117 of 626 faces (19%) in 16 incidents | medium, in combination | says "same celebrity", not "same campaign" |
 | Recurring public figure | Szymon Hołownia, Rafał Brzoska, Mateusz Morawiecki, each in 6 incidents | weak alone | several unrelated operators use them |
-| Three or more named faces in common | campaign pairs share at least 3, must-not-link pairs at most 1 | medium, in combination | the combination separates the pairs |
-| Brand overlap | an outlet or bank named on the page | medium, in combination | a clone names the outlet it copies |
+| Three or more named faces in common | in the analysis, campaign pairs share at least 3, must-not-link pairs at most 1 | medium, in combination (an analysis finding, not a rule in the code) | the combination separates the pairs |
+| Brand overlap | an outlet or bank named on the page | ecosystem only | a clone names the outlet it copies |
 
 Rafał Brzoska appears in 6 incidents, so a link through him alone says nothing.
 
-Coverage is the limit. The first reference set had 11 people. Widening it to 33 raised confident matches from 15.5% to 25.1% of faces, and two people still have no usable portrait. In the linking engine a face or a brand counts only as "same ecosystem", never as "same campaign".
+Coverage is the limit. The first reference set had 11 people. Widening it to 33 raised confident matches from 15.5% to 25.1% of faces, and two people still have no usable portrait. In the default run, with content views off, a face or a brand counts only as "same ecosystem", never as "same campaign". With `--content-views` on, a face match can add up to 1 bit at campaign level, and it still never decides a link alone.
 
 #### Video
 
@@ -141,7 +141,7 @@ A shared value counts only if it is rare. For each shared value:
 
     bits = max(max(prior × scale − discount, 0) − log2(k), 0)
 
-- **prior** is the weight of the kind of value, set by hand: a tracking pixel 3.0, a tenant id 6.0, a kit asset set about 4.0, a shared IP 1.5, a registrar 0.5. The priors are a starting point, not values fitted to the challenge data.
+- **prior** is the weight of the kind of value, set by hand: a tracking pixel 3.0, a tenant id 6.0, a kit asset set 2.5 to 6.5 depending on the kind of asset, a shared IP 1.5, a registrar 0.5. The priors are a starting point, not values fitted to the challenge data.
 - **scale** is how much the layer says about the relation tested. A kit says a lot about a template and little about an operator.
 - **discount** is 1.0 bit for a private id (tenant, owner, tracker, pixel) not seen live on both sides. A copied kit can carry the original's ids.
 - **k** is the number of groups carrying the value. The more groups share it, the less it is worth. A value worth less than 0.5 bit after this step is a **hub**: the ledger shows 0 bits, and it never proposes a pair. A value carried by more than 500 captures never proposes a pair.
@@ -154,19 +154,19 @@ Some values are excluded by type, not by frequency. A fingerprint, a viewport, a
 
 Platform constants and creative values (an ad id, a celebrity photo) count only together with a value below platform level, or they cannot link a campaign.
 
-A tenant or owner is single-valued per page. If two captures show different values under the operator or campaign relation, the pair gets −4 bits and can never link. A conflict on a platform costs bits only, because one operator can run several platforms.
+A tenant or owner is single-valued per page. If two captures show different tenant or owner values, the pair gets −4 bits and can never link. A conflict on a platform costs bits only, because one operator can run several platforms.
 
 Missing evidence scores 0 bits, never a penalty. If a capture has no HAR, its tracking layer is missing for that pair, and the ledger says so.
 
 #### Thresholds: edge, assign, new, review
 
-**Edge.** A pair links when its score reaches τ and it has enough separate layers. A live private id is enough on its own.
+**Edge.** A pair links when its score reaches τ and it has enough separate layers. For the operator and tracking-account relations, a live private id is enough on its own; for campaigns it must come with a second layer.
 
     τ = log2(n / m) + 3
 
 Here n is the number of captures and m the typical size of one campaign. The "+3" is a safety margin, and the code floors log2(n / m) at 0, so τ is never below 3 bits. With 30 captures and campaigns of about 3, τ is 6.3 bits.
 
-**Assign.** With K known campaigns, an item is assigned to the best one only when all three hold: its best score is at least τ + log2 K (the assign bar); the best campaign leads every other by at least 1 bit; and no conflict puts it there.
+**Assign.** With K known campaigns, an item is assigned to the best one only when all three hold: its best score is at least τ + log2 K (the assign bar); the best campaign leads the runner-up, the next campaign that could itself be assigned, by at least 1 bit; and no conflict puts it there.
 
 **New.** The item starts a new campaign when its best score is at most τ − 3 and its evidence capacity, the bits its inputs could still add, can reach τ. An item whose capacity is below τ goes to review, never to new.
 
@@ -560,6 +560,8 @@ These are the method's outputs from hand-set weights, not a measured accuracy.
 | `FTF_OCR_TIMEOUT` | 600 | seconds per Tesseract call |
 | `FTF_VIDEO_TIMEOUT` | 900 | seconds per ffmpeg call |
 | `FTF_RUN_DIR` | system temp directory | per-run copies of the inputs |
+
+The table lists the variables the image sets and the ones used most often. The code also reads settings for threads, speech-to-text, image embedding and egress proxies; see `src/ftf/`.
 
 ## 9. Licences and repo layout
 
