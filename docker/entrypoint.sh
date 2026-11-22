@@ -1,8 +1,9 @@
 #!/bin/sh
-# Container entry point. With arguments it is plain `ftf <args>`. Without arguments it starts the
-# demo: build the campaign base on first start (only if no base is found and a dataset folder is
-# mounted at /data/raw), then serve the app on 0.0.0.0:8501 inside the container (publish it on
-# the host's loopback only: -p 127.0.0.1:8501:8501). All pipeline logic lives in `ftf build-base`.
+# Container entry point. With arguments it runs `ftf <args>`, with the base and package settings
+# below. Without arguments it starts the demo: build the campaign base on first start (only if no
+# base is found and a dataset folder is mounted at /data/raw), then serve the app on 0.0.0.0:8501
+# inside the container (publish it on the host's loopback only: -p 127.0.0.1:8501:8501). All
+# pipeline logic lives in `ftf build-base`.
 # FTF_PACKAGE=<dir> points at the offline package (docs/container.md); each setting it provides is
 # used only when that setting is unset, so an explicit -e value always wins.
 set -eu
@@ -69,13 +70,16 @@ if [ -z "${FTF_BASE:-}" ] && [ ! -f "$base_dir/dataset.json" ] && [ -d "$raw_dir
     ftf build-base --raw "$raw_dir" --out "$base_dir"
 fi
 
+base_from_dir=0
 if [ -z "${FTF_BASE:-}" ] && [ -f "$base_dir/dataset.json" ]; then
     FTF_BASE="$base_dir/dataset.json"
+    base_from_dir=1
 fi
 
 if [ -n "${FTF_BASE:-}" ]; then
     export FTF_BASE
-    if [ -z "${FTF_ENRICH_CACHE:-}" ] && [ -f "$base_dir/enrichment/cache.json" ]; then
+    # The /base cache belongs to the /base base: an explicit or package base does not take it.
+    if [ "$base_from_dir" = 1 ] && [ -z "${FTF_ENRICH_CACHE:-}" ] && [ -f "$base_dir/enrichment/cache.json" ]; then
         copy_cache "$base_dir/enrichment/cache.json"
     fi
 else

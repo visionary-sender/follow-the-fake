@@ -71,13 +71,14 @@ def _read_and_discard_cache_copy(path: str) -> str:
     """The entry point copies the cache to a fresh /tmp/ftf-enrichment.* directory; remove only that."""
     cache = Path(path)
     assert cache.name == "cache.json" and cache.parent.name.startswith("ftf-enrichment.")
+    assert cache.parent.parent == Path("/tmp")
     try:
         return cache.read_text(encoding="utf-8")
     finally:
         shutil.rmtree(cache.parent, ignore_errors=True)
 
 
-def test_package_supplies_every_unset_setting_in_both_modes(env_ftf, tmp_path):
+def test_package_supplies_every_unset_setting_in_arguments_mode(env_ftf, tmp_path):
     package = _package(tmp_path / "package")
     extra = {"FTF_PACKAGE": str(package), "FTF_BASE_DIR": str(tmp_path / "none")}
     seen = _run_env(env_ftf, extra, "--help")
@@ -138,8 +139,11 @@ def test_serve_copies_the_package_cache_and_skips_the_build(env_ftf, tmp_path):
     raw = tmp_path / "raw"
     raw.mkdir()
     (raw / "case").mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
     env = {
         "PATH": f"{env_ftf}{os.pathsep}{os.environ['PATH']}",
+        "HOME": str(home),
         "FTF_PACKAGE": str(package),
         "FTF_BASE_DIR": str(tmp_path / "none"),
         "FTF_RAW_ROOT": str(raw),
@@ -150,3 +154,23 @@ def test_serve_copies_the_package_cache_and_skips_the_build(env_ftf, tmp_path):
     assert seen["FTF_BASE"] == f"{package}/base/dataset.json"
     assert _read_and_discard_cache_copy(seen["FTF_ENRICH_CACHE"]) == '{"cache": true}'
     assert (package / "enrichment" / "cache.json").read_text(encoding="utf-8") == '{"cache": true}'
+
+
+def test_serve_does_not_mix_an_explicit_base_with_the_base_folder_cache(env_ftf, tmp_path):
+    base = tmp_path / "base"
+    (base / "enrichment").mkdir(parents=True)
+    (base / "dataset.json").write_text("{}", encoding="utf-8")
+    (base / "enrichment" / "cache.json").write_text('{"base": true}', encoding="utf-8")
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {
+        "PATH": f"{env_ftf}{os.pathsep}{os.environ['PATH']}",
+        "HOME": str(home),
+        "FTF_BASE": "/elsewhere/dataset.json",
+        "FTF_BASE_DIR": str(base),
+        "FTF_RAW_ROOT": str(tmp_path / "none"),
+    }
+    result = subprocess.run(["sh", str(ENTRYPOINT)], env=env, capture_output=True, text=True, check=True)
+    seen = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+    assert seen["FTF_BASE"] == "/elsewhere/dataset.json"
+    assert seen["FTF_ENRICH_CACHE"] == ""

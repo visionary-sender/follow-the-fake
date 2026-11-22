@@ -118,7 +118,7 @@ travels only inside a privately handed-over base bundle.
 | `FTF_RAW_ROOT` | `/data/raw` | organiser folder; artefact paths in the base are relative to it |
 | `FTF_OFFLINE` | unset | `1` forces every network lookup off (enrichment, build-base) |
 | `FTF_FETCH` | `1` in the image | `1` lets the app and `ftf analyze` fetch a submitted URL live with the safe fetcher, only when online and `FTF_OFFLINE` is not set |
-| `FTF_ENRICH_CACHE` | `/base/enrichment/cache.json` if present | enrichment cache file |
+| `FTF_ENRICH_CACHE` | `/base/enrichment/cache.json` if the base comes from `/base` (serve mode); the package cache when present (both modes) | enrichment cache file, copied to a fresh `/tmp/ftf-enrichment.*` directory |
 | `FTF_PORT` | `8501` | app port inside the container |
 | `FTF_BRAND_STOPLIST` | `/opt/ftf-brand/brand-stoplist.json` | brand stop-list (hashed values of real outlet pages, from the build's `docker/brand-stoplist/` folder); `off` switches it off, a missing file warns and scores without it |
 | `FTF_PACKAGE` | unset | offline package folder (section below); each setting it provides is used only when unset |
@@ -159,8 +159,8 @@ image uses its own copies. The package supplies the base and the enrichment cach
 base present, the app does not rebuild the base, even if `/data/raw` is mounted.
 
 The settings are independent. An explicit `-e FTF_BASE` with the package cache mixes two sources, so
-set both or neither. In serve mode an explicit `-e FTF_BASE` is honoured: the build is skipped and
-`/base` is not used. A set `FTF_PACKAGE` that is not a directory prints a warning and is ignored.
+set both or neither. In serve mode an explicit `-e FTF_BASE` is honoured: the build is skipped, and
+neither `/base` nor its enrichment cache is used. A set `FTF_PACKAGE` that is not a directory prints a warning and is ignored.
 
 ## Offline and online
 
