@@ -69,7 +69,7 @@ with st.sidebar:
     online = st.checkbox("Online enrichment", value=True, key="online",
                          help="Registry and DNS lookups (RDAP, DNS over HTTPS, crt.sh, CERT Polska list). "
                               "If the network is down, answers come from the offline cache. "
-                              "The page itself is never opened from here; live pages are fetched only from the sandbox.")
+                              "Live page fetching runs only in the jury image (FTF_FETCH=1), inside its hardened container.")
 
 
 def _clear_result() -> None:
@@ -114,9 +114,9 @@ if st.button("Analyse", type="primary", key="analyze"):
         _clear_result()  # one run directory at a time: the previous upload copy is deleted
         with st.spinner("Running the pipeline…"):
             forced_offline = os.environ.get("FTF_OFFLINE", "").strip().lower() in {"1", "true", "yes", "on"}
+            fetch_on = os.environ.get("FTF_FETCH", "").strip().lower() in {"1", "true", "yes", "on"}
             st.session_state["result"] = analyze(inp, base, offline=not online or forced_offline,
-                                                 base_dir=base_dir(source or None),
-                                                 fetch=os.environ.get("FTF_FETCH") == "1")
+                                                 base_dir=base_dir(source or None), fetch=fetch_on)
     finally:
         if tmp is not None:
             shutil.rmtree(tmp, ignore_errors=True)

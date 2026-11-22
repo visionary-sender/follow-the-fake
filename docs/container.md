@@ -124,14 +124,15 @@ travels only inside a privately handed-over base bundle.
 The jury's machine has internet access. Enrichment is online by default: the app's "Online enrichment"
 box (ticked by default) allows registry and DNS lookups for submitted domains. A start probe and a
 5-second timeout per lookup fall back to the enrichment cache and the precomputed base when the
-network is down; the app shows `enrichment: online`, `offline cache` or `mixed`. Live page fetching
+network is down; the app shows `enrichment: online`, `offline cache`, `mixed` or `no answer`. Live page fetching
 is opt-in: the image sets `FTF_FETCH=1`, and it runs only when online (`FTF_OFFLINE=1` overrides
 both). It then runs only under the hardened flags above; the fetcher refuses to run as root and keeps
 Chromium's sandbox on. A dead or cloaked page is a normal result, not an error. Building the base
 makes no network requests.
 
-On the workbench VM the same image runs with `--network none` or `-e FTF_OFFLINE=1`: nothing there
-contacts scam infrastructure.
+On the workbench VM the same image runs with `--network none` or `-e FTF_OFFLINE=1`: analyze and
+enrichment make no lookups there. `ftf fetch` and the scanner do not read `FTF_OFFLINE`; live fetching
+stays off the workbench by rule.
 
 ## Resources
 

@@ -79,7 +79,7 @@ class RunContext:
     base: Dataset
     offline: bool
     run_dir: Path
-    fetch: bool = False  # live page fetching: sandbox only, never on the workbench or the jury's machine
+    fetch: bool = False  # live page fetching: only when online (the jury image sets FTF_FETCH=1); never on the workbench
     input_root: Optional[Path] = None  # artefact paths of the incident are relative to this
     base_dir: Optional[Path] = None  # folder of the base dataset.json: the base's vector stores
     incident: Optional[Incident] = None
@@ -356,13 +356,17 @@ def _domains(ctx: RunContext) -> list[tuple[str, str]]:
 
 def enrichment_mode(origins: Counter, offline: bool) -> str:
     """The HACK-91 label. "online": no answer needed the fallback. "offline cache": an offline run, or
-    every answer fell back to the cache (stale entry or none). "mixed": some of each."""
+    every answer fell back to a stale cache entry. "no answer": nothing came from the network or the cache.
+    "mixed": some of each."""
     if offline:
         return "offline cache"
+    total = sum(origins.values())
     fallen = origins["stale-cache"] + origins["none"]
     if fallen == 0:
         return "online"
-    return "offline cache" if fallen == sum(origins.values()) else "mixed"
+    if origins["none"] == total:
+        return "no answer"
+    return "offline cache" if fallen == total else "mixed"
 
 
 def enrichment(ctx: RunContext) -> tuple[str, str]:

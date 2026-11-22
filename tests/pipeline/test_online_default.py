@@ -20,6 +20,7 @@ REAL_CLIENT = ShortTimeoutClient
     ({"live": 3}, True, "offline cache"),
     ({"stale-cache": 2, "none": 2}, False, "offline cache"),
     ({"live": 2, "none": 2}, False, "mixed"),
+    ({"none": 2}, False, "no answer"),
 ])
 def test_enrichment_label(origins, offline, label):
     assert stages.enrichment_mode(Counter(origins), offline) == label
@@ -44,9 +45,9 @@ def test_dead_network_after_a_good_probe_falls_back_without_stalling(tmp_path, m
     res = analyze(AnalysisInput(kind="url", text="https://scam.example.com/x"), synthetic_base(),
                   run_dir=tmp_path / "run", offline=False)
     assert res.ok, res.stages
-    assert res.enrichment == "offline cache"
+    assert res.enrichment == "no answer"  # no cache entry exists here, and nothing answered
     enrich = next(s for s in res.stages if s.name == "enrichment")
-    assert enrich.status == "ok" and "offline cache" in enrich.note
+    assert enrich.status == "ok" and "no answer" in enrich.note
     assert not any("network probe failed" in note for note in res.notes)
 
 

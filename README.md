@@ -521,10 +521,12 @@ prints a stage summary and writes a contract dataset (exit 0 for assign, new and
 Inputs are copied to a per-run directory (`$FTF_RUN_DIR`, else the system temp dir) and
 hashed, never executed; captured HTML is never rendered, and URLs are shown defanged.
 
-Enrichment is online by default. A start probe (one DNS-over-HTTPS query) and a 5-second timeout
-on each lookup (one retry) fall back to the enrichment cache and the precomputed base, so a dead
-network never stalls a run. The JSON summary's `enrichment` field and the enrichment stage note
-say `online`, `offline cache` or `mixed`; the app shows the same label. `--offline` or
+Enrichment is online by default. A start probe (two DNS-over-HTTPS hosts) and a 5-second timeout
+on each lookup (15 s for crt.sh, one retry) fall back to the enrichment cache and the precomputed
+base. After the first request that gets no answer, the run stays offline, so a dead network costs
+about one timeout; DNS resolution is not bounded by that timeout. The JSON summary's `enrichment`
+field and the enrichment stage note say `online`, `offline cache`, `mixed` or `no answer`; the app
+shows the same label. `--offline` or
 `FTF_OFFLINE=1` forces the cache. `--online` is a no-op. Live page fetching stays opt-in:
 `--fetch` or `FTF_FETCH=1`, and only when online.
 

@@ -247,7 +247,7 @@ def analyze(
 
     `offline=False` allows network enrichment (registries, DNS over HTTPS); it never contacts the
     page itself. `fetch=True` (and online) lets a URL be fetched live with `ftf.fetch`: only on the
-    sandbox VM, never on the workbench or in the demo app.
+    only when online and enabled (the jury image sets FTF_FETCH=1), never on the workbench.
     Input bytes are copied into a per-run directory (`run_dir`, else a fresh temp dir under
     $FTF_RUN_DIR or the system temp dir), hashed with sha256 and never executed or rendered.
     `base_dir` is the folder of the base's dataset.json (its vector stores), passed to linking.
