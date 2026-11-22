@@ -181,3 +181,23 @@ def test_scheme_less_public_url_is_not_a_hit(check, public_host, tmp_path):
     ])
     root = _tree(tmp_path, {"src/a.py": "x = 'public.example/tag.js'\n"})
     assert check.check(path, root, None) == 0
+
+
+def test_scheme_less_url_before_punctuation_is_a_hit(check, tmp_path, capsys):
+    path = _write_dataset(tmp_path, [
+        {"kind": "script_url", "layer": "landing", "value": "shop.test/offer/page-7731, next"},
+        {"kind": "aio_landing", "layer": "landing", "value": VALUE},
+    ])
+    root = _tree(tmp_path, {"src/a.py": "x = 'shop.test/offer/page-7731'\n"})
+    assert check.check(path, root, None) == 1
+    assert "src/a.py:1: organiser url" in capsys.readouterr().out
+
+
+def test_scheme_less_url_with_file_like_tld_is_a_hit(check, tmp_path, capsys):
+    path = _write_dataset(tmp_path, [
+        {"kind": "script_url", "layer": "landing", "value": "shop.zip/offer/page-7731"},
+        {"kind": "aio_landing", "layer": "landing", "value": VALUE},
+    ])
+    root = _tree(tmp_path, {"src/a.py": "x = 'shop.zip/offer/page-7731'\n"})
+    assert check.check(path, root, None) == 1
+    assert "src/a.py:1: organiser url" in capsys.readouterr().out

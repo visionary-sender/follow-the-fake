@@ -136,13 +136,12 @@ def extract(dataset: dict) -> dict[str, set[str]]:
                 parts = urlsplit(url)
                 found["id"] |= _path_ids(f"{parts.path} {parts.query}", layer)
         for m in SCHEME_LESS_URL_RE.finditer(value):
-            host, path = m.group(1).lower(), m.group(2)
-            if host.rsplit(".", 1)[-1] in FILE_EXTENSIONS:
-                continue
+            host, path = m.group(1).lower(), m.group(2).rstrip(".,;:!?")
             if _public(host):
                 found["id"] |= _path_ids(path, layer)
             else:
-                # Reserved TLDs are not checked here: the whole host and path must match exactly.
+                # Reserved TLDs and file-like TLDs (.zip, .md) are not excluded here: the whole
+                # host and path must match exactly, so a false match needs the exact string.
                 found["url"].add(host + path.lower())
         for dom in DOMAIN_RE.findall(value):
             if _real_domain(dom.lower()):

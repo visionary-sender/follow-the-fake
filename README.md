@@ -119,7 +119,9 @@ The tables below are HACK-29's report, copied from its file with only the headin
 Two results matter most for the claims above:
 
 - With platform ids hidden (E1), the Linking engine recovers 0 of 11 true campaign pairs, so recall without the platform layer is 0 of 11. Its precision is safe: 0 of 37 must-not-link pairs are violated.
-- Open issue HACK-66: the Linking engine still links 34 of 58 real outlet pages (brand negatives, E4 e), 3 of 3 platform-only pages (E4 c) and 2 of 2 celebrity-only pages (E4 f) into a campaign. Those pages must stay outside campaigns above brand level. This is not fixed in this release.
+- Open issue HACK-66: the Linking engine still fails the distractor check for real outlet pages (brand negatives, E4 e: 34 of 58 link), platform-only pages (E4 c: 3 of 3), celebrity-only pages (E4 f: 2 of 2) and one synthetic kit copy (E4 b: 1 of 3). These pages link to a campaign, operator, template or tracking account, and they must not. This is not fixed in this release.
+
+In the pair counts, `P` is out of the predicted pairs and `R` is out of the true pairs, as the report defines them.
 
 Dataset build: `main 6ff9e3e`. Each table title states its evidence setting: E1, E6 and E7 run with platform ids hidden; E2, E3 and E4 run on all evidence (platform ids visible), the realistic setting. The labels and leak check use the platform ids as ground truth. Counts are raw: `P 2 of 11 pairs` means 2 of the 11 predicted pairs are true, and `R 2 of 12 pairs` means 2 of the 12 true pairs were found. Macro scores average over label groups first, then over groups. `baseline` is the loose floor; `linking` is the Linking engine.
 
@@ -320,7 +322,9 @@ The sample is small: 33 canonical captures in 26 case folders, 3 non-singleton c
 - **Enrichment and live fetching depend on outside services.** When a service is down, the item carries less evidence and is more likely to go to review.
 - **Campaigns rotate.** Operators change pages, pixels and ad accounts inside a campaign. The campaign relation is kept strict for that reason, so variants can end in review rather than in a campaign.
 - **The demo app's "insufficient alone" label** still uses an adapter threshold (log2 of the number of captures) until the engine publishes its threshold in the dataset.
-- **Distractor failures are open (HACK-66).** Real outlet, platform-only and celebrity-only pages can link into campaigns in this release; see the results above.
+- **Distractor failures are open (HACK-66).** Real outlet, platform-only, celebrity-only and one synthetic kit-copy page can link to a campaign, operator, template or tracking account in this release; see the results above.
+
+The counts in the paragraph above refer to protocols: "7 assigned items" and "8 leave-one-item" are the `loo_item` rows of E2, "8 leave-one-group items" are the `loco` rows, and `loco_mixed` (2 items) appears only in the E2 table.
 
 ## Repository layout
 
