@@ -83,6 +83,22 @@ def _with_raw(ds: Dataset, edit) -> Dataset:
     return Dataset.model_validate(raw)
 
 
+def test_degrade_keeps_collector_indicator_citing_a_dropped_artefact():
+    def edit(inc):
+        if inc["id"] != "ia1":
+            return
+        har = next(a for c in inc["captures"] for a in c["artefacts"] if a["type"] == "har")
+        tenant = next(i for i in inc["indicators"] if i["kind"] == "tenant_id")
+        inc["indicators"].append({
+            **tenant, "id": "a1:col", "kind": "fingerprint", "layer": "collector",
+            "provenance": {**tenant["provenance"], "artefact_id": har["id"]},
+        })
+
+    out = degrade(_with_raw(dataset(), edit), "screenshot")
+    (col,) = [i for i in out.indicators() if i.id == "a1:col"]
+    assert col.layer is Layer.collector and col.provenance.artefact_id is None
+
+
 def test_kit_copy_scrubs_provenance_and_drops_vectors():
     def edit(inc):
         if inc["id"] != "ia1":

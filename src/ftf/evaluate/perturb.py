@@ -66,11 +66,17 @@ def degrade_incident(incident: Incident, mode: str) -> Incident:
         missing = [m.model_dump() for m in cap.missing]
         missing += [{"modality": t, "reason": reason} for t in sorted(dropped - already, key=lambda t: t.value)]
         captures.append({**cap.model_dump(), "artefacts": [a.model_dump() for a in arts], "missing": missing})
-    indicators = [
-        i.model_dump() for i in incident.indicators
-        if i.layer is Layer.collector
-        or (i.provenance.artefact_id is not None and i.provenance.artefact_id in kept_artefacts)
-    ]
+    indicators = []
+    for i in incident.indicators:
+        aid = i.provenance.artefact_id
+        if i.layer is Layer.collector:
+            # Kept in every mode; a pointer at a dropped artefact is cleared so the incident validates.
+            d = i.model_dump()
+            if aid not in kept_artefacts:
+                d["provenance"] = {**d["provenance"], "artefact_id": None}
+            indicators.append(d)
+        elif aid is not None and aid in kept_artefacts:
+            indicators.append(i.model_dump())
     return Incident.model_validate({**incident.model_dump(), "captures": captures, "indicators": indicators})
 
 
