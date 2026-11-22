@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -256,6 +257,15 @@ def limitations(report: dict[str, Any]) -> list[str]:
     return sentences
 
 
+def build_commit(build_file_text: str | None) -> str | None:
+    """Only the `build: <branch> <sha>` line of BUILD.txt. The rest of the file names organiser
+    case folders (its `command:` line), so it never goes into the report."""
+    if not build_file_text:
+        return None
+    m = re.search(r"^build:\s*(.+)$", build_file_text, re.MULTILINE)
+    return m.group(1).strip() if m else None
+
+
 def build_report(results: dict[str, Any], steps: dict[str, dict[str, Any]], build: str | None) -> dict[str, Any]:
     """The report as data: tables with raw counts, both engines side by side, plus the limitations."""
     labels = results.get("labels")
@@ -265,7 +275,7 @@ def build_report(results: dict[str, Any], steps: dict[str, dict[str, Any]], buil
     folder = {cid: f"{c['source']}:{c['folder']}" for cid, c in labels["captures"].items()}
     report = {
         "schema": REPORT_SCHEMA,
-        "dataset": _dataset_section(labels, leak, build),
+        "dataset": _dataset_section(labels, leak, build_commit(build)),
         "steps": steps,
         "e1": _e1_section({e: results.get(f"hidden {e}") for e in ENGINES}),
         "e7": {e: _e7_section(results.get(f"timesplit {e}")) for e in ENGINES},

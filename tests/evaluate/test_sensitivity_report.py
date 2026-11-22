@@ -171,6 +171,13 @@ def test_report_tables_hold_raw_counts_for_both_engines_and_never_print_capture_
     assert "abc1234" in md
 
 
+def test_report_prints_only_the_build_commit_not_the_whole_build_file():
+    build_txt = "build: main abc1234\ncommand: ftf ingest /data/raw/SECRET_FOLDER\nincidents 3, captures 3"
+    md = render_markdown(build_report(_results(), _steps(), build=build_txt))
+    assert "main abc1234" in md
+    assert "SECRET_FOLDER" not in md and "command:" not in md
+
+
 def test_report_limitations_are_five_to_eight_sentences_with_run_numbers():
     report = build_report(_results(), _steps(), build=None)
     sentences = report["limitations"]
