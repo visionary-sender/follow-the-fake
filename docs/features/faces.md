@@ -75,19 +75,36 @@ Logo matching (no text) is not implemented; see limits.
 | opencv-python-headless | PyPI, `features` extra | Apache-2.0 (bundled FFmpeg LGPL-2.1, dynamically linked) | ~50 MB wheel |
 | Pillow | PyPI, `features` extra | MIT-CMU (HPND) | ~4.5 MB wheel |
 | Tesseract + `pol`, `eng` data | Debian packages (optional, OCR fallback) | Apache-2.0 | ~20 MB |
-| Reference images | Wikimedia Commons, per image in the manifest | PD / CC0 / CC BY (attribution in the manifest) | ~__REF_SIZE__ |
+| Reference images | Wikimedia Commons, per image in the manifest | PD / CC0 / CC BY (attribution in the manifest) | 2.7 MB for the 24 thumbnails |
 
 Weights download on first use into `ftf.features.common.model_dir()` and are checked against
 pinned SHA-256 digests.
 
 ## Results
 
-__RESULTS__
+Measured on `ftf-visual` (Debian, e2-standard-8: 8 vCPUs, no GPU), with
+`ftf features --dataset <indicator input> --families text,faces` on the challenge captures.
+
+| Measure | Value |
+|---|---|
+| Captures in the input | 34 (768 artefacts, of which 420 decode as images) |
+| Captures with a `person_face` | 26 (526 indicators, one per detected face) |
+| Captures with a `brand` | 17 (118 indicators) |
+| Captures with a `face_embedding` | 26 (526 faces, the same faces as `person_face`) |
+| CPU per image, faces only | about 0.26 s: 107.6 s CPU (user 93.2 s, sys 14.4 s) over the 420 decodable images, including model and reference loading; 52.6 s wall |
+| CPU per image, earlier faces-only run | 0.21 s on 394 organiser creatives (528 faces) |
+
+Reference set: 11 people and 24 images, with licences CC BY 2.0, CC BY 3.0, CC BY 3.0 pl,
+CC BY 4.0, CC0 and public domain. The embeddings take 12 KB (`embeddings.npy`, 24 × 128 float32).
+The prebuilt copy is at `gs://follow-the-fake-data/outputs/visual/hack-15/reference/`.
 
 ## Known limits
 
 - **Reference coverage.** Only people with licence-clean, single-face Commons photos are in the
-  set. __REF_LIMITS__ A face of anyone else still gets a `person_face` (its nearest reference,
+  set. The draft kept at most five images per person. Tomasz Lis and Adam Glapiński were skipped: the
+draft found no licence-clean, single-face Commons portrait for either. Wikimedia throttling
+(HTTP 429) cut the draft run short for some candidates, so the set is smaller than it could be.
+A face of anyone else of anyone else still gets a `person_face` (its nearest reference,
   with a low cosine) and, more usefully, a `face_embedding` that matches the same face in other
   captures.
 - **Small faces.** YuNet is trained for faces of about 10–300 px; avatars under ~20 px and
