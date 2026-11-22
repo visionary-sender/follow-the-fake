@@ -89,9 +89,10 @@ directory for its output:
 docker run --rm -v "$PWD/scan:/home/ftf/scan" ftf scan --source google_atc --source certpl --out scan
 ```
 
-The `meta` source needs the optional `playwright` package and Chromium, which the image does
-not include. Without them it reports `unavailable` and the other sources still run. To use
-it anyway: `pip install '.[fetch]' && playwright install --with-deps chromium`.
+The `meta` source needs the optional `playwright` package and Chromium. The image includes both
+(the `fetch` extra and the Chromium headless shell, see the Dockerfile). Outside the image, without
+them it reports `unavailable` and the other sources still run; to install them:
+`pip install '.[fetch]' && playwright install --with-deps chromium`.
 
 **Scheduled runs (team setup).** The scanner runs only on the sandbox VM `ftf-sandbox`, never
 on the laptop or the workbench. `scripts/scanner-sandbox.sh install` copies the code to

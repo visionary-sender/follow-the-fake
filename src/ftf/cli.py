@@ -16,6 +16,7 @@ from ftf.evaluate.commands import register as register_eval
 from ftf.features.commands import register as register_features
 from ftf.fetch.cli import register as register_fetch
 from ftf.ingest.commands import register as register_ingest
+from ftf.linking.calibrate import register_calibrate
 from ftf.linking.commands import register_assign
 from ftf.linking.commands import register_index
 from ftf.linking.commands import register_link
@@ -32,6 +33,7 @@ COMMANDS: list[Callable[[argparse._SubParsersAction], None]] = [
     register_analyze,
     register_assign,
     register_build_base,
+    register_calibrate,
     register_corpus,
     register_enrich_domain,
     register_eval,

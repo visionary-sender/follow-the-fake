@@ -230,6 +230,11 @@ during the build are not a licensing concern. Playwright, its Chromium (with Chr
 unmodified LGPL-2.1 FFmpeg) and its Node.js driver are a named exception (owner, 2026-11-21); they
 come only with the optional `fetch` extra and are listed separately in `LICENSES-THIRD-PARTY.md`.
 
+System packages in the image, models (`FTF_WITH_MODELS`, off by default) and outside services, with
+their licences and usage limits: [docs/licences.md](docs/licences.md). Some system libraries that
+Chromium needs are LGPL or MPL; they are not covered by a named exception yet and await an owner
+decision (listed in that document).
+
 ## Operations
 
 ### Export (`ftf export`)

@@ -21,8 +21,12 @@ Method (07 §2.4, D1/D2 "Assignment"):
   one log-likelihood-ratio scale, and the review band (`NEW_MARGIN`, 3 bits) is a distance from
   tau, not between two candidates, so it would send clear winners to review.
 * Evidence capacity = sum, over the layers the item can still show, of the most bits the weight
-  table gives that layer. Which layers a modality can show is read from the collection itself
-  (indicator provenance -> artefact type), not hard-coded.
+  table gives that layer's kinds the item's modalities can carry (`weights.KIND_MODALITIES`; a
+  private id without recorded traffic counts minus the static discount). Which layers a modality
+  can show is read from the collection itself (indicator provenance -> artefact type).
+* A `new` call becomes `review` when the best score plus the capacity of the missing modalities
+  (what the capacity would rise by with them) reaches the assign bar: the missing input could
+  have produced the assignment. The note names those inputs (HACK-67).
 * An incident whose (non-decoy) capture is an exact duplicate (`duplicate_of`) of a collection
   capture is assigned to the campaign holding that capture; if that capture is in no campaign
   or in several, it goes to review.
@@ -35,6 +39,15 @@ Method (07 §2.4, D1/D2 "Assignment"):
 * Under operator / campaign a tenant or owner conflict between any probe capture and a member
   of the chosen campaign (cannot-link) sends the incident to review instead of assigning it.
 * The collection is not re-clustered.
+* Content views (HACK-24, off by default): with `calibrations`, the ledger adds capped content-view
+  rows (`ledger.with_content`), read from the vector stores under `base_dir` (collection captures)
+  and `incident_dir` (the incident's captures). They raise scores and name similar creatives in
+  the candidate notes, but never make a pair qualify, so they can lift an item to review, never
+  to assign. With them on, every campaign is scored (the linear scan) even when an index is
+  given: the index finds candidates through shared exact values only, and a similar creative
+  shares none. The linear scan is the reference, so indexed and linear stay equal by
+  construction; at our scale (hundreds of campaigns) it is fast enough. A vector top-k hook in the
+  index (`CandidateIndex.nearest`) is the way to drop that cost later.
 """
 
 from __future__ import annotations
@@ -65,8 +78,9 @@ from ftf.contract.models import (
 from ftf.linking.backend import Backend
 from ftf.linking.grouping import CANNOT_LINK_RELATIONS, MIN_LAYERS, SINGLE_VALUED_LAYERS, canonical_map, has_conflict, incident_chain, link_id, qualifies
 from ftf.linking.index import CandidateIndex, cached_index, dataset_digest, modalities_of
-from ftf.linking.ledger import ScoringContext
-from ftf.linking.types import METHOD, PairScore
+from ftf.linking.ledger import ScoringContext, is_content_row, with_content
+from ftf.linking.similarity import Calibration, DatasetVectorStore, VectorStore, content_views
+from ftf.linking.types import METHOD, PairScore, decision_bits
 from ftf.linking.weights import WeightTable
 
 NEW_MARGIN = 3.0  # bits below tau at which an item is declared new
@@ -91,10 +105,13 @@ def assign(
     base_dir: Optional[Path] = None,
     incident_dir: Optional[Path] = None,
     index: Optional[CandidateIndex] = None,
+    calibrations: Optional[Mapping[str, Calibration]] = None,
+    vector_store: Optional[VectorStore] = None,
 ) -> Assignment:
     """Assign `incident` to a campaign of `relation` in `collection`, or declare it new, or send it to review."""
     return link_incident(
-        collection, incident, relation, backend=backend, base_dir=base_dir, incident_dir=incident_dir, index=index
+        collection, incident, relation, backend=backend, base_dir=base_dir, incident_dir=incident_dir, index=index,
+        calibrations=calibrations, vector_store=vector_store,
     ).assignment
 
 
@@ -107,13 +124,16 @@ def link_incident(
     incident_dir: Optional[Path] = None,
     index: Optional["CandidateIndex"] = None,
     weights: Optional[WeightTable] = None,
+    calibrations: Optional[Mapping[str, Calibration]] = None,
+    vector_store: Optional[VectorStore] = None,
 ) -> IncidentResult:
     """The assignment plus ledgers from the incident's captures to members of its top candidate campaigns.
 
     `base` is the output of `ftf link` / `link_dataset`. The links are valid inside `base` plus
-    the incident. `base_dir` / `incident_dir` are where the base's and the incident's vector
-    stores live (content views, HACK-24); while they are None, content views are skipped. They
-    are accepted but not used yet.
+    the incident. Content views (HACK-24) are on only with `calibrations`: vector views read the
+    stores under `base_dir` / `incident_dir` (where the base's and the incident's datasets were
+    written), or `vector_store` when given; without either only value views (hashes) count. With
+    content views on, the scan is linear (see the module docstring).
 
     With a `CandidateIndex` of `base` (given, or built earlier for this very object and cached),
     only the campaigns reachable through the incident's informative values are scored and the
@@ -128,6 +148,14 @@ def link_incident(
         index = cached_index(base)
     if index is not None and index._base is not base and (not index.digest or dataset_digest(base) != index.digest):
         raise ValueError("the index belongs to another base dataset; build or load it for this one")
+    content = content_views(dict(calibrations) if calibrations else None, vector_store or _store(base_dir, incident_dir, incident))
+    if content is not None:
+        if index is not None:
+            # what the index stands for (base plus incidents added since), scored with its options
+            # unless the caller brought its own scorer
+            base, factory = index.linear_view()
+            backend = backend or factory
+        index = None
     if index is not None and backend is None and weights is not None and index.drops_bits_of(weights):
         # `weights` gives bits to a kind the index kept no postings for: candidate search would miss
         # it, so score every campaign of the collection the index stands for, with its options.
@@ -141,6 +169,10 @@ def link_incident(
     be = (backend or Backend.from_dataset)(combined)
     if weights is not None:
         be = _reweighted(be, weights)
+    if content is not None:
+        if not isinstance(be.context, ScoringContext):
+            raise ValueError("content views need the hand-table ledger backend")
+        be = Backend.from_context(with_content(be.context, content))
     setup = _Setup(
         be=be,
         canon=canonical_map(combined),
@@ -149,6 +181,14 @@ def link_incident(
         campaigns=[c for c in base.campaigns if c.relation is relation],
     )
     return _decide(setup, incident, relation)
+
+
+def _store(base_dir: Optional[Path], incident_dir: Optional[Path], incident: Incident) -> Optional[DatasetVectorStore]:
+    """Vectors of the collection under `base_dir`, of the incident's captures under `incident_dir`."""
+    if base_dir is None and incident_dir is None:
+        return None
+    dirs = {c.id: incident_dir for c in incident.captures} if incident_dir is not None else None
+    return DatasetVectorStore(base_dir, dirs)  # no base_dir: the collection's vectors read as missing
 
 
 @dataclass
@@ -243,7 +283,7 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
                 if blocks_on_conflict and has_conflict(ps):
                     conflicted.add(camp.id)
                 prev = by_probe[x].get(camp.id)
-                if ps.bits >= bar and qualifies(ps, tau, min_layers) and (prev is None or ps.bits > prev.bits):
+                if decision_bits(ps) >= bar and qualifies(ps, tau, min_layers) and (prev is None or ps.bits > prev.bits):
                     by_probe[x][camp.id] = ps
                 if best_m is None or _rank(ps) > _rank(best_m):
                     best_m = ps
@@ -276,7 +316,11 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
         dup_camps = [camp for camp in campaigns if camp.id in dup_ids]
     scored.sort(key=_order)
 
-    capacity, gains = evidence_capacity(None, incident, probe or dup_of, be.layer_caps(relation), lm=setup.modalities)
+    mod_caps = be.modality_caps
+    capacity, gains, missing_bits = evidence_capacity(
+        None, incident, probe or dup_of, be.layer_caps(relation), lm=setup.modalities,
+        modality_caps=(lambda mods: mod_caps(relation, mods)) if mod_caps is not None else None,
+    )
 
     dup_camp = dup_camps[0] if len(dup_camps) == 1 else None
     candidates = [
@@ -298,7 +342,7 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
     # The assign target is the best campaign that clears the bar with a qualifying ledger,
     # not necessarily the top-scoring one (that one may rest on a single layer).
     target = next(
-        (camp for camp, ps, _ in scored if ps is not None and ps.bits >= bar and qualifies(ps, tau, min_layers)),
+        (camp for camp, ps, _ in scored if ps is not None and decision_bits(ps) >= bar and qualifies(ps, tau, min_layers)),
         None,
     )
 
@@ -311,12 +355,17 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
             (
                 (camp, ps)
                 for camp, ps, _ in scored
-                if camp.id != target.id and camp.id not in conflicted and ps is not None and ps.bits >= bar and qualifies(ps, tau, min_layers)
+                if camp.id != target.id and camp.id not in conflicted and ps is not None and decision_bits(ps) >= bar and qualifies(ps, tau, min_layers)
             ),
             None,
         )
     target_bits = next((ps.bits for camp, ps, _ in scored if target is not None and camp.id == target.id), 0.0)
-    tie = rival is not None and target_bits - rival[1].bits < TIE_MARGIN - 1e-9
+    target_id_bits = next((decision_bits(ps) for camp, ps, _ in scored if target is not None and camp.id == target.id), 0.0)
+    # the lead is measured without content views: a similar creative must not break a tie either
+    tie = rival is not None and target_id_bits - decision_bits(rival[1]) < TIE_MARGIN - 1e-9
+
+    missing_reach = _missing_could_reach_bar(best, bar, gains, missing_bits)
+    held_back = False
 
     if setup.campaigns_of is not None:
         holding = setup.campaigns_of
@@ -349,10 +398,11 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
         if all(c.campaign_id != target.id for c in candidates):
             ps = next(p for camp, p, _ in scored if camp.id == target.id)
             candidates.append(Candidate(campaign_id=target.id, score_bits=round(ps.bits, 3), note=_candidate_note(ps)))
-    elif best <= tau - NEW_MARGIN and capacity >= tau:
+    elif best <= tau - NEW_MARGIN and capacity >= tau and missing_reach is None:
         decision, campaign_id = Decision.new, None
     else:
         decision, campaign_id = Decision.review, None
+        held_back = best <= tau - NEW_MARGIN and capacity >= tau  # new, but for the missing inputs
 
     if tie and decision is Decision.review:
         for camp in (target, rival[0]):
@@ -367,6 +417,8 @@ def _decide(setup: _Setup, incident: Incident, relation: Relation) -> IncidentRe
         candidates.append(Candidate(campaign_id=cid, score_bits=round(ps.bits, 3) if ps is not None else 0.0, note="a lander of the incident points here"))
 
     note = _note(relation, best, tau, bar, k, capacity, gains, best_ps, min_layers)
+    if held_back and missing_reach is not None:
+        note = missing_reach + "; " + note
     if dup_of:
         where = f"campaign {dup_camp.id}" if dup_camp is not None else f"{len(dup_camps)} campaigns"
         note = f"exact duplicate of {', '.join(dup_of)} ({where}); " + note
@@ -558,16 +610,21 @@ def evidence_capacity(
     probe: list[str],
     caps: dict[Layer, float],
     lm: Optional[dict[Layer, set[ArtefactType]]] = None,
-) -> tuple[float, list[tuple[ArtefactType, Optional[str], float, list[Layer]]]]:
-    """Most bits the item could earn given its modalities, and what each absent modality could add.
+    modality_caps: Optional[Callable[[frozenset[ArtefactType]], dict[Layer, float]]] = None,
+) -> tuple[float, list[tuple[ArtefactType, Optional[str], float, list[Layer]]], float]:
+    """Most bits the item could earn given its modalities, what each absent modality could add, and all of them together.
 
-    Returns (capacity, gains) where gains are (modality, missing reason or None, extra bits,
-    layers) for every absent modality that would open a layer the item cannot show now.
+    Returns (capacity, gains, missing_bits). Gains are (modality, missing reason or None, extra
+    bits, layers) for every absent modality that would raise the capacity; missing_bits is the
+    rise with every absent modality at once (each layer counted once).
     `lm` (layer -> modalities of the collection plus the incident) replaces the scan of `ds`.
+    `modality_caps(modalities)` gives per-layer caps for an item showing those modalities (per
+    kind: `backend.layer_caps`); without it every item gets `caps` and only layers no present
+    modality reaches can add bits.
     """
     probe_set = set(probe)
     captures = [c for c in incident.captures if c.id in probe_set or c.duplicate_of in probe_set]
-    has = {t for c in captures for t in c.modalities}
+    has = frozenset(t for c in captures for t in c.modalities)
     reasons: dict[ArtefactType, str] = {}
     for c in captures:
         for m in c.missing:
@@ -577,18 +634,44 @@ def evidence_capacity(
         if ds is None:
             raise ValueError("evidence_capacity needs the collection or its layer modalities")
         lm = layer_modalities(ds)
-    reachable = own_layers | {layer for layer, mods in lm.items() if mods & has}
-    capacity = sum(max(caps.get(layer, 0.0), 0.0) for layer in reachable)
+    caps_for = modality_caps or (lambda mods: caps)
 
-    all_mods = {t for mods in lm.values() for t in mods} | set(reasons)
+    def reach(mods: frozenset[ArtefactType]) -> dict[Layer, float]:
+        layer_caps = caps_for(mods)
+        layers = own_layers | {layer for layer, ms in lm.items() if ms & mods}
+        return {layer: max(layer_caps.get(layer, 0.0), 0.0) for layer in layers}
+
+    now = reach(has)
+    capacity = sum(now.values())
+    absent = ({t for mods in lm.values() for t in mods} | set(reasons)) - has
     gains = []
-    for mod in sorted(all_mods - has, key=lambda m: m.value):
-        opened = sorted((layer for layer, mods in lm.items() if mod in mods and layer not in reachable), key=lambda l: l.value)
-        extra = sum(max(caps.get(layer, 0.0), 0.0) for layer in opened)
-        if extra > 0:
+    for mod in sorted(absent, key=lambda m: m.value):
+        more = reach(has | {mod})
+        extra = sum(more.values()) - capacity
+        opened = sorted((layer for layer, bits in more.items() if bits > now.get(layer, 0.0)), key=lambda l: l.value)
+        if extra > 1e-9 and opened:
             gains.append((mod, reasons.get(mod), extra, opened))
     gains.sort(key=lambda g: (-g[2], g[0].value))
-    return capacity, gains
+    missing_bits = max(sum(reach(has | absent).values()) - capacity, 0.0) if gains else 0.0
+    return capacity, gains, missing_bits
+
+
+def _missing_could_reach_bar(
+    best: float,
+    bar: float,
+    gains: list[tuple[ArtefactType, Optional[str], float, list[Layer]]],
+    extra: float,
+) -> Optional[str]:
+    """A note naming the missing inputs if they could lift the best score to the assign bar, else None.
+
+    `extra` is the capacity of the missing modalities (`evidence_capacity`'s missing_bits). When
+    the best candidate's score plus that capacity reaches the bar, the absence of a match is not
+    evidence of a new campaign, so the item goes to review instead of new (HACK-67).
+    """
+    if not gains or best + extra < bar:
+        return None
+    named = ", ".join(f"{mod.value} ({reason})" if reason else mod.value for mod, reason, _, _ in gains)
+    return f"missing inputs could reach the assign bar ({best:.1f} + up to {extra:.1f} bits >= {bar:.1f}): {named}"
 
 
 def _strong_layers(ps: PairScore, n: int = 3) -> str:
@@ -608,6 +691,10 @@ def _candidate_note(ps: PairScore) -> str:
     conflicts = sorted({f"{r.layer.value} {r.kind}" for r in ps.rows if r.status is EvidenceStatus.conflict and r.layer in SINGLE_VALUED_LAYERS})
     if conflicts:
         parts.append("conflict: " + ", ".join(conflicts))
+    similar = [r for r in ps.rows if r.bits > 0 and is_content_row(r)]
+    if similar:
+        # pointers for the reviewer: which content of the campaign member the item resembles
+        parts.append("similar content: " + ", ".join(f"{r.kind} {r.value} +{r.bits:.1f}" for r in similar))
     parts.append(f"best pair {ps.a} ~ {ps.b}")
     return "; ".join(parts)
 
@@ -628,7 +715,10 @@ def _note(
         f"evidence capacity {capacity:.1f} bits",
     ]
     if best_ps is not None and best >= bar and not qualifies(best_ps, tau, min_layers):
-        parts.append("best match rests on one layer only")
+        if decision_bits(best_ps) >= tau:
+            parts.append("best match rests on one layer only")
+        else:
+            parts.append("best match clears the bar only with content-view bits (similar content, no shared identifiers)")
     if capacity < tau:
         parts.append("capacity below tau: the inputs present cannot prove a new campaign")
     if gains:
