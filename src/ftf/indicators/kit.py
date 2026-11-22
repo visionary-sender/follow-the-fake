@@ -105,7 +105,7 @@ def extract(incident: Incident, capture: Capture, root: Path) -> Iterable[Indica
     for art in capture.artefacts:
         if art.type not in _READ:
             continue  # screenshots, videos, ad-library records: not kit content
-        data = _read(root, art)
+        data = _pages.url_text(root, art) if art.type is ArtefactType.url else _read(root, art)
         if data is None:
             continue
         if art.type is ArtefactType.asset:

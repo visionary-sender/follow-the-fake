@@ -43,6 +43,7 @@ from urllib.parse import urljoin
 from ftf.contract import Artefact, ArtefactType, Capture, Observed
 from ftf.enrich.normalise import hostname, registrable_domain
 from ftf.indicators import _kitnorm as kn
+from ftf.ingest import urllist
 
 log = logging.getLogger(__name__)
 
@@ -96,6 +97,20 @@ def read(root: Path, art: Artefact) -> bytes | None:
         return path.read_bytes()
     except OSError:
         return None
+
+
+def url_text(root: Path, art: Artefact) -> bytes | None:
+    """The text a ``url`` artefact stands for.
+
+    A member of a URL list (see :mod:`ftf.ingest.urllist`) names the shared list file and carries
+    its URL's digest: only that line counts, so each incident sees its own URL. Any other url file
+    is read whole, as before.
+    """
+    data = read(root, art)
+    if data is None or not art.sha256:
+        return data
+    url = urllist.find_line(data, art.sha256)
+    return data if url is None else url.encode("utf-8")
 
 
 # --------------------------------------------------------------------------- HAR
@@ -246,7 +261,7 @@ def page_chain(capture: Capture, root: Path, *, fetched: bool = False) -> list[P
                 role = LANDING if n == len(flat) - 1 else CHAIN
                 found.append(PageUrl(h.url, role, Observed.live, art.id, h.locator, "har", h.via))
         elif art.type is ArtefactType.url:
-            data = read(root, art)
+            data = url_text(root, art)
             if data is None:
                 continue
             urls = [m.group(0) for m in kn.URL_IN_TEXT.finditer(data[:65536].decode("utf-8", "replace"))]
