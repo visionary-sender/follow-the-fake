@@ -181,7 +181,10 @@ def _lsh_bands(shingles: set[str]) -> list[str]:
 
 
 def _page_shape(found: _Found, url: str, observed: Observed, art: Artefact, locator: str) -> None:
-    shape = kn.param_shape(urlsplit(url).query)
+    try:
+        shape = kn.param_shape(urlsplit(url).query)
+    except ValueError:  # malformed URL in a captured page
+        return
     if shape:
         found.add("page_url_shape", shape, observed, art.id, locator)
 

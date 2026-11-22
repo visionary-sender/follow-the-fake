@@ -18,7 +18,7 @@ hosts or domains only, never URLs, so no query string, click id or token can rea
 | `ad_display_domain` | creative | campaign | static | registered domain shown in the ad (the record's display domain) |
 
 A chain hop is `tracker_instance` / `operator` when its URL looks like a click tracker (a click-id
-parameter such as `clickid`, `subid`, `cid`, or a `/click` path segment), else `infrastructure` /
+parameter such as `clickid` or `subid`, or a `/click` path segment), else `infrastructure` /
 `campaign` (cloaker, pre-lander, redirector).
 
 `redirect_chain_shape` is e.g. `start:shared>302:tracker>302:self>200:landing`: per hop its role
@@ -65,8 +65,8 @@ _KINDS: dict[str, tuple[Layer, Level]] = {
 }
 _TRACKER = (Layer.tracker_instance, Level.operator)
 
-_CLICK_PARAMS = frozenset({"clickid", "click_id", "upd_clickid", "subid", "sub_id", "cid", "bcid", "xid", "trk", "tid"})
-_CLICK_PATH = re.compile(r"(?:^|/)(?:click|clk|track|go)(?:/|\.php|$)", re.I)
+_CLICK_PARAMS = frozenset({"clickid", "click_id", "upd_clickid", "subid", "sub_id", "bcid"})
+_CLICK_PATH = re.compile(r"(?:^|/)(?:click|clk)(?:/|\.php|$)", re.I)
 
 ROLES = ("landing", "redirect_hop", "ad_landing", "ad_display", "certpl", "shared")
 _ROLE_OF_KIND = {
@@ -139,10 +139,10 @@ def _hosts(capture: Capture, chain: list[_pages.PageUrl]) -> list[Indicator]:
             out.append(_ind(capture, "landing_host", host, p.observed, p.artefact_id, loc))
             if domain:
                 out.append(_ind(capture, "landing_domain", domain, p.observed, p.artefact_id, loc))
-        elif p.role == CHAIN and host not in landing_hosts:
+        elif p.role == CHAIN and host not in landing_hosts and domain not in landing_domains:
             tracker = looks_like_tracker(p.url) and not is_shared(host)
             out.append(_ind(capture, "chain_host", host, p.observed, p.artefact_id, loc, tracker=tracker))
-            if domain and domain not in landing_domains:
+            if domain:
                 out.append(_ind(capture, "chain_domain", domain, p.observed, p.artefact_id, loc, tracker=tracker))
     return out
 

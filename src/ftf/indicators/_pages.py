@@ -15,10 +15,15 @@ Sources, in artefact order:
 | HTML | browser "saved from url" comment | landing | static |
 | HTML | `link[rel=canonical]`, `meta[og:url]` | landing, only when weak (see below) | static |
 | MHTML | `Snapshot-Content-Location` header, first `text/html` part's `Content-Location` | landing | static |
+| MHTML | that part's canonical and og:url | landing, only when weak (see below) | static |
 
 Canonical and og:url are weak: a cloned page keeps the canonical of the site it copied. They
 count only when the capture has no strong source (HAR, url file, saved-from comment, MHTML
 location) or when their registered domain equals a strong one.
+
+Only the top-level chain is own: later document entries (iframes) are not, so kit.py reports
+an embedded foreign frame as a third party. Every URL of a non-fetcher url file is a landing:
+such a file is the report's own link list for that capture.
 
 A URL that is a landing in one source and a chain hop in another is a landing. Nothing is
 executed or rendered: HAR is read as JSON, HTML with lxml, MHTML with `email`.
@@ -152,7 +157,10 @@ def har_hops(doc: object) -> list[list[Hop]]:
             loc = _location(resp)
             if not loc:
                 break
-            target = urljoin(_dict(entries[cur].get("request")).get("url") or "", loc)
+            try:
+                target = urljoin(_dict(entries[cur].get("request")).get("url") or "", loc)
+            except ValueError:  # malformed Location: the chain ends here
+                break
             if not is_http(target) or target in seen:
                 break
             seen.add(target)
@@ -177,9 +185,9 @@ def _location(resp: dict) -> str | None:
 def _har_cached(path: str, size: int, mtime: float) -> tuple[tuple[Hop, ...], ...]:
     try:
         doc = json.loads(Path(path).read_bytes().decode("utf-8", "replace"))
-    except (OSError, ValueError):
+        return tuple(tuple(h) for h in har_hops(doc))
+    except (OSError, ValueError, TypeError, AttributeError):  # malformed captures must not stop the run
         return ()
-    return tuple(tuple(h) for h in har_hops(doc))
 
 
 def _har_file(root: Path, art: Artefact) -> tuple[tuple[Hop, ...], ...]:
@@ -199,7 +207,8 @@ def _har_file(root: Path, art: Artefact) -> tuple[tuple[Hop, ...], ...]:
 
 
 def mhtml_urls(data: bytes) -> list[tuple[str, str]]:
-    """(url, locator): the snapshot header and the first HTML part's Content-Location."""
+    """(url, locator): the snapshot header and the first HTML part's Content-Location, plus that
+    part's canonical and og:url (locators ending in `link[rel=canonical]` / `meta[og:url]`, weak)."""
     try:
         msg = email.message_from_bytes(data, policy=email.policy.default)
     except Exception:  # malformed captures must not stop the run
@@ -214,6 +223,11 @@ def mhtml_urls(data: bytes) -> list[tuple[str, str]]:
         where = str(part.get("Content-Location") or "").strip()
         if is_http(where):
             out.append((where, f"part[{i}]@content-location"))
+        try:
+            body = part.get_payload(decode=True) or b""
+        except Exception:
+            body = b""
+        out.extend((u, f"part[{i}] {loc}") for u, loc in kn.page_urls(body, kn.parse_html(body)) if loc != "comment:saved-from")
         break
     return out
 
@@ -236,6 +250,7 @@ def page_chain(capture: Capture, root: Path, *, fetched: bool = False) -> list[P
             if data is None:
                 continue
             urls = [m.group(0) for m in kn.URL_IN_TEXT.finditer(data[:65536].decode("utf-8", "replace"))]
+            urls = ["https:" + u if u.startswith("//") else u for u in urls]
             urls = [u for u in urls if is_http(u)]
             for n, u in enumerate(urls):
                 if fetched:
@@ -255,7 +270,8 @@ def page_chain(capture: Capture, root: Path, *, fetched: bool = False) -> list[P
             if data is None:
                 continue
             for u, loc in mhtml_urls(data):
-                found.append(PageUrl(u, LANDING, Observed.static, art.id, loc, "mhtml"))
+                src = "canonical" if loc.endswith(("link[rel=canonical]", "meta[og:url]")) else "mhtml"
+                found.append(PageUrl(u, LANDING, Observed.static, art.id, loc, src))
     strong = {registrable_domain(p.url) for p in found if p.source in _STRONG} - {None}
     if strong:
         found = [p for p in found if p.source != "canonical" or registrable_domain(p.url) in strong]

@@ -239,3 +239,36 @@ def test_kit_own_domains_equal_landing_and_chain(tmp_path):
 def test_missing_files_are_skipped(tmp_path):
     c = cap("x:c1", Artefact(id="x:a0", type=ArtefactType.har, path="nope.har"), Artefact(id="x:a1", type=ArtefactType.html))
     assert run(Incident(id="x", source="s", captures=[c]), tmp_path) == []
+
+
+def test_malformed_location_and_url_do_not_crash(tmp_path):
+    har = {"log": {"entries": [doc("https://a.example.net/x", 302, "http://["), doc("https://[x/")]}}
+    c = cap("b:c1", Artefact(id="b:har", type=ArtefactType.har, path=write(tmp_path, "b/x.har", json.dumps(har))))
+    inc = Incident(id="b", source="synthetic", captures=[c])
+    assert by_kind(run(inc, tmp_path))["landing_domain"] == {"example.net"}
+    list(kit.extract(inc, c, tmp_path))
+
+
+def test_same_domain_hop_is_not_a_chain_value(tmp_path):
+    har = {"log": {"entries": [doc("http://example.com/", 301, "https://www.example.com/"), doc("https://www.example.com/")]}}
+    c = cap("d:c1", Artefact(id="d:har", type=ArtefactType.har, path=write(tmp_path, "d/x.har", json.dumps(har))))
+    k = by_kind(run(Incident(id="d", source="synthetic", captures=[c]), tmp_path))
+    assert "chain_host" not in k and "chain_domain" not in k
+    assert k["redirect_chain_shape"] == {"start:self>301:landing"}
+
+
+def test_generic_redirect_is_not_a_tracker():
+    assert not domains.looks_like_tracker("https://a.example.net/go?cid=42")
+    assert domains.looks_like_tracker("https://a.example.net/click?x=1")
+
+
+def test_mhtml_canonical_is_weak_and_protocol_relative_url_file(tmp_path):
+    mhtml = (
+        'MIME-Version: 1.0\r\nContent-Type: multipart/related; type="text/html"; boundary="B"\r\n\r\n'
+        "--B\r\nContent-Type: text/html\r\n\r\n"
+        '<html><head><link rel="canonical" href="https://www.example.org/c"></head><body>x</body></html>\r\n--B--\r\n'
+    )
+    c = cap("mc:c1", Artefact(id="mc:a0", type=ArtefactType.mhtml, path=write(tmp_path, "mc/p.mhtml", mhtml)))
+    assert by_kind(run(Incident(id="mc", source="synthetic", captures=[c]), tmp_path))["landing_domain"] == {"example.org"}
+    c2 = cap("pr:c1", Artefact(id="pr:url", type=ArtefactType.url, path=write(tmp_path, "pr/u.txt", "//www.example.net/p\n")))
+    assert by_kind(run(Incident(id="pr", source="synthetic", captures=[c2]), tmp_path))["landing_domain"] == {"example.net"}
