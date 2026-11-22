@@ -102,7 +102,7 @@ def layer_caps(weights: Any, relation: Relation, modalities: Optional[frozenset[
 
 
 def link_level(ps: PairScore) -> LinkLevel:
-    """Tiers posted on strict = live private id or >= 3 positive layers, medium = 2, loose otherwise."""
+    """Tiers: strict = live private id or >= 3 positive layers, medium = 2, loose otherwise."""
     if ps.live_private or ps.layers_positive >= 3:
         return LinkLevel.strict
     if ps.layers_positive >= 2:

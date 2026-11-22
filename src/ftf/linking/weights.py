@@ -1,10 +1,9 @@
 """Hand table of indicator weights for the tiered evidence ledger (design D1).
 
 Every number here is an explicit, auditable prior in bits (log2 likelihood ratio), taken from the
-method report (and): tenant id ~6, landing id ~4, live pixel ~3, kit asset set ~4,
-caption ~2, platform constant 1.7, conflict on a single-valued field −4. replaces the table
-with learned values; it is plain data on purpose, so a learned table only has to build a
-`WeightTable` with the same fields.
+method report: tenant id ~6, landing id ~4, live pixel ~3, kit asset set ~4,
+caption ~2, platform constant 1.7, conflict on a single-valued field −4. The table is plain data on purpose, so a learned
+replacement only has to build a `WeightTable` with the same fields.
 
 Fields of one entry (`KindWeight`):
 
