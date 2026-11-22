@@ -61,9 +61,9 @@ one decision by one actor, so a layer counts once when it is combined with other
 Kinds and their layers are declared in `ftf.indicators._ids.KINDS`, `ftf.indicators.kit._KINDS`,
 `ftf.indicators.domains` (the landing's own hosts, the redirect chain and the displayed domain of an
 ad, HACK-48; the page's own URLs come from `ftf.indicators._pages`) and `ftf.enrich.domain`. The extractors read files as inert text and never fetch a URL found in a
-capture. The content layers (text embeddings, image hashes, faces) are **scaffolding only** in this
-release: `ftf.features` produces no calibrated similarities yet, so the scores below use the
-identifier, kit, infrastructure and ad-text indicators that are implemented.
+capture. The content layers (text embeddings, image hashes, faces) count only through calibrated
+content views, which are off by default (5.6); without them the scores below use the identifier,
+kit, infrastructure and ad-text indicators.
 
 ## 4. Collector exclusion
 
@@ -202,6 +202,36 @@ The worked example in 5.4 is computed with the per-layer rule that sections 5.1 
 the chain rule on, the tenant and landing terms are set by the discovered levels, so for a real pair
 read the ledger rows that `ftf score` or `ftf export` writes rather than recomputing the example.
 
+### 5.6 Calibrated content views (off by default)
+
+Text embeddings, image embeddings, perceptual hashes and MinHash signatures are continuous: two
+creatives of one campaign are *similar*, not equal. `ftf.linking.similarity` turns one such
+similarity into bits with a calibration fitted per view, and the ledger adds it as one row.
+
+- **Calibration.** `ftf calibrate-similarity DATASET -o calibration.json` groups the dataset with the
+  ledger itself (identifiers only, so a view never labels its own training pairs). Pairs of captures
+  in different campaign groups *and* different operator groups form the null; pairs in one campaign
+  group are the positives. Two campaigns of one operator may reuse a creative, so they belong to
+  neither side. With at least 10 positives the map is a class-balanced logistic regression; with
+  fewer it is the tail-LR bound of the null (how rare the similarity is among unrelated pairs). The
+  map is monotone, never negative (a dissimilar creative is no evidence against a link, campaigns
+  swap creatives) and capped at 4 bits. The quality report gives AUC, Cllr, Cllr_min and the
+  similarity that earns 1, 2 and 4 bits for each view.
+- **In the ledger.** With `--content-views calibration.json` (`ftf score`, `ftf link`, `ftf assign`)
+  each view adds a row in its indicator's own layer, scaled by that layer's relation scale (halved
+  again under operator), so the within-layer max holds it against the exact-match kinds of the
+  layer: a similar image and an equal image hash count once. A face match only says "same
+  celebrity", so a face view is capped at 1 bit unless its null was drawn from other scams with the
+  same face.
+- **Bits, not layers.** A content row raises the score but never makes a layer positive, never opens
+  the campaign gate and is never a live private id. Content similarity alone can therefore lift a
+  screenshot-only item to review, with the similar creatives named in the candidate notes, but it
+  never makes a link or an assignment.
+- **Candidate search.** The candidate index proposes campaigns through shared exact values, and a
+  similar creative shares none, so with content views on `ftf assign` scores every campaign (the
+  linear scan the index is tested against). Off, nothing changes: the scores are the same as
+  without the switch.
+
 ## 6. Relations and grouping
 
 One capture pair can be the same campaign under one relation and merely the same template under
@@ -312,8 +342,9 @@ at scale. The design targets 10^5 incidents; that target is a plan, not a result
 - **Independence across layers is assumed.** Bits add across layers. Where two layers move together
   (one operator's pixel spanning two campaigns) the sum overstates the evidence, which is why the
   operator-level layers are scaled down under the campaign relation.
-- **Content similarity is not used yet.** Text, image and face views are scaffolding. Their scores
-  would need calibration against scam and benign pages, and until then they carry no bits.
+- **Content similarity is off by default.** Calibrated views (5.6) need Visual's vectors and a
+  calibration fitted on the same kind of data; their positives come from the ledger's own campaign
+  groups, so a campaign the identifiers miss teaches the calibration nothing.
 - **Enrichment is best effort.** A registry, DNS or certificate lookup can fail. A failed lookup
   is recorded as `unknown` and carries no bits; a stale cache entry is labelled as stale.
 - **Campaigns rotate.** Operators change pages and pixels inside a campaign. The campaign relation

@@ -36,7 +36,15 @@ Rules (07 §2.2, §3 D1):
 - Missing data is 0, never negative. A `missing` row appears only when one side lacks the layer.
 - Collector indicators never contribute: a shared collector value is a `collector_excluded` row
   with 0 bits.
-- Vector indicators (`vector_ref`) are ignored here (calibrated similarities come with HACK-24).
+- Content views (HACK-24, off by default): with `ScoringContext.content` set (fitted
+  calibrations plus a vector store, `similarity.ContentViews`), each calibrated view (text and
+  image embeddings, perceptual hashes, MinHash) adds one capped shared row in its indicator's own
+  layer, scaled by that layer's relation scale (halved again under operator), so the within-layer
+  max applies against the exact-match kinds of that layer. A face view is capped at
+  `similarity.FACE_CAP_BITS` unless its null held other scams with the same face. Content rows add
+  bits only: they never make a layer positive, never open the campaign gate and are never a live
+  private id, so content similarity alone can send an item to review but never to a link or an
+  assignment. Off, the ledger is exactly what it was.
 
 The sum of the row bits equals `PairScore.bits`: rows that lose the within-layer max carry 0 bits
 and say so in their note.
@@ -47,7 +55,7 @@ from __future__ import annotations
 import math
 from collections import Counter, defaultdict
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from ftf.contract.models import (
     Dataset,
@@ -59,9 +67,11 @@ from ftf.contract.models import (
     LinkLevel,
     Observed,
     Relation,
+    linkable,
 )
 from ftf.linking.background import BackgroundCounts
 from ftf.linking.hierarchy import ANCHOR_KINDS, ChainRow, Hierarchy, apply_chain_rule
+from ftf.linking.similarity import OPERATOR_FACTOR, ContentViews, view_evidence
 from ftf.linking.types import METHOD, PairScore
 from ftf.linking.weights import HAND_TABLE, IGNORED_VALUES, WeightTable, is_campaign_evidence
 
@@ -123,14 +133,17 @@ class ScoringContext:
     background: BackgroundCounts | None = None  # corpus operator counts for the rarity term
     hierarchy: Hierarchy | None = None  # discovered id levels for the chain rule (None: off)
     kind_level: dict[Key, Level] = field(default_factory=dict)  # (layer, kind) → its usual Indicator.level
+    content: ContentViews | None = None  # calibrated content views (HACK-24); None: off
+    content_inds: dict[str, dict[str, list]] = field(default_factory=dict)  # canonical capture → view kind → indicators
 
     @classmethod
     def from_dataset(
         cls, ds: Dataset, weights: WeightTable = HAND_TABLE, background: BackgroundCounts | None = None,
-        chain_rule: bool = True,
+        chain_rule: bool = True, content: ContentViews | None = None,
     ) -> "ScoringContext":
         """Index `ds` for scoring. `background` switches the rarity term to corpus operator counts;
-        `chain_rule` discovers the id hierarchy of `ds` and applies one term per level."""
+        `chain_rule` discovers the id hierarchy of `ds` and applies one term per level; `content`
+        switches on the calibrated content views (see `with_content`)."""
         canonical: dict[str, str] = {}
         incident_of: dict[str, str] = {}
         for inc in ds.incidents:
@@ -184,7 +197,7 @@ class ScoringContext:
         )
         if chain_rule:
             ctx.hierarchy = ctx.build_hierarchy()
-        return ctx
+        return with_content(ctx, content)
 
     def build_hierarchy(self, anchors=ANCHOR_KINDS) -> Hierarchy:
         caps = {
@@ -216,10 +229,62 @@ class ScoringContext:
             raise KeyError(f"unknown capture {capture_id}") from None
 
 
+CONTENT_MARK = "content view, capped at"  # in the note of every content-view row
+
+
+def is_content_row(row: EvidenceRow) -> bool:
+    """True for a row added by a calibrated content view (HACK-24)."""
+    return row.status is EvidenceStatus.shared and CONTENT_MARK in (row.note or "")
+
+
+def with_content(ctx: ScoringContext, content: ContentViews | None) -> ScoringContext:
+    """`ctx` with the content views switched on (a new context), or `ctx` itself when `content` is
+    None or has no usable view (off)."""
+    if content is None or not content.active():
+        return ctx if ctx.content is None else replace(ctx, content=None, content_inds={})
+    kinds = {view.kind for view, _ in content.active()}
+    inds: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
+    for inc in ctx.ds.incidents:
+        for ind in inc.indicators:
+            if ind.kind in kinds and linkable(ind):
+                inds[ctx.canonical[ind.capture_id]][ind.kind].append(ind)
+    return replace(ctx, content=content, content_inds={c: dict(v) for c, v in inds.items()})
+
+
+def _content_rows(ctx: ScoringContext, ca: str, cb: str, ends: set[str], relation: Relation) -> list[EvidenceRow]:
+    """One capped shared row per calibrated content view the two captures are similar on."""
+    assert ctx.content is not None
+    w = ctx.weights
+    out: list[EvidenceRow] = []
+    by_a, by_b = ctx.content_inds.get(ca, {}), ctx.content_inds.get(cb, {})
+    for view, cal in ctx.content.active():
+        # evidence may only cite indicators of the two linked incidents (contract invariant 5)
+        a = [i for i in by_a.get(view.kind, ()) if ctx.indicator_incident.get(i.id) in ends]
+        b = [i for i in by_b.get(view.kind, ()) if ctx.indicator_incident.get(i.id) in ends]
+        if not a or not b:
+            continue
+        row = view_evidence(view, a, b, ctx.content.store, cal)
+        if row is None or row.status is not EvidenceStatus.shared:
+            continue
+        scale = w.scale(view.kind, row.layer, relation) * (OPERATOR_FACTOR if relation is Relation.operator else 1.0)
+        cap = ctx.content.cap(view.kind, cal)
+        bits = round(min(row.bits, cap) * scale, 3)
+        if bits < w.hub_bits:
+            continue
+        note = f"{row.note}; {CONTENT_MARK} {cap:g} bits"
+        if scale != 1:
+            note += f", ×{scale:g} for {relation.value}"
+        if cap < cal.cap_bits:
+            note += "; a face match alone says only: same celebrity"
+        out.append(row.model_copy(update={"bits": bits, "note": note}))
+    return out
+
+
 @dataclass
 class _Candidate:
     row: EvidenceRow
     bits: float
+    content: bool = False  # a calibrated content view: adds bits, never makes the layer positive
 
 
 def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relation.campaign) -> PairScore:
@@ -355,6 +420,10 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
         other_rows += explained
     for c in shared_cands:
         shared_rows[c.key[0]].append(_Candidate(c.row, c.bits))
+    if ctx.content is not None:
+        # after the identifier rows of each layer, so on equal bits an identifier keeps the slot
+        for row in _content_rows(ctx, ca, cb, ends, relation):
+            shared_rows[row.layer].append(_Candidate(row, row.bits, content=True))
     # a live operator-private id counts for the strict gate only if it still carries bits after the chain rule
     live_private = any(c.live_private and c.bits > 0 for c in shared_cands)
     # the terms of one id chain (tenant ⊃ owner ⊃ aio campaign ⊃ landing) are one positive layer for the D1
@@ -372,10 +441,13 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
         # landing) the best kind per chain level counts, so a shared owner and a shared aio campaign are two
         # terms, while an alias of the campaign id or a page shape next to the landing id is not (`_slot`)
         tops: dict[Level | None, _Candidate] = {}
+        id_tops: dict[Level | None, _Candidate] = {}  # the same without content rows: decides positivity
         # a chain level's term owns its slot: an alias in the same slot (the campaign name next to the campaign
         # id) must not escape the conditioning by outscoring it
         for c in sorted(shared_rows.get(layer, []), key=lambda c: ((layer, c.row.kind) not in chain_kinds, -c.bits)):
             slot = _slot(ctx, slots, layer, c.row.kind)
+            if not c.content:
+                id_tops.setdefault(slot, c)
             top = tops.get(slot)
             if top is None:
                 tops[slot] = c
@@ -392,9 +464,11 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
             for c in confs[1:]:
                 rows.append(c.row.model_copy(update={"bits": 0.0, "note": f"{c.row.note}; counted once per layer"}))
         total += layer_bits
-        if layer_bits > 0:
-            own = [c for c in tops.values() if c.bits > 0 and (layer, c.row.kind) not in chain_kinds]
-            if own or not any(c.bits > 0 for c in tops.values()):
+        # positive layers count identifier evidence only; without content rows id_tops is tops
+        id_bits = sum(c.bits for c in id_tops.values()) + (confs[0].bits if confs else 0.0)
+        if id_bits > 0:
+            own = [c for c in id_tops.values() if c.bits > 0 and (layer, c.row.kind) not in chain_kinds]
+            if own or not any(c.bits > 0 for c in id_tops.values()):
                 layers_positive += 1
             else:
                 chain_positive = True

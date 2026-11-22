@@ -3,6 +3,8 @@
 `ftf score IN.json A B [--relation R]` prints one pair's ledger; `ftf link` writes one partition
 per relation; `ftf index` builds the candidate index of a linked collection; `ftf assign` assigns
 new incidents to it (through the index, no rescan); `ftf sensitivity` flags fragile links (±2 bits).
+`--content-views CALIBRATION.json` (from `ftf calibrate-similarity`) switches on the calibrated
+content views of `score`, `link` and `assign` (HACK-24); without it they are off.
 """
 
 from __future__ import annotations
@@ -22,7 +24,8 @@ from ftf.linking.backend import Backend
 from ftf.linking.grouping import ALL_RELATIONS, link_dataset
 from ftf.linking.index import CandidateIndex
 from ftf.linking.learn_commands import add_weights_argument, context_from_args, load_weights_arg
-from ftf.linking.ledger import ScoringContext, level_of, score_pair, threshold, verdict
+from ftf.linking.ledger import ScoringContext, level_of, score_pair, threshold, verdict, with_content
+from ftf.linking.similarity import DatasetVectorStore, content_views, load_calibrations
 from ftf.linking.sensitivity import annotate_assignment, annotate_dataset, assignment_flips, fragile_links, summary
 from ftf.linking.types import PairScore
 from ftf.linking.weights import HAND_TABLE, warn_unknown_kinds
@@ -43,13 +46,14 @@ def register_score(subparsers: argparse._SubParsersAction) -> None:
         help="relation to score (default: %(default)s)",
     )
     add_weights_argument(parser)
+    add_content_arguments(parser)
     parser.set_defaults(func=run_score)
 
 
 def run_score(args: argparse.Namespace) -> int:
     try:
         ds = Dataset.from_json(args.dataset.read_bytes())
-        ctx = context_from_args(ds, args)
+        ctx = with_content(context_from_args(ds, args), content_from_args(args, args.dataset))
         warn_unknown_kinds(ds, ctx.weights, "score")
         score = score_pair(ctx, args.a, args.b, Relation(args.relation))
     except (OSError, ValidationError, KeyError, ValueError) as exc:
@@ -98,6 +102,7 @@ def register_link(subparsers: argparse._SubParsersAction) -> None:
         help="relation to group under (repeatable; default: all)",
     )
     add_weights_argument(parser)
+    add_content_arguments(parser)
     parser.set_defaults(func=run_link)
 
 
@@ -118,6 +123,9 @@ def register_assign(subparsers: argparse._SubParsersAction) -> None:
     parser.add_argument("--sensitivity", action="store_true", help="note decisions that flip when one layer moves by --delta bits")
     parser.add_argument("--delta", type=float, default=2.0, help="bits for --sensitivity (default: %(default)s)")
     add_weights_argument(parser)
+    add_content_arguments(parser)
+    parser.add_argument("--new-vectors-dir", type=Path, action="append", metavar="DIR",
+                        help="where NEW.json's vector stores live (repeatable; default: the directory of NEW.json)")
     parser.set_defaults(func=run_assign)
 
 
@@ -155,7 +163,15 @@ def run_link(args: argparse.Namespace) -> int:
         return factory
     ds = _load(args.input)
     relations = list(dict.fromkeys(Relation(r) for r in args.relation)) if args.relation else list(ALL_RELATIONS)
+    try:
+        content = content_from_args(args, args.input)
+    except ValueError as exc:
+        print(f"ftf link: {exc}", file=sys.stderr)
+        return 2
     backend = factory(ds) if factory else None
+    if content is not None:
+        ctx = backend.context if backend is not None else ScoringContext.from_dataset(ds)
+        backend = Backend.from_context(with_content(ctx, content))
     warn_unknown_kinds(ds, backend.context.weights if backend else HAND_TABLE, "link")
     out = link_dataset(ds, relations, backend=backend)
     _write(out, args.out)
@@ -189,8 +205,25 @@ def run_assign(args: argparse.Namespace) -> int:
     if args.linear and args.index:
         print("ftf assign: --index and --linear exclude each other", file=sys.stderr)
         return 2
+    try:
+        calibrations = load_calibrations(args.content_views) if args.content_views else None
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        print(f"ftf assign: --content-views: {exc}", file=sys.stderr)
+        return 2
+    store = None
+    if calibrations:
+        if args.sensitivity:
+            print("ftf assign: --sensitivity does not support --content-views yet", file=sys.stderr)
+            return 2
+        new_dirs = args.new_vectors_dir or [args.new.parent]
+        base_dirs = args.vectors_dir or [args.collection.parent]
+        store = DatasetVectorStore(
+            new_dirs[0], {c.id: base_dirs[0] for i in base.incidents for c in i.captures}, extra_dirs=[*base_dirs, *new_dirs]
+        )
+        if content_views(calibrations, store) is None:
+            calibrations = None
     index: Optional[CandidateIndex] = None
-    if not args.linear:
+    if not args.linear and not calibrations:  # content views score every campaign (assign.py)
         try:
             if args.index:
                 index = CandidateIndex.load(args.index, base, weights=table, background=background)
@@ -218,7 +251,7 @@ def run_assign(args: argparse.Namespace) -> int:
             # with the index, it carries the --weights options; without it, the backend factory does
             be = None if index is not None else factory
             try:
-                res = link_incident(current, inc, relation, index=index, backend=be)
+                res = link_incident(current, inc, relation, index=index, backend=be, calibrations=calibrations, vector_store=store)
             except ValueError as exc:
                 print(f"ftf assign: {inc.id}: {exc}", file=sys.stderr)
                 return 2
@@ -317,3 +350,27 @@ def run_sensitivity(args: argparse.Namespace) -> int:
     for rel, s in report["relations"].items():
         print(f"  {rel}: {s['fragile']} of {s['links']} fragile (single layer), {s['worst_case_flips']} flip if every layer moves")
     return 0
+
+
+def add_content_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--content-views", type=Path, metavar="CALIBRATION.json",
+        help="switch on the calibrated content views (text/image similarity) with these calibrations "
+        "from `ftf calibrate-similarity` (default: off)",
+    )
+    parser.add_argument(
+        "--vectors-dir", type=Path, action="append", metavar="DIR",
+        help="where the dataset's vector stores (vectors/...) live (repeatable; default: the dataset's directory)",
+    )
+
+
+def content_from_args(args: argparse.Namespace, dataset_path: Path):
+    """The `ContentViews` switch from `--content-views` / `--vectors-dir`, or None (off). ValueError on a bad file."""
+    if not getattr(args, "content_views", None):
+        return None
+    try:
+        calibrations = load_calibrations(args.content_views)
+    except (OSError, KeyError, TypeError) as exc:
+        raise ValueError(f"--content-views: {exc}") from None
+    dirs = args.vectors_dir or [dataset_path.parent]
+    return content_views(calibrations, DatasetVectorStore(dirs[0], extra_dirs=dirs[1:]))

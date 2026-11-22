@@ -39,6 +39,15 @@ Method (07 §2.4, D1/D2 "Assignment"):
 * Under operator / campaign a tenant or owner conflict between any probe capture and a member
   of the chosen campaign (cannot-link) sends the incident to review instead of assigning it.
 * The collection is not re-clustered.
+* Content views (HACK-24, off by default): with `calibrations`, the ledger adds capped content-view
+  rows (`ledger.with_content`), read from the vector stores under `base_dir` (collection captures)
+  and `incident_dir` (the incident's captures). They raise scores and name similar creatives in
+  the candidate notes, but never make a pair qualify, so they can lift an item to review, never
+  to assign. With them on, every campaign is scored (the linear scan) even when an index is
+  given: the index finds candidates through shared exact values only, and a similar creative
+  shares none. The linear scan is the reference, so indexed and linear stay equal by
+  construction; at our scale (hundreds of campaigns) it is fast enough. A vector top-k hook in the
+  index (`CandidateIndex.nearest`) is the way to drop that cost later.
 """
 
 from __future__ import annotations
@@ -69,7 +78,8 @@ from ftf.contract.models import (
 from ftf.linking.backend import Backend
 from ftf.linking.grouping import CANNOT_LINK_RELATIONS, MIN_LAYERS, SINGLE_VALUED_LAYERS, canonical_map, has_conflict, incident_chain, link_id, qualifies
 from ftf.linking.index import CandidateIndex, cached_index, dataset_digest, modalities_of
-from ftf.linking.ledger import ScoringContext
+from ftf.linking.ledger import ScoringContext, is_content_row, with_content
+from ftf.linking.similarity import Calibration, DatasetVectorStore, VectorStore, content_views
 from ftf.linking.types import METHOD, PairScore
 from ftf.linking.weights import WeightTable
 
@@ -95,10 +105,13 @@ def assign(
     base_dir: Optional[Path] = None,
     incident_dir: Optional[Path] = None,
     index: Optional[CandidateIndex] = None,
+    calibrations: Optional[Mapping[str, Calibration]] = None,
+    vector_store: Optional[VectorStore] = None,
 ) -> Assignment:
     """Assign `incident` to a campaign of `relation` in `collection`, or declare it new, or send it to review."""
     return link_incident(
-        collection, incident, relation, backend=backend, base_dir=base_dir, incident_dir=incident_dir, index=index
+        collection, incident, relation, backend=backend, base_dir=base_dir, incident_dir=incident_dir, index=index,
+        calibrations=calibrations, vector_store=vector_store,
     ).assignment
 
 
@@ -111,13 +124,16 @@ def link_incident(
     incident_dir: Optional[Path] = None,
     index: Optional["CandidateIndex"] = None,
     weights: Optional[WeightTable] = None,
+    calibrations: Optional[Mapping[str, Calibration]] = None,
+    vector_store: Optional[VectorStore] = None,
 ) -> IncidentResult:
     """The assignment plus ledgers from the incident's captures to members of its top candidate campaigns.
 
     `base` is the output of `ftf link` / `link_dataset`. The links are valid inside `base` plus
-    the incident. `base_dir` / `incident_dir` are where the base's and the incident's vector
-    stores live (content views, HACK-24); while they are None, content views are skipped. They
-    are accepted but not used yet.
+    the incident. Content views (HACK-24) are on only with `calibrations`: vector views read the
+    stores under `base_dir` / `incident_dir` (where the base's and the incident's datasets were
+    written), or `vector_store` when given; without either only value views (hashes) count. With
+    content views on, the scan is linear (see the module docstring).
 
     With a `CandidateIndex` of `base` (given, or built earlier for this very object and cached),
     only the campaigns reachable through the incident's informative values are scored and the
@@ -132,6 +148,11 @@ def link_incident(
         index = cached_index(base)
     if index is not None and index._base is not base and (not index.digest or dataset_digest(base) != index.digest):
         raise ValueError("the index belongs to another base dataset; build or load it for this one")
+    content = content_views(dict(calibrations) if calibrations else None, vector_store or _store(base_dir, incident_dir, incident))
+    if content is not None:
+        if index is not None and backend is None:
+            base, backend = index.linear_view()  # what the index stands for, with its options
+        index = None
     if index is not None and backend is None and weights is not None and index.drops_bits_of(weights):
         # `weights` gives bits to a kind the index kept no postings for: candidate search would miss
         # it, so score every campaign of the collection the index stands for, with its options.
@@ -145,6 +166,10 @@ def link_incident(
     be = (backend or Backend.from_dataset)(combined)
     if weights is not None:
         be = _reweighted(be, weights)
+    if content is not None:
+        if not isinstance(be.context, ScoringContext):
+            raise ValueError("content views need the hand-table ledger backend")
+        be = Backend.from_context(with_content(be.context, content))
     setup = _Setup(
         be=be,
         canon=canonical_map(combined),
@@ -153,6 +178,14 @@ def link_incident(
         campaigns=[c for c in base.campaigns if c.relation is relation],
     )
     return _decide(setup, incident, relation)
+
+
+def _store(base_dir: Optional[Path], incident_dir: Optional[Path], incident: Incident) -> Optional[DatasetVectorStore]:
+    """Vectors of the collection under `base_dir`, of the incident's captures under `incident_dir`."""
+    if base_dir is None and incident_dir is None:
+        return None
+    dirs = {c.id: incident_dir for c in incident.captures} if incident_dir is not None else None
+    return DatasetVectorStore(base_dir if base_dir is not None else incident_dir, dirs)
 
 
 @dataclass
@@ -653,6 +686,10 @@ def _candidate_note(ps: PairScore) -> str:
     conflicts = sorted({f"{r.layer.value} {r.kind}" for r in ps.rows if r.status is EvidenceStatus.conflict and r.layer in SINGLE_VALUED_LAYERS})
     if conflicts:
         parts.append("conflict: " + ", ".join(conflicts))
+    similar = [r for r in ps.rows if r.bits > 0 and is_content_row(r)]
+    if similar:
+        # pointers for the reviewer: which content of the campaign member the item resembles
+        parts.append("similar content: " + ", ".join(f"{r.kind} {r.value} +{r.bits:.1f}" for r in similar))
     parts.append(f"best pair {ps.a} ~ {ps.b}")
     return "; ".join(parts)
 

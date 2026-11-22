@@ -173,9 +173,13 @@ class DatasetVectorStore:
     """
 
     def __init__(self, default_dir: Union[str, Path, None] = None,
-                 capture_dirs: Optional[dict[str, Union[str, Path]]] = None):
+                 capture_dirs: Optional[dict[str, Union[str, Path]]] = None,
+                 extra_dirs: Sequence[Union[str, Path]] = ()):
         self.default_dir = Path(default_dir).resolve() if default_dir is not None else None
         self.capture_dirs = {c: Path(d).resolve() for c, d in (capture_dirs or {}).items()}
+        # searched after the capture's own directory: Visual writes text and image vectors to
+        # separate output directories, each with its own `vectors/` folder
+        self.extra_dirs = [Path(d).resolve() for d in extra_dirs]
         self._stores: dict[tuple[Path, str], Optional[tuple[dict[str, int], np.ndarray]]] = {}
 
     @classmethod
@@ -217,20 +221,21 @@ class DatasetVectorStore:
         return self._stores[key]
 
     def get(self, ref: VectorRef, capture_id: Optional[str] = None) -> Optional[np.ndarray]:
-        base = self.dir_for(capture_id)
-        if base is None:
-            return None
-        loaded = self._load(base, ref.store)
-        if loaded is None:
-            return None
-        index, matrix = loaded
-        row = index.get(ref.key)
-        if row is None:
-            return None
-        v = np.asarray(matrix[row], dtype=np.float64)
-        if v.shape != (ref.dim,) or not np.all(np.isfinite(v)):
-            return None
-        return v
+        own = self.dir_for(capture_id)
+        bases = list(dict.fromkeys(([own] if own is not None else []) + self.extra_dirs))
+        for base in bases:
+            loaded = self._load(base, ref.store)
+            if loaded is None:
+                continue
+            index, matrix = loaded
+            row = index.get(ref.key)
+            if row is None:
+                continue
+            v = np.asarray(matrix[row], dtype=np.float64)
+            if v.shape != (ref.dim,) or not np.all(np.isfinite(v)):
+                return None
+            return v
+        return None
 
 
 # --------------------------------------------------------------------------- calibration
@@ -347,6 +352,9 @@ class Calibration:
     z_mean: Optional[float] = None
     z_scale: Optional[float] = None
     quality: dict[str, Any] = field(default_factory=dict)
+    # face views only: True when the null was drawn from other scams showing the same face, so a
+    # match beyond it means more than "same celebrity" (07 §4 E4f); otherwise the ledger caps it low
+    null_same_face: bool = False
 
     # ----------------------------------------------------------------- fitting
 
@@ -480,6 +488,7 @@ class Calibration:
             "knots": self.knots,
             "tail_counts": self.tail_counts,
             "quality": self.quality,
+            "null_same_face": self.null_same_face,
         }
 
     @classmethod
@@ -514,6 +523,7 @@ def save_calibrations(cals: dict[str, Calibration], path: Union[str, Path]) -> N
 
 
 def load_calibrations(path: Union[str, Path]) -> dict[str, Calibration]:
+    """Calibrations keyed by view kind, from `save_calibrations` (or `ftf calibrate-similarity`)."""
     doc = json.loads(Path(path).read_text(encoding="utf-8"))
     if doc.get("format") != CALIBRATION_FORMAT or not isinstance(doc.get("views"), dict):
         raise ValueError(f"{path}: not a calibration file")
@@ -614,3 +624,46 @@ def view_evidence(view: View, ind_a: Union[Indicator, Sequence[Indicator], None]
     return EvidenceRow(layer=layer, kind=view.kind, status=EvidenceStatus.shared,
                        value=f"{view.measure} {m.similarity:.3f}", bits=round(m.bits, 3),
                        indicator_ids=list(m.indicator_ids), note=note)
+
+
+# --------------------------------------------------------------------------- ledger switch
+
+FACE_KIND = "face_embedding"
+FACE_CAP_BITS = 1.0  # a face match says "same celebrity": scams of many operators share one face
+OPERATOR_FACTOR = 0.5  # a similar creative says less about the operator than about the campaign
+
+
+@dataclass
+class ContentViews:
+    """The content-view switch of the ledger: fitted calibrations plus where the vectors live.
+
+    Only views with a calibration count; vector views also need a store. With no usable view the
+    switch is off (`active()` empty) and the ledger scores exactly as without it.
+    """
+
+    calibrations: dict[str, Calibration]
+    store: Optional[VectorStore] = None
+
+    def active(self) -> list[tuple[View, Calibration]]:
+        out = []
+        for kind in sorted(self.calibrations):
+            view = VIEWS.get(kind)
+            if view is None or (view.representation == "vector" and self.store is None):
+                continue
+            out.append((view, self.calibrations[kind]))
+        return out
+
+    def cap(self, kind: str, calibration: Calibration) -> float:
+        """Most bits the view may add: the calibration's cap, and `FACE_CAP_BITS` for a face view
+        whose null did not include other scams with the same face."""
+        if kind == FACE_KIND and not calibration.null_same_face:
+            return min(calibration.cap_bits, FACE_CAP_BITS)
+        return calibration.cap_bits
+
+
+def content_views(calibrations: Optional[dict[str, Calibration]], store: Optional[VectorStore]) -> Optional[ContentViews]:
+    """A `ContentViews` switch, or None (off) when there is no calibration or no usable view."""
+    if not calibrations:
+        return None
+    cv = ContentViews(dict(calibrations), store)
+    return cv if cv.active() else None
