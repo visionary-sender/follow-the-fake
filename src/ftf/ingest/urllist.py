@@ -22,7 +22,7 @@ def url_line(raw: bytes) -> str | None:
         line = text.decode("utf-8")
     except UnicodeDecodeError:
         return None
-    if not line.startswith(_SCHEMES) or any(ch.isspace() for ch in line):
+    if not line.lower().startswith(_SCHEMES) or any(ch.isspace() for ch in line):
         return None
     return line
 

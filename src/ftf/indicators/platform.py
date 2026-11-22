@@ -226,8 +226,9 @@ def _from_url(sink: _Sink, artefact: Artefact, root: Path) -> None:
     if _BINARY_EXT.search(artefact.path or ""):
         return
     data = _pages.url_text(root, artefact)
-    if data is not None:
-        sink.page(data.decode("utf-8", "replace"), artefact, "file", html=False)
+    if data is None or len(data) > MAX_TEXT_BYTES or b"\x00" in data[:4096]:
+        return
+    sink.page(data.decode("utf-8", "replace"), artefact, "file", html=False)
 
 
 def extract(incident: Incident, capture: Capture, root: Path) -> Iterable[Indicator]:

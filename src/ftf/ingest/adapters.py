@@ -251,6 +251,8 @@ def is_url_list(path: Path) -> bool:
     """A ``.txt`` file whose non-empty lines are at least half http(s) URLs, with at least one."""
     if path.suffix.lower() != ".txt" or path.is_symlink() or not path.is_file():
         return False
+    if path.stat().st_size > URL_LIST_MAX_BYTES:
+        return False  # too large to read as a list: kept as one text artefact, as before
     with path.open("rb") as fh:
         head = fh.read(URL_LIST_MAX_BYTES)
     lines = [line for line in head.split(b"\n") if line.strip()]
@@ -287,7 +289,7 @@ def _top_url_lists(folder: Path) -> list[RawIncident]:
     """The organiser root's top-level ``scam_links*.txt`` files, read as URL lists."""
     out: list[RawIncident] = []
     for p in _listdir(folder):
-        if p.is_file() and fnmatch.fnmatch(p.name.lower(), URL_LIST_GLOB):
+        if p.is_file() and fnmatch.fnmatch(p.name.lower(), URL_LIST_GLOB) and is_url_list(p):
             out.extend(url_list(p))
     return out
 

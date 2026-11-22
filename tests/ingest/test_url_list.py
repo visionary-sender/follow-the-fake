@@ -6,6 +6,7 @@ registrable domain in the Public Suffix List, so it cannot exercise landing_doma
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 from ftf.contract import Artefact, ArtefactType, Observed, Stage
@@ -14,7 +15,7 @@ from ftf.ingest import adapters, ids, load_inputs, run, urllist
 
 from .conftest import write
 
-HEADER = "Lista linków (przykład)"
+HEADER = "Link list (example)"
 URL_A = "https://alpha.example.com/offer?gclid=Cj0KCQ-test-alpha&utm_campaign=spring&utm_source=google"
 URL_B = "https://beta.example.net/p/one?ad_id=120200000000000001&utm_medium=cpc"
 URL_C = "https://gamma.example.org/?gclid=Cj0KCQ-test-gamma&utm_term=wallet"
@@ -31,7 +32,7 @@ def list_file(folder: Path, name: str = "scam_links_example.txt") -> Path:
 
 def test_detection_by_content_and_suffix(tmp_path):
     assert adapters.is_url_list(list_file(tmp_path))
-    notes = write(tmp_path / "notes.txt", "Notatki z sprawy\nnic tu nie ma\nhttps://alpha.example.com/\n")
+    notes = write(tmp_path / "notes.txt", "Case notes\nnothing to see here\nhttps://alpha.example.com/\n")
     assert not adapters.is_url_list(notes)  # one URL line of three: not mostly URLs
     page = write(tmp_path / "page.html", "<a href='https://alpha.example.com/'>x</a>\nhttps://beta.example.net/\n")
     assert not adapters.is_url_list(page)  # URLs in a page are not a list
@@ -76,7 +77,7 @@ def test_organiser_root_picks_up_top_level_scam_links(tmp_path):
     write(raw / "BACKUP" / "p1" / "page.html", "<html></html>")
     (raw / "do_udostepnienia").mkdir()
     list_file(raw, name="scam_links_odszyfrowane.txt")
-    write(raw / "notes.txt", "to nie jest lista, nie jest w scam_links")
+    write(raw / "notes.txt", "Case notes, not a list")
     ds = load_inputs([raw], root=raw)
     url_incidents = [i for i in ds.incidents if i.source == "url_list"]
     assert len(url_incidents) == 3
@@ -132,5 +133,21 @@ def test_url_artefact_reads_only_its_line(tmp_path):
 def test_plain_url_file_is_still_read_whole(tmp_path):
     text = "https://trk.example.net/click?x=1\nhttps://cloak.example.org/p\n"
     write(tmp_path / "x" / "url.txt", text)
-    art = Artefact(id="x:url", type=ArtefactType.url, path="x/url.txt", sha256="0" * 64)
+    digest = hashlib.sha256(text.encode()).hexdigest()  # a plain file carries the digest of its whole content
+    art = Artefact(id="x:url", type=ArtefactType.url, path="x/url.txt", sha256=digest)
     assert _pages.url_text(tmp_path, art) == text.encode()
+
+
+def test_list_member_whose_line_is_gone_reads_nothing(tmp_path):
+    raw = tmp_path / "raw"
+    result = run([list_file(raw)], root=raw)
+    alpha = next(i for i in result.dataset.incidents if i.id == ids.input_incident_id(URL_A))
+    (art,) = alpha.captures[0].artefacts
+    # the organiser re-saves the list without URL_A: no neighbour's URL may stand in for it
+    list_file_text = "\n".join([HEADER, URL_B, URL_C])
+    write(raw / "scam_links_example.txt", list_file_text)
+    assert _pages.url_text(raw, art) is None
+
+
+def test_scheme_is_case_insensitive_and_url_kept_as_written():
+    assert urllist.url_line(b"HTTPS://Alpha.Example.com/X?y=1") == "HTTPS://Alpha.Example.com/X?y=1"
