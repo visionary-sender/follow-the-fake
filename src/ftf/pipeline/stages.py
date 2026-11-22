@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import hashlib
 import importlib
-import json
 import os
 import re
 import shutil
@@ -49,6 +48,9 @@ from ftf.contract import (
     Observed,
     Stage,
 )
+from ftf.enrich.normalise import registrable_domain
+from ftf.indicators import _pages
+from ftf.indicators.domains import registered_domains
 from ftf.ingest import ids
 from ftf.pipeline.analyze import AnalysisInput, SimilarItem
 
@@ -320,33 +322,25 @@ def refang(text: str) -> str:
     return text.replace("[.]", ".").replace("[:]", ":")
 
 
-MAX_HAR_BYTES = 100 * 1024 * 1024
-
-
-def _har_page_urls(path: Path) -> list[str]:
-    """http(s) page URLs a HAR names (`ftf.enrich.scope.page_urls`); the HAR is parsed as JSON data only."""
-    from ftf.enrich.scope import page_urls
-
-    try:
-        if path.stat().st_size > MAX_HAR_BYTES:
-            return []
-        har = json.loads(path.read_bytes().decode("utf-8", "replace"))
-    except (OSError, ValueError):
-        return []
-    return [u for u in page_urls(har) if u.lower().startswith(("http://", "https://"))]
-
-
 def _domains(ctx: RunContext) -> list[tuple[str, str]]:
-    """(capture id, URL or domain) pairs to enrich: a URL input, else the page URLs of the incident's HARs."""
+    """(capture id, URL) pairs to enrich: a URL input, else the scam's own pages.
+
+    Own pages are `ftf.indicators._pages.page_chain` URLs whose registered domain is one of
+    `registered_domains(dataset)`: landing, redirect hops and ad landings, without the shared
+    CDNs, trackers and platform shims (`include_shared=False`).
+    """
     if not ctx.incident.captures:
         return []
     if ctx.inp.kind == "url":
         return [(ctx.incident.captures[0].id, refang(ctx.inp.text))]
+    if ctx.input_root is None:
+        return []
+    own = set(registered_domains(Dataset(name="analyze", incidents=[ctx.incident])))
     out: list[tuple[str, str]] = []
     for cap in ctx.incident.captures:
-        for art in cap.artefacts:
-            if art.type is ArtefactType.har and art.path and ctx.input_root is not None:
-                out += [(cap.id, u) for u in _har_page_urls(ctx.input_root / art.path)]
+        for page in _pages.page_chain(cap, ctx.input_root):
+            if registrable_domain(page.url) in own:
+                out.append((cap.id, page.url))
     return list(dict.fromkeys(out))
 
 
