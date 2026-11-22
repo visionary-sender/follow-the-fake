@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Sandbox VM for live fetching of untrusted URLs. The only place the VM's flags are defined.
 #
-#   scripts/sandbox.sh create              create ftf-sandbox if missing (idempotent), then setup
+#   scripts/sandbox.sh create              create sandbox VM if missing (idempotent), then setup
 #   scripts/sandbox.sh setup               provision users, dirs and the transfer command (idempotent)
 #   scripts/sandbox.sh sync                copy this worktree's code to /opt/ftf, (re)build venv + Chromium
 #   scripts/sandbox.sh start|stop|status   power the VM on/off, show state and safety flags
 #   scripts/sandbox.sh ssh                 interactive shell (IAP)
 #   scripts/sandbox.sh run -- <cmd...>     run a venv command as the unprivileged user ftf in /srv/ftf
-#   scripts/sandbox.sh authorize-workbench let ftf-workbench move files to/from the sandbox (see below)
+#   scripts/sandbox.sh authorize-workbench let workbench VM move files to/from the sandbox (see below)
 #   scripts/sandbox.sh push-list <wb-path> <name>  copy a URL list workbench -> /srv/ftf/inbox/<name>
 #   scripts/sandbox.sh pull [<run>]        copy /srv/ftf/captures[/<run>] sandbox -> workbench
 #                                          /data/derived/fetcher/, then rsync it to the bucket
@@ -18,18 +18,15 @@
 # The fetcher runs as user `ftf`, never root. Captured content never touches the laptop: it moves
 # sandbox -> workbench directly over the VPC's internal network, using a key that lives only on
 # the workbench and is restricted on the sandbox to a fixed command (/usr/local/bin/ftf-transfer).
-# The laptop only orchestrates (gcloud, ssh commands); it never stores or opens captures.
+# The laptop only drives gcloud and ssh commands; it never stores or opens captures.
 #
-# Cost (europe-central2, on-demand): e2-medium ~0.17 PLN/h while running; 20 GB pd-balanced
-# ~0.3 PLN/day. Other issues may install their own software under /opt/<issue> on the same VM.
 set -euo pipefail
 
-VM=ftf-sandbox
+VM=${FTF_SANDBOX_VM:-sandbox}
 ZONE=europe-central2-a
-PROJECT=follow-the-fake
-WORKBENCH=${FTF_VM:-ftf-workbench}
-export CLOUDSDK_ACTIVE_CONFIG_NAME=${CLOUDSDK_ACTIVE_CONFIG_NAME:-follow-the-fake}
-BUCKET_DEST=gs://follow-the-fake-data/outputs/fetcher/
+PROJECT=${FTF_GCP_PROJECT:?set FTF_GCP_PROJECT}
+WORKBENCH=${FTF_VM:-workbench}
+BUCKET_DEST=gs://${FTF_BUCKET:-FTF_BUCKET-not-set}/outputs/fetcher/
 WB_DEST=/data/derived/fetcher
 
 create_vm() {
@@ -39,8 +36,8 @@ create_vm() {
     --boot-disk-size 20GB --boot-disk-type pd-balanced \
     --provisioning-model STANDARD \
     --no-service-account --no-scopes \
-    --labels ftf-issue=hack-17,purpose=sandbox \
-    --tags ftf-sandbox \
+    --labels ftf-fleet=sandbox,purpose=sandbox \
+    --tags "$VM" \
     --max-run-duration 8h --instance-termination-action STOP \
     --shielded-secure-boot --shielded-vtpm --shielded-integrity-monitoring
 }
@@ -175,7 +172,7 @@ case "$mode" in
     require_running
     hostkey=$(ssh_to "$VM" 'cat /etc/ssh/ssh_host_ed25519_key.pub' | awk '{print $1" "$2}')
     ip=$(internal_ip)
-    pub=$(ssh_to "$WORKBENCH" "set -e; mkdir -p ~/.ssh; chmod 700 ~/.ssh; [ -f ~/.ssh/ftf_sandbox ] || ssh-keygen -q -t ed25519 -N '' -C ftf-workbench-to-sandbox -f ~/.ssh/ftf_sandbox; echo '$ip $hostkey' > ~/.ssh/ftf_sandbox_known_hosts; cat ~/.ssh/ftf_sandbox.pub")
+    pub=$(ssh_to "$WORKBENCH" "set -e; mkdir -p ~/.ssh; chmod 700 ~/.ssh; [ -f ~/.ssh/ftf_sandbox ] || ssh-keygen -q -t ed25519 -N '' -C workbench-to-sandbox -f ~/.ssh/ftf_sandbox; echo '$ip $hostkey' > ~/.ssh/ftf_sandbox_known_hosts; cat ~/.ssh/ftf_sandbox.pub")
     line="restrict,command=\"/usr/local/bin/ftf-transfer\" $pub"
     ssh_to "$VM" "echo $(printf '%q' "$line") | sudo tee /home/ftfxfer/.ssh/authorized_keys >/dev/null && sudo chown ftfxfer:ftfxfer /home/ftfxfer/.ssh/authorized_keys && sudo chmod 600 /home/ftfxfer/.ssh/authorized_keys"
     echo "sandbox.sh: $WORKBENCH can now run ftf-transfer on $VM ($ip)" >&2

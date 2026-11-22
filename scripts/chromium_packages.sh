@@ -1,6 +1,6 @@
 #!/bin/sh
 # Lists the Debian packages that the image's Chromium step adds (`playwright install --with-deps`),
-# with the licence their copyright file records (HACK-68). Run on the VM, after building the image:
+# with the licence their copyright file records. Run on the VM, after building the image:
 #   scripts/vm.sh run -- sh scripts/chromium_packages.sh ftf:dev > chromium-rows.tsv
 # Output: `package<TAB>licence` rows. Compare with the committed list:
 #   scripts/vm.sh run -- python3 -I scripts/licences.py --audit-image chromium-rows.tsv

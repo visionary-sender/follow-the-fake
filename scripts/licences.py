@@ -12,13 +12,13 @@ project venv (on the VM: `scripts/vm.sh licences`).
                                           # FILE: `package<TAB>licence` rows of the system packages
                                           # the image's Chromium step added (see docs/licences.md)
 
-Policy (owner, 2026-11-21): the permissive allowlist applies to production dependencies, i.e.
-what ships in the jury's container. Named exceptions: certifi (unmodified MPL-2.0 CA bundle) and
+Policy: the permissive allowlist applies to production dependencies, i.e.
+what ships in the target container. Named exceptions: certifi (unmodified MPL-2.0 CA bundle) and
 the optional `fetch` extra, Playwright plus its browser binaries (Chromium, with its bundled
 unmodified LGPL-2.1 FFmpeg, and the Node.js driver). LGPL, GPL and MPL stay denied for everything
 else. The Python packages of the `fetch` extra are listed from metadata like any other; the browser
 binaries it downloads (`playwright install`) carry no metadata, so `FETCH_BINARIES` lists them.
-HACK-68 (owner, 2026-11-22): the Debian system libraries Chromium needs are a named exception too,
+the Debian system libraries Chromium needs are a named exception too,
 see `CHROMIUM_TSV`.
 """
 
@@ -44,38 +44,38 @@ PUBLIC_DOMAIN_WORDS = {"CC0"}
 DENIED_PREFIXES = ("GPL", "LGPL", "AGPL", "MPL", "EUPL", "SSPL", "CDDL", "EPL", "CC", "GNU")
 DENIED_WORDS = {"MOZILLA", "PROPRIETARY", "COMMERCIAL", "UNLICENSED"}
 
-# Named exceptions to the allowlist, one package at a time. Owner decision (HACK-19, 2026-11-21):
+# Named exceptions to the allowlist, one package at a time.
 # certifi is the Mozilla CA bundle, MPL-2.0, used unmodified. MPL-2.0 is file-level copyleft and
 # puts no obligation on our code. Other MPL packages stay denied. Add a package only if it is an
-# unmodified MPL-2.0 data or CA bundle, and record the decision in the PR that adds it.
+# unmodified MPL-2.0 data or CA bundle, and note the exception in the change that adds it.
 # Keys are canonical package names; a value must match the metadata licence exactly.
 EXCEPTIONS = {
     "certifi": {
         "licence": "Mozilla Public License 2.0 (MPL 2.0)",
         "shown_as": "MPL-2.0 (named exception, unmodified CA bundle; see README Licence section)",
     },
-    # HACK-80 (owner decision, 2026-11-22): tqdm, pulled in by transformers and huggingface_hub, used
-    # unmodified; pending owner review (HACK-74). Only this exact licence string is accepted.
+    # tqdm, pulled in by transformers and huggingface_hub, used
+    # unmodified; under review. Only this exact licence string is accepted.
     "tqdm": {
         "licence": "MPL-2.0 AND MIT",
-        "shown_as": "MPL-2.0 AND MIT (named exception, unmodified, pending owner review, HACK-74)",
+        "shown_as": "MPL-2.0 AND MIT (named exception, unmodified)",
     },
-    # HACK-80 (owner decision, 2026-11-22): BSL-1.0 is one part of torch's bundled code, and
+    # BSL-1.0 is one part of torch's bundled code, and
     # CNRI-Python is the regex package's own licence. Each is accepted only as torch's or regex's
     # exact licence string, so no other package can use either licence ID.
     "torch": {
         "licence": ("Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause "
                     "AND BSL-1.0 AND ISC AND MIT AND Zlib"),
         "shown_as": "Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause "
-                    "AND BSL-1.0 AND ISC AND MIT AND Zlib (named exception: BSL-1.0 part of bundled code, HACK-80)",
+                    "AND BSL-1.0 AND ISC AND MIT AND Zlib (named exception: BSL-1.0 part of bundled code)",
     },
     "regex": {
         "licence": "Apache-2.0 AND CNRI-Python",
-        "shown_as": "Apache-2.0 AND CNRI-Python (named exception: CNRI-Python, HACK-80)",
+        "shown_as": "Apache-2.0 AND CNRI-Python (named exception: CNRI-Python)",
     },
 }
 
-# HACK-68 named exception (owner decision, 2026-11-22): the Debian system libraries that Chromium
+# Named exception: the Debian system libraries that Chromium
 # needs, installed in the image by `playwright install --with-deps` (Dockerfile). They are used
 # unmodified, and some are LGPL, MPL or GPL in part. Only the packages in CHROMIUM_TSV are accepted,
 # each with exactly the licence its copyright file records. Everything else still needs a
@@ -158,7 +158,7 @@ def shown_licence(name: str, licence: str) -> str:
     return licence
 
 
-# HACK-80 named exception (owner decision, pending HACK-74): Debian's ffmpeg, installed by the
+# Named exception: Debian's ffmpeg, installed by the
 # Dockerfile's features slot (FTF_WITH_FFMPEG). Used unmodified and run as a separate program. Its
 # copyright file lists GPL parts, so only this exact licence string is accepted, and no other package.
 SYSTEM_EXCEPTIONS = {
@@ -167,13 +167,13 @@ SYSTEM_EXCEPTIONS = {
                     "LGPL-2+; LGPL-2.1+; LGPL-2.1+ and BSD-2-clause; LGPL-2.1+ and BSD-3-clause; "
                     "LGPL-2.1+ and BSL; LGPL-2.1+ and Expat; LGPL-2.1+ and Sundry; Sundry; Zlib; "
                     "man-page; public-domain"),
-        "shown_as": "ffmpeg (named exception: unmodified, run as a separate program, pending owner decision (HACK-74))",
+        "shown_as": "ffmpeg (named exception: unmodified, run as a separate program, under review)",
     },
 }
 
 
 def is_allowed_system(name: str, licence: str, chromium: dict[str, str]) -> bool:
-    """Permissive licence, the HACK-68 exception (listed in CHROMIUM_TSV with the same licence), or the
+    """Permissive licence, the exception (listed in CHROMIUM_TSV with the same licence), or the
     named exception in SYSTEM_EXCEPTIONS (exact licence string)."""
     exception = SYSTEM_EXCEPTIONS.get(name)
     if exception is not None and licence == exception["licence"]:
@@ -182,9 +182,9 @@ def is_allowed_system(name: str, licence: str, chromium: dict[str, str]) -> bool
 
 
 def audit_image(rows: dict[str, str], chromium: dict[str, str]) -> list[str]:
-    """Compare the system packages of a built image with the HACK-68 list. Returns the errors."""
+    """Compare the system packages of a built image with the list. Returns the errors."""
     errors = [
-        f"not permissive and not the HACK-68 exception: {name} ({licence})"
+        f"not permissive and not the exception: {name} ({licence})"
         for name, licence in sorted(rows.items())
         if not is_allowed_system(name, licence, chromium)
     ]
@@ -195,7 +195,7 @@ def audit_image(rows: dict[str, str], chromium: dict[str, str]) -> list[str]:
 
 def features_installed() -> bool:
     """True when every requirement of the `features` extra is installed. The default VM venv has none,
-    so `scripts/vm.sh licences` installs the extra (HACK-80) and the licence test skips without it."""
+    so `scripts/vm.sh licences` installs the extra and the licence test skips without it."""
     for raw in metadata.requires("ftf") or []:
         req = Requirement(raw)
         in_features = req.marker is not None and req.marker.evaluate({"extra": "features"}) \
@@ -250,7 +250,7 @@ def render() -> str:
         f"## Browser binaries of the `fetch` extra (`{FETCH_PIN}`)",
         "",
         "Downloaded into the container image by `playwright install` for `ftf fetch` (live page capture).",
-        "Named exception, owner decision 2026-11-21: Playwright and its browser binaries are allowed,",
+        "Named exception, Playwright and its browser binaries are allowed,",
         "including Chromium's bundled unmodified LGPL-2.1 FFmpeg.",
         "",
         "| Component | Licence |",
@@ -260,10 +260,10 @@ def render() -> str:
     chromium = load_chromium_packages()
     lines += [
         "",
-        "## Debian system libraries of Chromium (HACK-68 named exception)",
+        "## Debian system libraries of Chromium",
         "",
         "Installed in the image by `playwright install --with-deps` (Dockerfile), unmodified, as",
-        "Debian packages. Some are LGPL, MPL or GPL in part; owner decision 2026-11-22 accepts them",
+        "Debian packages. Some are LGPL, MPL or GPL in part; they are accepted",
         "as the only exception to the permissive allowlist. Licence per the package's copyright file.",
         "",
         "| Package | Licence |",

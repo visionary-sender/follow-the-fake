@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Time `ftf features` (all families) per input on the current checkout (HACK-89).
+"""Time `ftf features` (all families) per input on the current checkout.
 
 Ranks the incidents of a dataset by how many OCR-able images they hold (ad screenshots and
 screenshots of non-duplicate captures), writes the top --k as one-incident datasets under --out,
