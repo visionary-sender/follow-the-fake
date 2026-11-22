@@ -66,10 +66,12 @@ RUN if [ "$FTF_WITH_MODELS" != 0 ]; then \
 COPY docker/build-context/faces-reference/ /opt/ftf-models/face-reference/
 RUN chmod -R a+rX /opt/ftf-models
 # Offline at run time: the weights are read from $FTF_MODEL_DIR and the reference set from
-# $FTF_FACES_REFERENCE; nothing is fetched from the hub. Global FTF_OFFLINE is not set (it would also
+# $FTF_FACE_REFERENCE; nothing is fetched from the hub. Global FTF_OFFLINE is not set (it would also
 # switch off the jury's live enrichment); the model loaders honour it on their own paths.
+# Visual's HACK-83 makes FTF_FACE_REFERENCE the name; the plural stays as an alias.
 ENV HF_HUB_OFFLINE=1 \
     TRANSFORMERS_OFFLINE=1 \
+    FTF_FACE_REFERENCE=/opt/ftf-models/face-reference \
     FTF_FACES_REFERENCE=/opt/ftf-models/face-reference
 
 COPY docker/entrypoint.sh /usr/local/bin/ftf-entrypoint
