@@ -54,7 +54,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "--from-raw",
         type=Path,
         metavar="DIR",
-        help="ingest this folder (organiser data, saved pages, HARs; runs every extractor, so slower) and take its registered domains, as --from-dataset does",
+        help="ingest this folder (organiser data, saved pages, HARs; runs every extractor, so slower), skip unreadable inputs with a warning, and take its registered domains as --from-dataset does",
     )
     parser.add_argument("--cache", type=Path, default=DEFAULT_CACHE, help="cache file (default: %(default)s)")
     parser.add_argument("--offline", action="store_true", help="never use the network; serve the cache (also FTF_OFFLINE=1)")
@@ -76,6 +76,25 @@ def _dataset_domains(dataset: Dataset, source: str) -> tuple[list[str], dict[str
     return domains, info
 
 
+def _ingest_raw(root: Path) -> tuple[Dataset, list[str]]:
+    """Ingest a folder as one input. If ingest rejects it, ingest each entry alone and skip the
+    unreadable ones with a warning, as the old folder walk did. Returns the dataset and the names
+    of the skipped entries."""
+    try:
+        return ingest_run([root], root=root).dataset, []
+    except (ValueError, OSError) as exc:
+        print(f"ftf enrich-domain: WARNING: ingest of {root} as one input failed ({exc}); reading its entries one by one", file=sys.stderr)
+    incidents = []
+    skipped: list[str] = []
+    for entry in sorted(root.iterdir()):
+        try:
+            incidents.extend(ingest_run([entry], root=root).dataset.incidents)
+        except (ValueError, OSError) as exc:
+            skipped.append(entry.name)
+            print(f"ftf enrich-domain: WARNING: skipped unreadable input {entry.name}: {exc}", file=sys.stderr)
+    return Dataset(name=f"raw {root.name}", incidents=incidents), skipped
+
+
 def _collect(args: argparse.Namespace) -> tuple[list[str], list[dict[str, Any]]]:
     raw: list[str] = list(args.domains)
     scopes: list[dict[str, Any]] = []
@@ -94,8 +113,9 @@ def _collect(args: argparse.Namespace) -> tuple[list[str], list[dict[str, Any]]]
     if args.from_raw:
         if not args.from_raw.is_dir():
             raise ValueError(f"--from-raw is not a directory: {args.from_raw}")
-        dataset = ingest_run([args.from_raw], root=args.from_raw, indicators=True).dataset
+        dataset, skipped = _ingest_raw(args.from_raw)
         domains, info = _dataset_domains(dataset, f"raw {args.from_raw}")
+        info["skipped_inputs"] = skipped
         raw.extend(domains)
         scopes.append(info)
     return list(dict.fromkeys(raw)), scopes  # keep first occurrence order, drop repeats

@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -134,3 +135,34 @@ def test_shared_ad_display_domain_is_not_counted_as_dropped(tmp_path):
                         provenance=Provenance(artefact_id=None, locator="test"), extractor="domains@test")
     ds = Dataset(name="test", incidents=[Incident(id="case", source="synthetic", captures=[cap], indicators=[ad_only])])
     assert domain_indicators.shared_dropped(ds) == {}  # a brand shown in an ad is never an enrichment candidate
+
+
+def test_from_raw_skips_an_unreadable_input_with_a_warning(tmp_path, capsys, monkeypatch):
+    from ftf.enrich import commands
+
+    real_ingest = commands.ingest_run
+
+    def ingest_with_one_unreadable_entry(inputs, **kwargs):
+        # Ingest refuses the folder as one input, and refuses the entry named "bad".
+        if any(Path(i).name in ("raw", "bad") for i in inputs):
+            raise ValueError(f"cannot read {Path(inputs[0]).name}")
+        return real_ingest(inputs, **kwargs)
+
+    monkeypatch.setattr(commands, "ingest_run", ingest_with_one_unreadable_entry)
+    raw = tmp_path / "raw"
+    case = raw / "case1"
+    case.mkdir(parents=True)
+    (raw / "bad").mkdir()
+    page = "https://scam-target.top/a"
+    har = {"log": {"pages": [{"id": "p0", "title": page}], "entries": [
+        {"pageref": "p0", "_resourceType": "document", "request": {"method": "GET", "url": page},
+         "response": {"status": 200, "headers": [], "content": {"mimeType": "text/html", "text": "<html></html>"}}}]}}
+    (case / "page.har").write_text(json.dumps(har), encoding="utf-8")
+    summary = tmp_path / "s.json"
+    code = main(["enrich-domain", "--from-raw", str(raw), "--offline", "--cache", str(tmp_path / "c.json"),
+                 "--tld-cache", str(tmp_path), "--summary", str(summary)])
+    assert code == 0
+    assert "skipped unreadable input bad" in capsys.readouterr().err
+    report = json.loads(summary.read_text(encoding="utf-8"))
+    assert report["scopes"][0]["skipped_inputs"] == ["bad"]
+    assert [d["domain"] for d in report["domain_details"]] == ["scam-target.top"]
