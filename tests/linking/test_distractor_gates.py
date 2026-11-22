@@ -70,6 +70,7 @@ BRAND_LIST = frozenset({digest(L.tracking_account, "google_analytics_id", "outle
 def base(monkeypatch) -> Dataset:
     monkeypatch.setattr(bg, "default_brand", lambda: BRAND_LIST)
     monkeypatch.setattr("ftf.linking.ledger.default_brand", lambda: BRAND_LIST)
+    monkeypatch.setattr("ftf.linking.index.default_brand", lambda: BRAND_LIST)
     return link_dataset(Dataset(name="gates", incidents=[campaign_member(1), campaign_member(2)] + fillers()))
 
 
@@ -138,10 +139,20 @@ def test_indexed_and_linear_paths_agree(base):
         assert sorted((l.id, l.relation) for l in a.links) == sorted((l.id, l.relation) for l in b.links)
 
 
+def test_cached_index_dropped_when_stoplist_changes(base, monkeypatch):
+    from ftf.linking.index import CandidateIndex, cached_index
+
+    CandidateIndex.build(base)  # cached for this very object
+    assert cached_index(base) is not None
+    monkeypatch.setattr("ftf.linking.index.default_brand", lambda: frozenset())
+    assert cached_index(base) is None
+
+
 def test_stoplist_loading(tmp_path, monkeypatch, capsys):
     path = tmp_path / "brand-stoplist.json"
     path.write_text(json.dumps(bg.brand_stoplist_doc({"d1", "d2"}, 2)))
-    bg._load.cache_clear()
+    monkeypatch.setattr(bg, "_LOADED", {})
+    monkeypatch.setattr(bg, "_WARNED", set())
     monkeypatch.setenv(bg.BRAND_STOPLIST_ENV, str(path))
     assert bg.default_brand() == frozenset({"d1", "d2"})
     monkeypatch.setenv(bg.BRAND_STOPLIST_ENV, "off")
@@ -151,7 +162,6 @@ def test_stoplist_loading(tmp_path, monkeypatch, capsys):
     assert "brand stop-list not loaded" in capsys.readouterr().err
     monkeypatch.delenv(bg.BRAND_STOPLIST_ENV)
     assert bg.stoplist_path() == bg.DEFAULT_BRAND_STOPLIST
-    bg._load.cache_clear()
 
 
 def test_brand_stoplist_command(tmp_path):

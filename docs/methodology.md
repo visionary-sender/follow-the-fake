@@ -108,8 +108,17 @@ subtracts the rarity term:
   ledger as `hub_subsumed` with 0 bits, because a value that common says nothing about one campaign.
 - With a background corpus (`ftf link --background`), the rarity term takes corpus counts for the
   values the corpus knows: `log2[(c + α)/(1 + α)]`, where `c` is the larger of the corpus operator count
-  and the sample's pre-groups (`ftf.linking.background`). A brand asset from the stop-list is removed.
+  and the sample's pre-groups (`ftf.linking.background`).
   Without a corpus, the pre-group count above is used. The default run has no corpus.
+- **Brand stop-list (on by default, HACK-66).** A scam clone loads the impersonated outlet's logo,
+  fonts, favicon, CDN and analytics. Those values are the outlet's skin, not the scammer's. `ftf
+  brand-stoplist` hashes every value seen on the real outlet pages of the background corpus (tagged
+  `must_not_link`). The default scoring path reads that file from `$FTF_BRAND_STOPLIST`, or from
+  `/data/derived/linking/brand-stoplist/brand-stoplist.json` when the variable is not set. A
+  stop-listed value is `hub_subsumed` with 0 bits under every relation except ecosystem. The
+  `brand_asset` kind counts under ecosystem only, with or without the list. Without the file (for
+  example in the jury container), the engine prints a warning and scores as if no stop-list existed.
+  The file holds digests only.
 - A value carried by more than 500 captures never proposes a candidate pair (`HUB_POSTINGS`).
 - The priors above are the **hand table**. `ftf link --weights FILE` replaces them with a learned table
   (HACK-23, `ftf.linking.learned`), which keeps the same fields. The default run uses the hand table.
@@ -154,7 +163,15 @@ platforms.
    **−4 bits** (`conflict_bits`) once for that layer, and the pair is a **cannot-link**: the verdict
    can never be `link`. A platform conflict costs bits only, since one operator can run several
    platforms. A conflict on the template or the ecosystem relation is not counted.
-4. **Missing is 0 bits, never negative.** If one capture has a layer and the other does not (for
+4. **Platform and creative gate (HACK-66).** Under the campaign, operator and tracking-account
+   relations, a pair needs at least one positive row outside the platform and creative layers whose
+   value sits below platform level. The level is the value's place in the discovered hierarchy, or
+   else its kind's usual `Indicator.level`. Platform constants and platform-level values in other
+   layers (third-party hosts, page and form shapes) are shared by every tenant. A creative on its own
+   (an ad, a celebrity's face or photo) can be reused by anyone. Without such a row the pair counts
+   at most one positive layer and no live private id, so it never links or assigns. Its bits stay in
+   the ledger, and an assignment explains it under the ecosystem relation instead.
+5. **Missing is 0 bits, never negative.** If one capture has a layer and the other does not (for
    example, no HAR for one of them), the ledger shows a `missing` row with 0 bits. A missing modality
    is not a penalty. Section 6 uses it to say what an item could still add.
 

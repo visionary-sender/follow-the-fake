@@ -130,6 +130,9 @@ def run_brand_stoplist(args: argparse.Namespace) -> int:
             print(f"ftf brand-stoplist: no corpus_kind.jsonl beside {args.corpus}", file=sys.stderr)
             return 2
         real = real_pages(corpus, kinds)
+        if not real.incidents:
+            print("ftf brand-stoplist: no incident tagged must_not_link in corpus_kind.jsonl", file=sys.stderr)
+            return 2
         brand = brand_digests(real)
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(brand_stoplist_doc(brand, len(real.incidents))) + "\n", encoding="utf-8")

@@ -233,7 +233,7 @@ def _indexed_setup(
         def informative(key) -> bool:
             # The most bits this value can earn in base + incident (live prior, combined rarity).
             prior = ctx.weights.weight(key[1], key[0]).bits * ctx.weights.scale(key[1], key[0], relation)
-            return prior - ctx.rarity(key, ctx.groups(key)) >= hub
+            return prior - ctx.rarity(key, ctx.groups(key), relation) >= hub
 
     keys = index.probe_keys(incident)
     modalities = {layer: set(mods) for layer, mods in index.modalities.items()}

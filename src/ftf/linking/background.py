@@ -21,7 +21,6 @@ bucket artefact like the data it was counted from.
 
 from __future__ import annotations
 
-import functools
 import hashlib
 import json
 import os
@@ -262,11 +261,22 @@ def stoplist_path() -> str | None:
     return None if raw.strip().lower() in _OFF else raw
 
 
-@functools.lru_cache(maxsize=8)
+_LOADED: dict[tuple[str, float], frozenset[str]] = {}
+_WARNED: set[str] = set()
+
+
 def _load(path: str) -> frozenset[str]:
+    """Read once per (path, mtime); a failed read is not cached, so a file written later is picked up."""
     try:
-        return read_brand_stoplist(path)
+        key = (path, os.stat(path).st_mtime)
+        if key not in _LOADED:
+            _LOADED.clear()
+            _LOADED[key] = read_brand_stoplist(path)
+        return _LOADED[key]
     except (OSError, ValueError) as exc:
+        if path in _WARNED:
+            return frozenset()
+        _WARNED.add(path)
         print(f"ftf: warning: brand stop-list not loaded ({exc}); brand-skin values are scored like any other "
               f"(set {BRAND_STOPLIST_ENV} to the file, or to 'off')", file=sys.stderr)
         return frozenset()

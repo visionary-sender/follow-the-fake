@@ -134,8 +134,8 @@ class ScoringContext:
     hierarchy: Hierarchy | None = None  # discovered id levels for the chain rule (None: off)
     kind_level: dict[Key, Level] = field(default_factory=dict)  # (layer, kind) → its usual Indicator.level
     content: ContentViews | None = None  # calibrated content views (HACK-24); None: off
-    content_inds: dict[str, dict[str, list]] = field(default_factory=dict)
-    brand: frozenset[str] = frozenset()  # brand stop-list digests (HACK-66): values seen on real outlet pages  # canonical capture → view kind → indicators
+    content_inds: dict[str, dict[str, list]] = field(default_factory=dict)  # canonical capture → view kind → indicators
+    brand: frozenset[str] = frozenset()  # brand stop-list digests (HACK-66): values seen on real outlet pages
 
     @classmethod
     def from_dataset(
@@ -210,10 +210,14 @@ class ScoringContext:
         }
         return Hierarchy.from_captures(caps, anchors)
 
-    def rarity(self, key: tuple[Layer, str, str], k: int) -> float:
+    def rarity(self, key: tuple[Layer, str, str], k: int, relation: Relation | None = None) -> float:
         """Bits taken off a shared value for being common: log2(k) over the sample's pre-groups, or with
         background counts log2[(c + α)/(1 + α)], c = max(corpus operators, sample pre-groups) (0 for one
-        operator). The max, not the sum: a corpus that contains the scored sample must not count it twice."""
+        operator). The max, not the sum: a corpus that contains the scored sample must not count it twice.
+        Under a brand-skin relation a stop-listed value is infinitely common (HACK-66)."""
+        brand = getattr(self, "brand", None)
+        if brand and relation in BRAND_SKIN_RELATIONS and digest(*key) in brand:
+            return math.inf
         if self.background is None or not self.background.knows(key[0], key[1]):
             return math.log2(max(k, 1))
         a = self.background.alpha
@@ -348,8 +352,7 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
                 if entry.private and not live:
                     prior = max(prior - w.static_discount, 0.0)
                 # brand skin (HACK-66): a value also on a real outlet page counts under ecosystem only
-                skin = relation in BRAND_SKIN_RELATIONS and bool(ctx.brand) and digest(layer, kind, norm) in ctx.brand
-                rar = math.inf if skin else ctx.rarity((layer, kind, norm), k)
+                rar = ctx.rarity((layer, kind, norm), k, relation)
                 bits = max(prior - rar, 0.0)
                 if bits > best_bits:
                     best_norm, best_bits, best_k, best_live, best_rar = norm, bits, k, live, rar
