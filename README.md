@@ -27,6 +27,12 @@ Terms used throughout:
 
 A campaign keeps some layers and changes others. A scammer can rotate the creative and the domain and keep the tracking account and the page build, so each layer is scored on its own. In the tables, "strength" is how much one shared value says about one campaign, on its own.
 
+![Campaign recall with one layer removed at a time](docs/figures/layer_ablation.png)
+
+*Campaign recall rests on tracking accounts (0/11 without them), image hashes (1/11), kit and page structure (2/11) and partly infrastructure (7/11). Removing text or faces changes nothing, and no must-not-link pair is linked in any run.*
+
+In this sample, campaign recall comes from tracking accounts, image hashes, kit and page structure and, partly, infrastructure. Text and faces add no campaign recall: they are content views, off by default.
+
 #### Technical infrastructure
 
 We extract registrable domains, the redirect chain, hosting IP and ASN, nameserver host, registrar, creation date, certificate issuer, mail servers, and the tracking domains that receive clicks and postbacks. Trackers and pixels (Meta pixel, conversions gateway, Google Ads, analytics ids) sit in this layer too, but tracking ids are scored as their own layer.
@@ -73,7 +79,7 @@ We extract the OCR text of each screenshot, the visible page text, a MinHash sig
 
 Example: BACKUP p3 and p4 are one article with one name swapped. The masked overlap is 0.63 and the embedding cosine 0.95, where unrelated pages have a median overlap of 0.
 
-Article text is the cleanest campaign signal we have: campaign pairs sit at or above 0.952, must-not-link pairs at 0.938 or below. (This check covers all 12 campaign pairs; E1 works on a slightly different set of 11.) Yet text links nothing in the default run. It counts only with calibrated content views switched on (`--content-views`), and even then never makes a link or an assignment alone, because the calibration is weak: Cllr is 0.55 to 0.64 on 11 positive pairs, measured in-sample.
+Article text is the cleanest campaign signal we have: campaign pairs sit at or above 0.952, must-not-link pairs at 0.938 or below. (This check covers all 12 campaign pairs; E1 works on a slightly different set of 11.) Yet text links nothing in the default run, and removing it changes no campaign pair in this sample. It counts only with calibrated content views switched on (`--content-views`), and even then never makes a link or an assignment alone, because the calibration is weak: Cllr is 0.55 to 0.64 on 11 positive pairs, measured in-sample.
 
 #### Images
 
@@ -100,7 +106,7 @@ We extract the faces in each creative and page: a 128-dimension vector per face,
 | Three or more named faces in common | in the analysis, campaign pairs share at least 3, must-not-link pairs at most 1 | medium, in combination (an analysis finding, not a rule in the code) | the combination separates the pairs |
 | Brand overlap | an outlet or bank named on the page | ecosystem only | a clone names the outlet it copies |
 
-In the default run, with content views off, a face or a brand counts only as "same ecosystem", never as "same campaign". With `--content-views` on, a face match can add up to 1 bit at campaign level, and it still never decides a link alone. Coverage of the reference set is the limit (section 2).
+In the default run, with content views off, a face or a brand counts only as "same ecosystem", never as "same campaign"; removing faces changes no campaign pair in this sample. With `--content-views` on, a face match can add up to 1 bit at campaign level, and it still never decides a link alone. Coverage of the reference set is the limit (section 2).
 
 #### Video
 
@@ -228,7 +234,15 @@ The pair counts differ between tables. The ground truth has 44 must-not-link pai
 
 Seven experiments, E1 to E7, ran in 13 steps, all `ok`. The 33 canonical captures form only 3 non-singleton campaign groups, so read the tables as a regression check, not a benchmark. E1, E6 and E7 hide the platform ids; E2, E3 and E4 show all evidence. Content views were off (the default).
 
-<!-- Figures slot: the Evaluation charts and the campaign graph (docs/figures/*.png) go here. -->
+![Evidence per pair against the link threshold, platform ids hidden](docs/figures/evidence_separation.png)
+
+*With platform ids hidden, all 11 same-campaign pairs carry more evidence than the link threshold τ = 6.46 bits, while none of the 37 must-not-link pairs and none of 200 random different-campaign pairs reaches it.*
+
+![Baseline against the Linking engine](docs/figures/baseline_vs_model.png)
+
+*A link-anything-shared baseline finds all 11 campaign pairs but only 11 of its 66 links are right. The linker finds 11/11 with every link right, and under leave-one-incident-out it assigns 7 of 8 held-out items correctly with no wrong campaign.*
+
+Figures: organiser build main 8eec049 with Visual features, code main aca1f57, platform ids hidden.
 
 <!-- eval:build start -->
 Dataset build: the final report ran on main 5354603.
@@ -409,7 +423,7 @@ Each problem says what happened, what we did and what would work better; the las
 
 **3. Look-alike outlet pages.** Scam pages copy outlet logos, fonts and analytics, and reuse celebrity photos. Without the brand stop-list and the gates, the baseline fails the E4 check on 49 of 58 real outlet pages, all 3 platform-only pages and both celebrity-only items; the Linking engine passes them. *Better:* a stop-list built from more outlets and batches; brand stock images still match unrelated cases.
 
-**4. Platform ids dominate the evidence.** With platform ids hidden, the engine found 0 of 11 pairs at the start of the push. The gain came from the face, image and text layers, the corroborated landing build (HACK-84) and the same-host rule (HACK-88). *Better:* weights calibrated on labelled pairs, so the remaining layers are not only hand-set.
+**4. Platform ids dominate the evidence.** With platform ids hidden, the engine found 0 of 11 pairs at the start of the push. The gain came from the Visual features, the corroborated landing build (HACK-84) and the same-host rule (HACK-88); in the final build, removing text or faces changes nothing (layer figure in section 1). *Better:* weights calibrated on labelled pairs, so the remaining layers are not only hand-set.
 
 **5. Content views are not calibrated.** Every content view has an AUC of at least 0.99, but Cllr is 0.55 to 0.64, measured in-sample on 11 positive pairs. A variant that let text support decisions made the time split worse, so content views stay opt-in. *Better:* calibration on more labelled pairs.
 
