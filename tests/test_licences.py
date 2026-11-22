@@ -62,6 +62,14 @@ def test_not_permissive(licence):
     assert not licences.is_permissive(licence)
 
 
+def test_semicolon_joined_licences_all_apply():
+    # Debian License: fields joined by `;` all apply: one copyleft field makes the package copyleft.
+    assert not licences.is_permissive("GPL-2+; MIT")
+    assert not licences.is_permissive("MIT; GPL-2+")
+    assert licences.is_permissive("MIT; BSD-3-Clause")
+    assert licences.is_permissive("Apache-2.0 OR GPL-2.0-only")  # OR still means one alternative
+
+
 def test_chromium_exception_is_exact_and_narrow():
     # HACK-68: only the listed Debian packages, with exactly the recorded licence string.
     chromium = {"libfake-lgpl1": "LGPL-2.1+", "libfake-mit1": "MIT"}

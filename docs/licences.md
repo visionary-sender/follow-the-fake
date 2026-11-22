@@ -29,11 +29,14 @@ image (`dpkg-query`), built on the workbench VM on 2026-11-22.
 
 Owner decision (HACK-68, 2026-11-22): the Debian system libraries that Chromium needs, installed
 by `playwright install --with-deps`, are allowed in the image even where they are LGPL, MPL or GPL
-in part. Chromium links them as unmodified Debian packages, and no package is patched. This is the
-only exception for system packages; it does not extend to other packages. In
+in part. They are unmodified Debian packages, and no package is patched. The list is every package
+that the `--with-deps` step adds, as the issue defines it: some are not linked by Chromium itself
+(X11 utilities, fonts, Xvfb). Narrowing the list is an owner question. This is the only exception
+for system packages; it does not extend to other packages. In
 `scripts/licences.py` a package is accepted only if `scripts/chromium-debian-packages.tsv` lists
 it with exactly the licence recorded there. `scripts/licences.py --audit-image FILE` checks the
-packages of a built image against that list; the image built on 2026-11-22 gives 0 errors.
+packages of a built image against that list; the image built on 2026-11-22 gives 0 errors. It is
+run by hand on the VM, not by the licence test.
 Licence names come from each copyright file's `License:` fields, or from its notice phrases
 where the file is free-form. That is a keyword check, not a legal review.
 
@@ -57,13 +60,13 @@ the changes as `scripts/chromium-debian-packages.tsv`.
 | libasound2t64 | LGPL-2.1+ |
 | libatk-bridge2.0-0t64 | AFL-2.1; AFL-2.1 or GPL-2+; GPL-2; GPL-2+; LGPL-2+; LGPL-2.1+; public-domain |
 | libatk1.0-0t64 | AFL-2.1; AFL-2.1 or GPL-2+; GPL-2; GPL-2+; LGPL-2+; LGPL-2.1+; public-domain |
-| libatomic1 | free-form: MIT, GPL, BSD |
+| libatomic1 | free-form: MIT, GPL, LGPL, BSD |
 | libatspi2.0-0t64 | AFL-2.1; AFL-2.1 or GPL-2+; GPL-2; GPL-2+; LGPL-2+; LGPL-2.1+; public-domain |
-| libavahi-client3 | free-form: GPL, BSD |
-| libavahi-common-data | free-form: GPL, BSD |
-| libavahi-common3 | free-form: GPL, BSD |
+| libavahi-client3 | free-form: GPL, LGPL, BSD |
+| libavahi-common-data | free-form: GPL, LGPL, BSD |
+| libavahi-common3 | free-form: GPL, LGPL, BSD |
 | libbrotli1 | MIT |
-| libcairo2 | free-form: HPND, MPL |
+| libcairo2 | free-form: HPND, LGPL, MPL |
 | libcom-err2 | 0BSD; Apache-2; BSD-3-Clause; BSD-3-Clause-Variant; BSD-4-Clause-CMU; Expat; GPL or MIT-US-export; GPL-2; GPL-2+; GPL-2+ with Texinfo exception; ISC; Kazlib; LGPL-2; Latex2e |
 | libcups2t64 | Apache-2.0; Apache-2.0-with-GPL2-LGPL2-Exception; Apache-2.0-with-GPL2-LGPL2-Exception or BSD-2-clause; BSD-2-Clause; FSFUL; Zlib |
 | libdatrie1 | GPL-2+; LGPL-2.1+ |
@@ -101,7 +104,7 @@ the changes as `scripts/chromium-debian-packages.tsv`.
 | libnss3 | BSD-3; MPL-2.0; Zlib; public-domain |
 | libp11-kit0 | Apache-2.0; BSD-3-clause; FSFAP; FSFULLR; GPL-2+ with Autoconf-data exception; GPL-3+ with Autoconf-data exception; ISC; LGPL-2.1+; X11; customFSFUL; customFSFULLRWD |
 | libpango-1.0-0 | Apache-2; Apache-2 and Bitstream-Vera and OFL-1.1; Bitstream-Vera; Chromium-BSD-style; Example; ICU; LGPL-2+; LGPL-2+ and ICU; LGPL-2+ and LGPL-2.1+; LGPL-2+ and TCL; LGPL-2.1+; OFL-1.1; TCL; Unicode |
-| libpciaccess0 | free-form: MIT |
+| libpciaccess0 | free-form: MIT, GPL |
 | libpixman-1-0 | free-form: MIT |
 | libpng16-16t64 | Apache-2.0; BSD-3-clause; BSD-like-with-advertising-clause; GPL-2+; GPL-2+ or BSD-like-with-advertising-clause; expat; libpng; libpng OR Apache-2.0 OR BSD-3-clause |
 | libsensors-config | GPL-2; GPL-2+; LGPL-2.1+; Linux-man-pages-copyleft |

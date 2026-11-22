@@ -11,8 +11,13 @@ base=${FTF_BASE_IMAGE:-python:3.11-slim@sha256:07d4824036af339fa1b6ef769cc99d9c1
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 dpkg_names="dpkg-query -W -f='\${Package}\n'"
-sudo docker run --rm --entrypoint sh "$base" -c "$dpkg_names" | sort > "$work/base.txt"
-sudo docker run --rm --entrypoint sh "$image" -c "$dpkg_names" | sort > "$work/image.txt"
+sudo docker run --rm --entrypoint sh "$base" -c "$dpkg_names" > "$work/base.raw"
+sudo docker run --rm --entrypoint sh "$image" -c "$dpkg_names" > "$work/image.raw"
+# Each listing must be non-empty: an empty base list would make the whole image look "added".
+for f in base image; do
+  [ -s "$work/$f.raw" ] || { echo "chromium_packages.sh: empty package list for $f" >&2; exit 1; }
+  sort "$work/$f.raw" > "$work/$f.txt"
+done
 comm -13 "$work/base.txt" "$work/image.txt" > "$work/added.txt"
 echo "packages added by the Chromium step: $(wc -l < "$work/added.txt" | tr -d ' ')" >&2
 sudo docker run --rm -i --entrypoint python3 -v "$work/added.txt:/added.txt:ro" "$image" -I - \

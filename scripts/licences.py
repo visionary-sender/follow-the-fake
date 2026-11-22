@@ -108,9 +108,10 @@ def licence_of(dist: metadata.Distribution) -> str:
 def is_permissive(licence: str) -> bool:
     """At least one OR-alternative must have every AND part permissive."""
     expr = licence.replace("(", " ").replace(")", " ")
-    for alt in re.split(r"\s+OR\s+|\s*/\s*|;", expr, flags=re.IGNORECASE):
+    for alt in re.split(r"\s+OR\s+|\s*/\s*", expr, flags=re.IGNORECASE):
         alt = re.sub(r"\s+WITH\s+\S+", "", alt.strip(), flags=re.IGNORECASE)  # exceptions only add rights
-        parts = re.split(r"\s+AND\s+", alt, flags=re.IGNORECASE)
+        # `;` separates Debian License: fields, and every one of them applies (AND, not OR).
+        parts = re.split(r"\s+AND\s+|\s*;\s*", alt, flags=re.IGNORECASE)
         if all(_part_permissive(p) for p in parts):
             return True
     return False
@@ -228,8 +229,14 @@ def main() -> int:
     args = parser.parse_args()
     table = render()
     if args.audit_image:
-        rows = dict(line.split("\t", 1) for line in Path(args.audit_image).read_text().splitlines()
-                    if line.strip())
+        rows: dict[str, str] = {}
+        for number, line in enumerate(Path(args.audit_image).read_text().splitlines(), 1):
+            if not line.strip():
+                continue
+            name, sep, licence = line.partition("\t")
+            if not sep or not licence or name in rows:
+                raise SystemExit(f"{args.audit_image}:{number}: expected a unique `package<TAB>licence` row")
+            rows[name] = licence
         errors = audit_image(rows, load_chromium_packages())
         for e in errors:
             print(e, file=sys.stderr)
