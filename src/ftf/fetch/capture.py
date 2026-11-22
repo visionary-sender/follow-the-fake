@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 from ftf import __version__
+from ftf import egress as eg
 from ftf.contract import (
     CONTRACT_VERSION,
     Artefact,
@@ -112,6 +113,16 @@ class Recorder:
         self.html_head: str = ""
         self.guard: GuardProxy | None = None
         self.failed_after_load = False
+        self.egress: dict | None = eg.current()  # read at the start: rotation happens between visits
+        # Optional upstream proxy (phase 2). A malformed proxy file fails the visit, never goes direct.
+        self.upstream: eg.Upstream | None = None
+        self.upstream_error: str | None = None
+        try:
+            self.upstream = eg.upstream_proxy()
+        except ValueError as e:
+            self.upstream_error = str(e)
+        if self.upstream is not None:
+            self.egress = {**(self.egress or {}), "proxy": self.upstream.label}
 
     # -- during the visit --------------------------------------------------------------------
 
@@ -269,8 +280,21 @@ class Recorder:
             provenance=Provenance(artefact_id=f"fetch:{self.capture_id}:url", note="ftf fetch verdict"),
             extractor=EXTRACTOR,
         )
+        indicators = [indicator]
+        if self.egress is not None:
+            indicators.append(Indicator(
+                id=f"fetch:{self.capture_id}:egress",
+                capture_id=cap_id,
+                layer=Layer.collector,  # our network address: describes the collector, never links
+                kind="analyst_ip",
+                level=Level.capture,
+                value=eg.label(self.egress),
+                observed=Observed.live,
+                provenance=Provenance(artefact_id=f"fetch:{self.capture_id}:url", note="egress worker (salted IP hash)"),
+                extractor=EXTRACTOR,
+            ))
         incident = Incident(id=f"fetch:{self.capture_id}", source=SOURCE, source_ref=self.capture_id,
-                            captures=[capture], indicators=[indicator])
+                            captures=[capture], indicators=indicators)
         guard = self.guard
         manifest = {
             "manifest_version": MANIFEST_VERSION,
@@ -298,6 +322,9 @@ class Recorder:
             "browser": {"version": self.browser_version, "user_agent": self.user_agent},
             # How the visit presented itself (collector data: describes us, never link on it).
             "profile": self.profile,
+            # Which egress worker sent the traffic (region and salted IP hash, never the raw IP);
+            # null when fetched from a machine without one (the sandbox, the jury's container).
+            "egress": self.egress,
             "limits": {k: v for k, v in asdict(self.config).items() if k not in ("allow_networks", "allow_ports")},
             "incident": json.loads(incident.model_dump_json()),
         }
