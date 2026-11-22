@@ -53,8 +53,10 @@ def test_skeleton_with_creative_is_a_campaign_build():
     assert ps.layers_positive >= 2
 
 
-def test_two_structure_kinds_without_creative_are_a_build():
-    assert build_of(ctx_for([SKELETON, SCRIPT], [SKELETON, SCRIPT]))
+def test_structure_without_creative_is_no_build():
+    # one operator reuses its build across campaigns: two rare structure kinds alone stay template-level
+    assert not build_of(ctx_for([SKELETON, SCRIPT, (L.kit, "asset_norm_sha256", "n-1")],
+                                [SKELETON, SCRIPT, (L.kit, "asset_norm_sha256", "n-1")]))
 
 
 def test_copied_kit_alone_stays_template_level():

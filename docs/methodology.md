@@ -175,10 +175,10 @@ platforms.
    evidence: under the campaign relation the kit layer counts at half scale and does not open the
    campaign gate. One campaign's captures, however, usually share one landing build. When the pair
    shares a whole-page skeleton or a normalised inline script that at most 2 pre-groups carry, and
-   something independent backs it (a second such rare structure kind, or a rare shared creative
-   image or masked text template), the structure kinds count at full scale, count as campaign
+   a rare shared creative image or masked text template backs it (the operator changes those per
+   campaign; it reuses its build, so two rare structure kinds alone are not enough), the structure kinds count at full scale, count as campaign
    evidence, and the page structure and the page script take one kit-layer term each. A build shared
-   by three or more pre-groups, or with nothing backing it, stays template-level. Constants:
+   by three or more pre-groups, or without a rare creative or text template, stays template-level. Constants:
    `weights.KIT_BUILD_*`; the check is `ledger.kit_build`.
 6. **Missing is 0 bits, never negative.** If one capture has a layer and the other does not (for
    example, no HAR for one of them), the ledger shows a `missing` row with 0 bits. A missing modality

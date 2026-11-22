@@ -668,8 +668,8 @@ def _substantive(ctx: ScoringContext, key: tuple[Layer, str, str]) -> bool:
     return level not in _SKIN_LEVELS
 def kit_build(ctx: ScoringContext, va: dict, vb: dict, relation: Relation) -> bool:
     """Corroborated landing build (HACK-84, `weights.KIT_BUILD_*`): the two captures share a page skeleton or
-    inline script carried by at most KIT_BUILD_MAX_GROUPS pre-groups, backed by a second such structure kind or
-    by a rare shared creative or masked text template. Brand-skin values (on a real outlet page) never count."""
+    inline script carried by at most KIT_BUILD_MAX_GROUPS pre-groups, backed by a rare shared creative image or
+    masked text template. Brand-skin values (on a real outlet page) never count."""
     if relation not in KIT_BUILD_RELATIONS:
         return False
     rare: set[str] = set()
@@ -682,8 +682,7 @@ def kit_build(ctx: ScoringContext, va: dict, vb: dict, relation: Relation) -> bo
             if k <= KIT_BUILD_MAX_GROUPS and not math.isinf(ctx.rarity((key[0], kind, norm), k, relation)):
                 rare.add(kind)
                 break
-    structure = rare & KIT_BUILD_STRUCTURE
-    return bool(rare & KIT_BUILD_ANCHORS) and (len(structure) >= 2 or bool(rare & KIT_BUILD_CORROBORATION))
+    return bool(rare & KIT_BUILD_ANCHORS) and bool(rare & KIT_BUILD_CORROBORATION)
 
 
 # Layers in which a kind without a weight entry may count as campaign evidence by its own Indicator.level

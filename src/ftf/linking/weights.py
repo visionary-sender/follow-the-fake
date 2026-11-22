@@ -301,12 +301,13 @@ def is_campaign_evidence(layer: Layer, kind: str) -> bool:
 
 
 # Corroborated landing build (HACK-84, applied in `ledger.kit_build`). With the platform ids hidden, one
-# campaign's captures usually share one landing build. A copied kit alone stays template-level (HACK-77), so a
-# build counts for the campaign only when a page-level structure value (whole-page skeleton or normalised inline
-# script) is rare (carried by at most KIT_BUILD_MAX_GROUPS pre-groups) and something independent of the page
-# code backs it: a second rare structure kind, or a rare shared creative or masked text template. Then, for the
-# relations in KIT_BUILD_RELATIONS, the structure kinds count at KIT_BUILD_SCALE, open the campaign gate, and
-# the page and the script take one term each in the kit layer (`KIT_BUILD_SLOTS`) instead of one between them.
+# campaign's captures usually share one landing build. A copied kit alone stays template-level (HACK-77), and on
+# the organiser set one operator reuses its build (skeleton, inline scripts, assets) across its campaigns, so even
+# two rare structure kinds do not tell campaigns apart. A build counts for the campaign only when a page-level
+# structure value (whole-page skeleton or normalised inline script) carried by at most KIT_BUILD_MAX_GROUPS
+# pre-groups is backed by a rare shared creative image or masked text template, which the operator changes per
+# campaign. Then, for the relations in KIT_BUILD_RELATIONS, the structure kinds count at KIT_BUILD_SCALE, open the
+# campaign gate, and the page and the script take one term each in the kit layer (`KIT_BUILD_SLOTS`).
 KIT_BUILD_ANCHORS = frozenset({"dom_skeleton_sha256", "inline_script_sha256"})
 KIT_BUILD_STRUCTURE = KIT_BUILD_ANCHORS | {"asset_norm_sha256"}
 KIT_BUILD_CORROBORATION = frozenset({"image_phash", "image_pdq", "text_template"})
