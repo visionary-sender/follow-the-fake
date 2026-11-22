@@ -108,7 +108,7 @@ build-report.json        which build stages ran or were skipped
 The enrichment cache is derived from organiser domains, so it is never baked into the image; it
 travels only inside a privately handed-over base bundle.
 
-The final base bundle is `<BASE_BUNDLE_DIR>`, handed over privately; its export tables are in `<EXPORT_DIR>`.
+The final campaign base ships in the offline package (`base/`). `ftf export` produces the export tables from it.
 
 An input that is already in the base shows its stored analysis: `ftf analyze` returns the base's
 incident for it, so an extractor or feature change shows for that input only after the base is

@@ -510,6 +510,8 @@ ftf serve --base dataset.json --port 8501
 
 `ftf analyze` prints the verdict (assign, new or review) and exits 0 for all three. Inputs are copied to a per-run directory and hashed, never executed. Captured HTML is never rendered, and URLs are shown defanged.
 
+An input already in the base shows its stored analysis, so after changing an extractor or feature, rebuild the base with `ftf build-base … --force`.
+
 `ftf export` writes `incidents.csv`, `captures.csv`, `indicators.csv`, `links.csv`, `evidence.csv` (one row per ledger row), `campaigns.csv`, a validated `dataset.json`, and `campaign_patterns.md`, which defangs every value. An export built from organiser data is never committed to the repository.
 
 ### Build the image
@@ -526,7 +528,7 @@ Without the stop-list file the build still works, and the engine warns and score
 
 ### Walkthrough
 
-The walkthrough uses a slice of the challenge base (`base-h4-main`), with case 1 held out. Cases are named by their folder number.
+The walkthrough uses a slice of the campaign base in the offline package, with case 1 held out. Cases are named by their folder number.
 
 1. **A known variant.** `do_udostepnienia:1`, held out, is assigned to the 7-capture campaign it belongs to. The best candidate scores 18.7 bits and the evidence capacity is 48.4 bits.
 2. **A new campaign.** An unrelated saved page with no shared value against any campaign is declared **new**. Its evidence capacity is 44.9 bits.
