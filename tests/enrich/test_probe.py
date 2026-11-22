@@ -1,4 +1,4 @@
-"""Start probe and short lookup timeouts (HACK-91). No network: every fetch is injected or refused."""
+"""Start probe and short lookup timeouts. No network: every fetch is injected or refused."""
 
 import pytest
 

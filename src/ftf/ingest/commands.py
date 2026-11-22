@@ -49,7 +49,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     parser.add_argument("--timing", type=Path, help="write per-capture timing and notes (JSON) here")
     parser.add_argument("--allow-empty", action="store_true",
                         help="succeed even when captures with HTML or HAR yield no indicators at all (normally exit 1)")
-    parser.add_argument("--fetch", action="store_true", help="capture bare URLs with the HACK-17 fetcher (sandbox only)")
+    parser.add_argument("--fetch", action="store_true", help="capture bare URLs with the fetcher (sandbox only)")
     parser.add_argument("--fetch-dir", type=Path, help="fetcher output folder (default: <out dir>/fetched)")
     parser.set_defaults(func=main)
 
@@ -63,7 +63,7 @@ def _write(path: Path, text: str) -> None:
 
 def main(args: argparse.Namespace) -> int:
     if args.fetch and not adapters.fetch_available():
-        print("ftf ingest: --fetch needs the HACK-17 fetcher (ftf.fetch), which is not installed", file=sys.stderr)
+        print("ftf ingest: --fetch needs the fetcher (ftf.fetch), which is not installed", file=sys.stderr)
         return 2
     fetch_dir = args.fetch_dir or args.out.parent / "fetched"
     try:

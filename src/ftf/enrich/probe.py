@@ -1,4 +1,4 @@
-"""Start probe and short lookup timeouts for online-by-default runs (HACK-91).
+"""Start probe and short lookup timeouts for online-by-default runs.
 
 `network_up()` asks one DNS-over-HTTPS question about example.com, first at dns.google and then at
 cloudflare-dns.com, each with a short timeout. When both fail, the run is offline: enrichment reads
@@ -19,7 +19,7 @@ from ftf.enrich.http import FetchFn, PoliteClient, Politeness, Unavailable, urll
 from ftf.enrich.sources import DOH_URL
 
 LOOKUP_TIMEOUT = 5.0  # seconds per request
-# crt.sh answers slowly under load. A decision: confirm on the jury network.
+# crt.sh answers slowly under load. Confirm on the target network.
 HOST_TIMEOUT = {"crt.sh": 15.0}
 PROBE_URLS = (
     f"{DOH_URL}?name=example.com&type=A",

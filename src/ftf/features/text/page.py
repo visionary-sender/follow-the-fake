@@ -1,7 +1,7 @@
 """Visible text of a saved page, parsed as inert markup (never executed or rendered).
 
 Handles saved HTML, MHTML (first text/html part) and HAR (HTML response bodies; the one with the
-most visible text is taken as the main document). Ingestion (HACK-9) owns those formats; this
+most visible text is taken as the main document). Ingestion owns those formats; this
 keeps to what text needs and should switch to Ingestion's main-document choice once it exists.
 """
 

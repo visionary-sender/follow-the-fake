@@ -1,4 +1,4 @@
-"""Campaign views per relation, as pure functions over a contract `Dataset` (HACK-31).
+"""Campaign views per relation, as pure functions over a contract `Dataset`.
 
 Each relation (same template, tracking account, operator, campaign, ecosystem) gets its own
 graph of captures. An edge is a contract `Link` of that relation and carries only the evidence
@@ -446,7 +446,7 @@ def explain_pair(ds: Dataset, a: str, b: str, threshold: float | None = None) ->
 def evidence_rows(edge: Edge) -> list[dict]:
     """Compact evidence table for one edge: shared rows, then other rows, then collector rows.
 
-    Values are defanged. Follow-up: switch to `ftf.app.ledger` (HACK-30) once it is on main.
+    Values are defanged. Follow-up: switch to `ftf.app.ledger` once it is on main.
     """
     rows = [
         {"evidence": "shared", "layer": s.layer, "kind": s.kind, "value": defang(s.value),

@@ -1,4 +1,4 @@
-"""Capture folders written by our own collectors: the URL fetcher (HACK-17) and the ad-library scanner (HACK-20).
+"""Capture folders written by our own collectors: the URL fetcher and the ad-library scanner.
 
 Both write ``<out>/<folder>/capture.json`` (a manifest with ``tool``, ``manifest_version`` and a
 contract ``Incident``) next to the captured files, and ``<out>/dataset.json`` for the run. The

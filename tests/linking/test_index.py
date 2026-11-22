@@ -1,4 +1,4 @@
-"""Candidate index (HACK-25): same results as the linear scan, no re-clustering, JSON round trip."""
+"""Candidate index: same results as the linear scan, no re-clustering, JSON round trip."""
 
 from __future__ import annotations
 
@@ -235,7 +235,7 @@ def _small_base() -> Dataset:
 
 
 def _dup_incident(iid: str, of: str, stage: str = "lander", extra: bool = False):
-    # The caption is campaign-level evidence: the HACK-53 gate needs one under campaign, and the base lacks it,
+    # The caption is campaign-level evidence: the gate needs one under campaign, and the base lacks it,
     # so a0 stays reachable only through values a duplicate merges in.
     b = sc.Builder()
     b.n = 1000
@@ -369,7 +369,7 @@ def test_an_index_for_another_base_is_refused():
         link_incident(base, new[0], index=idx)
 
 
-# --- HACK-23 options: learned weights, background rarity, chain rule ---------------------------------
+# --- options: learned weights, background rarity, chain rule ---------------------------------
 
 
 def _options_case(seed: int = 7):

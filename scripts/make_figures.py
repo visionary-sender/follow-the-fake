@@ -1,4 +1,4 @@
-"""README figures HACK-93: evidence separation and baseline vs model.
+"""README figures: evidence separation and baseline vs model.
 
 Needs matplotlib (not in project venv): `pip install matplotlib`. Run on workbench VM.
 

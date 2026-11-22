@@ -1,4 +1,4 @@
-"""HACK-66: brand skin, platform-level and creative-only evidence never link into a campaign (E4 c, e, f).
+"""brand skin, platform-level and creative-only evidence never link into a campaign.
 
 Placeholder values only, no case data.
 """

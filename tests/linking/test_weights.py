@@ -1,4 +1,4 @@
-"""HAND_TABLE entries for Ingestion's kinds (HACK-10), on synthetic captures with placeholder values."""
+"""HAND_TABLE entries for Ingestion's kinds, on synthetic captures with placeholder values."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ def row(score, kind):
     return r
 
 # Linkable kinds Ingestion emits (kind names only, no values). Copied from `ftf.indicators._ids.KINDS`
-# on the HACK-10 branch; switch to importing it once that package is on main.
+# on the branch; switch to importing it once that package is on main.
 INGESTION_KINDS = {
     "aio_action_files", "aio_campaign", "aio_campaign_name", "aio_cdn_tenant", "aio_flow", "aio_form",
     "aio_handle_key", "aio_lander_template", "aio_landing", "aio_landing_name", "aio_owner", "aio_sdk_asset",
@@ -56,7 +56,7 @@ INGESTION_KINDS = {
     "meta_adset_name", "meta_campaign_id", "meta_campaign_name", "meta_pixel", "platform_name",
     "push_client_id", "tracker_postback", "video_cdn_tenant", "xid_tracker_machine",
     "aio_advertiser", "contact_telegram", "gtm_container", "offer_id", "tiktok_pixel", "yandex_metrica_id",
-    # HACK-11 kit and page-structure fingerprints
+    # kit and page-structure fingerprints
     "asset_sha256", "asset_norm_sha256", "inline_script_sha256", "dom_skeleton_sha256", "dom_skeleton_lsh",
     "page_url_shape", "form_action_shape", "third_party_host", "third_party_domain",
 }
@@ -103,7 +103,7 @@ def test_differing_aio_campaign_under_one_owner_is_a_campaign_conflict_but_no_ca
     assert not has_private_conflict(s)  # same owner: a different campaign, never a cannot-link
     op = score_pair(ctx, "x/lander", "y/lander", Relation.operator)
     assert not [r for r in op.rows if r.status is EvidenceStatus.conflict]
-    # under campaign the shared owner is explained away by the differing campaign under it (HACK-23)
+    # under campaign the shared owner is explained away by the differing campaign under it
     assert row(s, "aio_owner").status is EvidenceStatus.hub_subsumed and "differing aio campaign" in row(s, "aio_owner").note
 
 
@@ -112,7 +112,7 @@ def test_multi_valued_tracker_shares_one_value_without_conflict(kind):
     layer = HAND_TABLE.kinds[kind].layer
     a = [ind(layer, kind, "trk-1", live=True), ind(layer, kind, "trk-2", live=True)]
     b = [ind(layer, kind, "trk-1", live=True), ind(layer, kind, "trk-3", live=True)]
-    s = score_pair(_pair(a, b), "x/lander", "y/lander", Relation.operator)  # campaign: gated (HACK-53)
+    s = score_pair(_pair(a, b), "x/lander", "y/lander", Relation.operator)  # campaign: gated
     assert row(s, kind).status is EvidenceStatus.shared
     assert row(s, kind).bits == pytest.approx(3.0)
     assert s.live_private

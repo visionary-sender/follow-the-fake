@@ -323,7 +323,7 @@ class Recorder:
             # How the visit presented itself (collector data: describes us, never link on it).
             "profile": self.profile,
             # Which egress worker sent the traffic (region and salted IP hash, never the raw IP);
-            # null when fetched from a machine without one (the sandbox, the jury's container).
+            # null when fetched from a machine without one (the sandbox, the container).
             "egress": self.egress,
             "limits": {k: v for k, v in asdict(self.config).items() if k not in ("allow_networks", "allow_ports")},
             "incident": json.loads(incident.model_dump_json()),

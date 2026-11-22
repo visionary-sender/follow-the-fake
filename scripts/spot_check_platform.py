@@ -1,11 +1,11 @@
-"""Spot-check the HACK-10 platform extractor against the planning findings. Runs on the VM only.
+"""Spot-check the platform extractor against the planning findings. Runs on the VM only.
 
     python -I scripts/spot_check_platform.py \
         --dataset /data/derived/ingest/organiser/dataset-captures-only.json --root /data/raw \
-        --expect /data/derived/spot-check/hack-10-platform-expectations.json
+        --expect /data/derived/spot-check/platform-expectations.json
 
 The expectations file is organiser-derived data, so it lives in the bucket
-(gs://follow-the-fake-data/outputs/spot-check/), never in git. Its shape:
+(gs://$FTF_BUCKET/outputs/spot-check/), never in git. Its shape:
 
     {"shared":   [["meta_pixel", ["p1", "p3"]], ...],   # nodes must share at least one value
      "disjoint": [["meta_pixel", ["1", "p1"]], ...],    # no two nodes may share a value

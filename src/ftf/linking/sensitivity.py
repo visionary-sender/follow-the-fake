@@ -1,4 +1,4 @@
-"""Fragile links and decisions: does a verdict survive moving the weight table by ±2 bits? (07 §4 E6)
+"""Fragile links and decisions: does a verdict survive moving the weight table by ±2 bits?
 
 Every prior in the hand table is a judgement call. For each link (and each assignment) the
 ledger is recomputed with one layer's weights moved by −delta and by +delta (every kind of the
@@ -164,7 +164,7 @@ def annotate_dataset(ds: Dataset, records: list[dict]) -> Dataset:
 
 
 def summary(records: list[dict], delta: float = DELTA) -> dict:
-    """Flip counts per relation (E6): links, fragile ones, worst-case flips, and flips per layer move."""
+    """Flip counts per relation: links, fragile ones, worst-case flips, and flips per layer move."""
     per: dict[str, dict] = {}
     for r in records:
         s = per.setdefault(r["relation"], {"links": 0, "fragile": 0, "worst_case_flips": 0, "by_move": Counter()})

@@ -1,6 +1,6 @@
 """Tiered evidence ledger on synthetic captures (placeholder values only, no case data).
 
-The three decisions of 07 §2.5 are rebuilt with the same structure:
+The three decisions are rebuilt with the same structure:
 (a) new capture on a new domain vs a known campaign: platform + tenant + landing + live pixel + caption;
 (b) a page on another platform sharing only a creative pack and a brand skin;
 (c) a copied kit on another stack: same template, campaign unresolved.
@@ -132,7 +132,7 @@ def test_a_new_domain_assigned_to_known_campaign(ctx):
     assert row(s, "aio_cdn_tenant").bits > row(s, "aio_landing").bits > 0
     # the three campaign-A incidents share a live pixel: one pre-group, so no rarity penalty
     assert row(s, "aio_landing").seen_in == "1 group (3 incidents) / 10"
-    # the landing id is conditioned on the shared tenant (chain rule, HACK-23), never above its hand weight
+    # the landing id is conditioned on the shared tenant (chain rule), never above its hand weight
     assert 0 < row(s, "aio_landing").bits <= HAND_TABLE.kinds["aio_landing"].bits
     assert "given the shared tenant" in row(s, "aio_landing").note
     # platform constants are everywhere: one hub row per kind, no bits
@@ -153,7 +153,7 @@ def test_b_distractor_on_other_platform_is_new(ctx):
     assert row(s, "platform_name").status is EvidenceStatus.conflict
     assert row(s, "platform_name").bits == HAND_TABLE.conflict_bits
     assert row(s, "image_phash").bits > 0
-    # brand skin (HACK-66): ecosystem only, says nothing about the campaign
+    # brand skin: ecosystem only, says nothing about the campaign
     assert row(s, "brand_asset").bits == 0 and "says nothing" in row(s, "brand_asset").note
     # distractor has no tenant layer: a missing row, 0 bits
     assert row(s, "aio_cdn_tenant").status is EvidenceStatus.missing
@@ -169,7 +169,7 @@ def test_c_copied_kit_same_template_campaign_in_review(ctx):
     camp = score_pair(ctx, "k1/lander", "k2/lander", Relation.campaign)
     tau = threshold(ctx, Relation.campaign)
     assert tmpl.bits > 0
-    assert row(tmpl, "kit_asset_set").bits == pytest.approx(5.5)  # 07 §2.5 c: template +5.5
+    assert row(tmpl, "kit_asset_set").bits == pytest.approx(5.5)  # template +5.5
     # clears τ for template, but on one layer only: the D1 gate keeps it in review
     assert tmpl.bits >= threshold(ctx, Relation.template)
     assert verdict(tmpl, ctx) == "review"
@@ -185,7 +185,7 @@ def test_c_copied_kit_same_template_campaign_in_review(ctx):
 
 
 def test_big_campaign_ids_not_punished():
-    """07 §2.2 item 2: a campaign of six incidents keeps the full weight of its own ids."""
+    """A campaign of six incidents keeps the full weight of its own ids."""
     members = [incident(f"a{i}", CAMPAIGN_A) for i in range(6)]
     others = [
         incident(f"o{i}", AIO + [ind(L.tenant, "aio_cdn_tenant", f"tenant-o{i}"),
@@ -205,7 +205,7 @@ def test_big_campaign_ids_not_punished():
 
 
 def _owner_campaigns() -> Dataset:
-    """One owner, two of its campaigns, platform ids hidden (E1): only the owner's live CAPI gateway, its kit
+    """One owner, two of its campaigns, platform ids hidden: only the owner's live CAPI gateway, its kit
     asset, a foreign host and the platform SDK are shared; plus unrelated fillers so the threshold is realistic."""
     owner = [
         ind(L.tracking_account, "capi_gateway", "gateway-1", live=True),
@@ -223,7 +223,7 @@ def _owner_campaigns() -> Dataset:
 
 
 def test_owner_accounts_and_kit_do_not_make_a_campaign():
-    """HACK-53: two campaigns of one owner sharing only the CAPI gateway and kit: operator link, never a campaign link."""
+    """two campaigns of one owner sharing only the CAPI gateway and kit: operator link, never a campaign link."""
     ctx = ScoringContext.from_dataset(_owner_campaigns())
     camp = score_pair(ctx, "c1/lander", "c2/lander", Relation.campaign)
     op = score_pair(ctx, "c1/lander", "c2/lander", Relation.operator)
@@ -241,7 +241,7 @@ def test_owner_accounts_and_kit_do_not_make_a_campaign():
 
 
 def test_same_campaign_pixel_and_landing_links():
-    """HACK-53: a shared live CAPI gateway plus the same landing is a campaign link."""
+    """a shared live CAPI gateway plus the same landing is a campaign link."""
     ctx = ScoringContext.from_dataset(_owner_campaigns())
     s = score_pair(ctx, "c1/lander", "c1b/lander", Relation.campaign)
     assert row(s, "aio_landing").bits > 0
@@ -250,7 +250,7 @@ def test_same_campaign_pixel_and_landing_links():
 
 
 def test_operator_level_kinds_in_campaign_layers_do_not_open_the_gate():
-    """HACK-53 review: an advertiser page or a cloned page title sits in a campaign-ish layer but is shared
+    """review: an advertiser page or a cloned page title sits in a campaign-ish layer but is shared
     by all campaigns of the account or template; with the owner's live gateway it is still no campaign link."""
     shared = [
         ind(L.tracking_account, "capi_gateway", "gateway-1", live=True),
@@ -272,7 +272,7 @@ def test_operator_level_kinds_in_campaign_layers_do_not_open_the_gate():
 
 
 def test_shared_aio_campaign_opens_the_gate_whatever_wins_its_slot():
-    """HACK-53 review: two landings of one aio campaign sharing the campaign id and a campaign-constant kit set:
+    """review: two landings of one aio campaign sharing the campaign id and a campaign-constant kit set:
     the gate reads the candidates before the chain rule, so the pair links whichever row carries the level."""
     chain = [
         ind(L.platform, "platform_name", "stack-a"),
@@ -306,7 +306,7 @@ def test_shared_aio_campaign_opens_the_gate_whatever_wins_its_slot():
 
 
 def test_differing_aio_campaign_closes_the_gate():
-    """HACK-53 review: two aio campaign ids with the same owner-chosen name and one live pixel: two campaigns."""
+    """review: two aio campaign ids with the same owner-chosen name and one live pixel: two campaigns."""
     def camp(cid: str) -> list:
         return [
             ind(L.owner, "aio_campaign", cid),
@@ -356,7 +356,7 @@ def test_no_strict_level_with_tenant_conflict(ctx):
 
 
 def test_reseller_tenant_with_two_owners_is_cannot_link():
-    """07 §2.2 item 5: one live tenant id hosting two owners does not make one campaign."""
+    """One live tenant id hosting two owners does not make one campaign."""
     def side(owner: str) -> list[tuple]:
         return [
             ind(L.tenant, "aio_cdn_tenant", "tenant-z", live=True),
@@ -370,7 +370,7 @@ def test_reseller_tenant_with_two_owners_is_cannot_link():
     assert ctx.group_of["x"] != ctx.group_of["y"]  # neither tenant nor pixel joins two owners
     for rel in (Relation.campaign, Relation.operator):
         s = score_pair(ctx, "x/lander", "y/lander", rel)
-        # the shared tenant is explained away by the differing owners under it (chain rule, HACK-23)
+        # the shared tenant is explained away by the differing owners under it (chain rule)
         assert row(s, "aio_cdn_tenant").status is EvidenceStatus.hub_subsumed
         assert row(s, "aio_owner").status is EvidenceStatus.conflict
         assert row(s, "aio_cdn_tenant").seen_in.startswith("2 groups")

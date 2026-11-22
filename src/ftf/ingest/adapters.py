@@ -6,7 +6,7 @@ Supported inputs, each also accepted on its own:
 2. a single organiser case folder, or any other folder (an ad-hoc submission);
 3. a saved HTML page, with its ``<stem>_files/`` resource folder if present;
 4. a HAR file; 5. an MHTML file (kept as one ``mhtml`` artefact; only its MIME headers are read);
-6. a bare ``http(s)://`` URL (fetched only with ``fetch=True`` and the HACK-17 fetcher installed);
+6. a bare ``http(s)://`` URL (fetched only with ``fetch=True`` and the fetcher installed);
 7. a fetcher or scanner capture folder (``capture.json`` inside) or a run folder holding several
    (:mod:`ftf.ingest.manifests`);
 8. a text file that is mostly http(s) URLs, one per line (a ``.txt`` whose non-empty lines are at
@@ -303,7 +303,7 @@ def fetch_available() -> bool:
 
 
 def fetched_url(url: str, fetch_dir: Path, fetcher: Callable | None = None) -> RawIncident:
-    """Capture ``url`` with the HACK-17 fetcher (``ftf.fetch.fetch_url``), then read its folder."""
+    """Capture ``url`` with the fetcher (``ftf.fetch.fetch_url``), then read its folder."""
     if fetcher is None:
         from ftf.fetch import fetch_url as fetcher
     result = fetcher(url, fetch_dir)
@@ -328,7 +328,7 @@ def load(item: str | Path, *, fetch: bool = False, fetch_dir: Path | None = None
     if isinstance(item, str) and is_url(item):
         if fetch:
             if fetcher is None and not fetch_available():
-                raise RuntimeError("--fetch needs the HACK-17 fetcher (ftf.fetch), which is not installed")
+                raise RuntimeError("--fetch needs the fetcher (ftf.fetch), which is not installed")
             if fetch_dir is None:
                 raise ValueError("fetching a URL needs a fetch directory")
             return [fetched_url(item, fetch_dir, fetcher)]
@@ -346,7 +346,7 @@ def load(item: str | Path, *, fetch: bool = False, fetch_dir: Path | None = None
             return manifests.load_run(path)
         if manifests.is_legacy_scanner_root(path):
             raise ValueError(f"{path}: pre-v1 scanner output (runs/*/incidents-*.json, no capture folders) is not read; "
-                             "expected the v1 layout (HACK-20): <out>/<stamp>-<source>-<id>/{capture.json,ad.json,creative-<n>.<ext>}")
+                             "expected the v1 layout: <out>/<stamp>-<source>-<id>/{capture.json,ad.json,creative-<n>.<ext>}")
         subs = [p for p in _listdir(path) if p.is_dir()]
         if subs and all(organiser_source(p) for p in subs):  # the raw data root itself
             return [inc for p in subs for inc in organiser_root(p, organiser_source(p))] + _top_url_lists(path)

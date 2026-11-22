@@ -69,7 +69,7 @@ with st.sidebar:
     online = st.checkbox("Online enrichment", value=True, key="online",
                          help="Registry and DNS lookups (RDAP, DNS over HTTPS, crt.sh, CERT Polska list). "
                               "If the network is down, answers come from the offline cache. "
-                              "Live page fetching runs only in the jury image (FTF_FETCH=1), inside its hardened container.")
+                              "Live page fetching runs only in the container image (FTF_FETCH=1), inside its hardened container.")
 
 
 def _clear_result() -> None:
