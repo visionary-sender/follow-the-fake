@@ -1,5 +1,6 @@
 import json
 import os
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -9,7 +10,9 @@ from ftf.features import faces
 from ftf.features.common import load_vectors, write_dataset, read_dataset
 from ftf.features.faces import brands, models, reference
 from ftf.features.faces.brands import html_title_text, match_brands
-from ftf.features.faces.reference import MANIFEST_PATH, Reference, licence_ok
+from ftf.features.faces.reference import Reference
+
+MANIFEST = Path(faces.__file__).parent / "reference_manifest.json"
 
 
 def names(text):
@@ -46,13 +49,6 @@ def test_html_title_is_read_inert(tmp_path):
     assert html_title_text(tmp_path / "none.html") is None
 
 
-def test_licence_filter():
-    for ok in ["CC0", "Public domain", "PD-PLGov", "CC BY 4.0", "CC BY 3.0 pl", "CC-BY-2.0", "cc by"]:
-        assert licence_ok(ok), ok
-    for bad in ["CC BY-SA 4.0", "CC-BY-SA", "CC BY-NC 2.0", "CC BY-ND 4.0", "GFDL", "", "Fair use"]:
-        assert not licence_ok(bad), bad
-
-
 def test_reference_match_takes_best_image_per_person():
     m = np.array([[1, 0, 0], [0, 1, 0], [0.6, 0.8, 0]], dtype=np.float32)
     ref = Reference(["A", "B", "A"], ["f1", "f2", "f3"], m, "sha")
@@ -62,17 +58,46 @@ def test_reference_match_takes_best_image_per_person():
     assert ref.match(np.zeros(3)) == []
 
 
-def test_manifest_records_licence_and_attribution():
-    if not MANIFEST_PATH.exists():
-        pytest.skip("no reference manifest yet")
-    doc = json.loads(MANIFEST_PATH.read_text())
-    assert doc["people"]
-    for person in doc["people"]:
-        assert person["name"] and person["wikidata"].startswith("Q") and person["images"]
-        for im in person["images"]:
-            assert licence_ok(im["licence"]), im["title"]
-            assert im["author"] and im["source"].startswith("https://commons.wikimedia.org/")
-            assert im["thumb_url"].startswith(("https://upload.wikimedia.org/", "https://thumb.wikimedia.org/"))
+def test_git_manifest_lists_names_sources_and_files():
+    doc = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    assert doc["format"] == reference.FORMAT and doc["images"]
+    for im in doc["images"]:
+        assert im["name"] and im["source"].startswith("https://") and im["file"].startswith("images/")
+        assert len(im["sha256"]) == 64
+
+
+def test_read_names_skips_comments_and_pins_qids(tmp_path):
+    p = tmp_path / "names.txt"
+    p.write_text("# people\nExample Person A\n\nExample Person B=Q42\n", encoding="utf-8")
+    assert reference.read_names(p) == [("Example Person A", None), ("Example Person B", "Q42")]
+
+
+def test_load_reference_without_manifest_notes_once(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("FTF_FACE_REFERENCE", str(tmp_path / "missing"))
+    reference.load_reference.cache_clear()
+    assert reference.load_reference() is None
+    assert reference.load_reference() is None
+    err = capsys.readouterr().err
+    assert err.count("no reference set") == 1
+
+
+def test_load_reference_reads_prebuilt_directory(tmp_path, monkeypatch):
+    doc = {"format": 1, "embeddings": "embeddings.npy",
+           "images": [{"name": "Example Person A", "source": "https://x.example/a", "file": "images/a.jpg"},
+                      {"name": "Example Person B", "source": "https://x.example/b", "file": "images/b.jpg"}]}
+    (tmp_path / "manifest.json").write_text(json.dumps(doc))
+    np.save(tmp_path / "embeddings.npy", np.eye(3, dtype=np.float32)[:2])
+    monkeypatch.setenv("FTF_FACE_REFERENCE", str(tmp_path))
+    reference.load_reference.cache_clear()
+    ref = reference.load_reference()
+    assert ref.people == ["Example Person A", "Example Person B"]
+    assert ref.sources == ["https://x.example/a", "https://x.example/b"]
+    assert ref.match(np.array([0.0, 0.0, 5.0]))[0][1] == pytest.approx(0.0)
+    reference.load_reference.cache_clear()
+    (tmp_path / "embeddings.npy").unlink()
+    monkeypatch.setattr(reference, "_embed_rows", lambda d, rows: (rows[:1], np.eye(3, dtype=np.float32)[:1]))
+    assert reference.load_reference().people == ["Example Person A"]
+    reference.load_reference.cache_clear()
 
 
 class StubEngine:

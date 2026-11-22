@@ -171,7 +171,17 @@ platforms.
    (an ad, a celebrity's face or photo) can be reused by anyone. Without such a row the pair counts
    at most one positive layer and no live private id, so it never links or assigns. Its bits stay in
    the ledger, and an assignment explains it under the ecosystem relation instead.
-5. **Missing is 0 bits, never negative.** If one capture has a layer and the other does not (for
+5. **Corroborated landing build (HACK-84, campaign relation).** A copied kit alone is template
+   evidence: under the campaign relation the kit layer counts at half scale and does not open the
+   campaign gate. One campaign's captures, however, usually share one landing build. When the pair
+   shares a whole-page skeleton or a normalised inline script that at most 2 pre-groups carry, and
+   a rare shared creative image backs it (the operator changes the creative per campaign but reuses
+   its build and its article text, so rare structure kinds or a masked text template are not enough), those rare structure values (not every value of their kind) count at full scale, count as
+   campaign evidence, and the page structure and the page script take one kit-layer term each. A build shared
+   by three or more pre-groups, or without a rare creative image, stays template-level; so does a value the hierarchy places above
+   campaign level, and corpus counts (when on) enter the rarity. Constants:
+   `weights.KIT_BUILD_*`; the check is `ledger.kit_build`.
+6. **Missing is 0 bits, never negative.** If one capture has a layer and the other does not (for
    example, no HAR for one of them), the ledger shows a `missing` row with 0 bits. A missing modality
    is not a penalty. Section 6 uses it to say what an item could still add.
 
@@ -369,7 +379,7 @@ at scale. The design targets 10^5 incidents; that target is a plan, not a result
 - **The evaluation is a regression check, not a benchmark.** The final report's raw counts are in the
   README ("Evaluation results"). Its protocols are time split (E7), hidden-layer recovery (E1),
   leave-one-out (E2), degraded inputs (E3), distractors (E4) and a ±2-bit sensitivity sweep (E6). With
-  platform ids hidden the engine recovers 0 of 11 true campaign pairs and links none, so recall there is
-  0 of 11 while precision is safe. On the distractors it passes all natural must-not-link pairs, brand
+  platform ids hidden the engine recovers 4 of 11 true campaign pairs, and all 4 pairs it predicts are true,
+  so recall there is 4 of 11 while precision is safe. On the distractors it passes all natural must-not-link pairs, brand
   negatives, platform-only and celebrity-only pages, but one of three synthetic kit copies still fails.
   No accuracy figure is claimed here.

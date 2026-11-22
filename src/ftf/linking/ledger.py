@@ -23,7 +23,7 @@ Rules (07 §2.2, §3 D1):
 - Within a layer only the best shared kind counts (layers are dependent inside); across layers
   the bits add. A conflict on a single-valued, campaign-stable field (platform / tenant / owner)
   adds `conflict_bits` once per layer (the worst one).
-- Campaign gate (HACK-53): under the campaign relation the D1 gate (≥2 positive layers or a live
+- Campaign gate (HACK-53; corroborated landing build HACK-84, `kit_build`): under the campaign relation the D1 gate (≥2 positive layers or a live
   operator-private id) also needs one positive shared value of campaign-level evidence (`weights.CAMPAIGN_EVIDENCE_KINDS`:
   the ad and its creative, ad account campaign or ad set, landing or own domain, aio campaign, offer id; or a
   value the id hierarchy places at campaign or landing level; for a kind without a weight entry in the creative,
@@ -73,7 +73,11 @@ from ftf.linking.background import BackgroundCounts, default_brand, digest
 from ftf.linking.hierarchy import ANCHOR_KINDS, ChainRow, Hierarchy, apply_chain_rule
 from ftf.linking.similarity import OPERATOR_FACTOR, ContentViews, view_evidence
 from ftf.linking.types import METHOD, PairScore, decision_bits
-from ftf.linking.weights import HAND_TABLE, IGNORED_VALUES, WeightTable, is_campaign_evidence
+from ftf.linking.weights import (
+    HAND_TABLE, IGNORED_VALUES, KIT_BUILD_ANCHORS, KIT_BUILD_CORROBORATION, KIT_BUILD_MAX_GROUPS,
+    KIT_BUILD_PAGE_SLOT, KIT_BUILD_RELATIONS, KIT_BUILD_SCALE, KIT_BUILD_SLOTS, KIT_BUILD_STRUCTURE, WeightTable,
+    is_campaign_evidence,
+)
 
 # Typical campaign size m (in captures) per relation, for the prior log-odds −log2(n/m) (07 §2.4).
 # Hand-set: an aio campaign in the sample spans ~3 captures; a tracking account or operator spans
@@ -316,6 +320,7 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
     conflict_rows: dict[Layer, list[_Candidate]] = defaultdict(list)
     other_rows: list[EvidenceRow] = []
     shared_cands: list[ChainRow] = []
+    build = kit_build(ctx, va, vb, relation)
 
     for key in sorted(set(va) | set(vb), key=lambda k: (list(Layer).index(k[0]), k[1])):
         layer, kind = key
@@ -348,7 +353,8 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
             for norm in sorted(common):
                 k = ctx.groups((layer, kind, norm))
                 live = norm in xa.live and norm in xb.live
-                prior = entry.bits * scale
+                # corroborated build (HACK-84): only the rare build value itself counts at campaign scale
+                prior = entry.bits * (max(scale, KIT_BUILD_SCALE) if (layer, kind, norm) in build else scale)
                 if entry.private and not live:
                     prior = max(prior - w.static_discount, 0.0)
                 # brand skin (HACK-66): a value also on a real outlet page counts under ecosystem only
@@ -383,6 +389,8 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
                 note += f"; operator-private, {how}"
             if len(common) > 1:
                 note += f"; {len(common)} values shared, best kept"
+            if (layer, kind, best_norm) in build:
+                note += f"; corroborated landing build (HACK-84), scale {max(scale, KIT_BUILD_SCALE):g}"
             shared_cands.append(ChainRow(EvidenceRow(
                 layer=layer, kind=kind, status=EvidenceStatus.shared, value=value, bits=round(best_bits, 3),
                 seen_in=seen, indicator_ids=ids, note=note,
@@ -405,6 +413,8 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
             return True
         if level is not None:
             return False  # the value spans several campaigns of its owner (or more), whatever its kind
+        if c.key in build:
+            return True
         if is_campaign_evidence(c.key[0], c.key[1]):
             return True
         # a kind without a weight entry in a campaign-ish layer: its own Indicator.level decides
@@ -433,6 +443,7 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
         c.bits > 0 and _substantive(ctx, c.key) for c in shared_cands)
     for c in shared_cands:
         shared_rows[c.key[0]].append(_Candidate(c.row, c.bits))
+    build_kinds = {c.key[1] for c in shared_cands if c.key in build}  # kit kinds whose kept value is a build value
     if ctx.content is not None:
         # after the identifier rows of each layer, so on equal bits an identifier keeps the slot
         for row in _content_rows(ctx, ca, cb, ends, relation):
@@ -460,6 +471,8 @@ def score_pair(ctx: ScoringContext, a: str, b: str, relation: Relation = Relatio
         # id) must not escape the conditioning by outscoring it
         for c in sorted(shared_rows.get(layer, []), key=lambda c: ((layer, c.row.kind) not in chain_kinds, -c.bits)):
             slot = _slot(ctx, slots, layer, c.row.kind)
+            if layer is Layer.kit and c.row.kind in build_kinds:
+                slot = KIT_BUILD_SLOTS.get(c.row.kind, KIT_BUILD_PAGE_SLOT)
             if not c.content:
                 id_tops.setdefault(slot, c)
             top = tops.get(slot)
@@ -653,6 +666,37 @@ def _substantive(ctx: ScoringContext, key: tuple[Layer, str, str]) -> bool:
     if level is None:
         level = ctx.kind_level.get(key[:2])
     return level not in _SKIN_LEVELS
+
+def kit_build(ctx: ScoringContext, va: dict, vb: dict, relation: Relation) -> frozenset[tuple[Layer, str, str]]:
+    """Corroborated landing build (HACK-84, `weights.KIT_BUILD_*`): the shared page skeleton / inline script /
+    asset values (layer, kind, normalised value) that count at campaign level for this pair, or none.
+
+    A value is rare when at most KIT_BUILD_MAX_GROUPS pre-groups carry it and its rarity (corpus counts included)
+    is at most log2(KIT_BUILD_MAX_GROUPS); brand-skin values, collector values and values the hierarchy places
+    above campaign level never count. The build needs a rare skeleton or script and a rare shared creative image;
+    only the rare structure values are returned, so a common value of the same kind keeps its template scale."""
+    if relation not in KIT_BUILD_RELATIONS:
+        return frozenset()
+    cap = math.log2(KIT_BUILD_MAX_GROUPS)
+    rare: set[tuple[Layer, str, str]] = set()
+    for key in set(va) & set(vb):
+        layer, kind = key
+        if layer is Layer.collector or (kind not in KIT_BUILD_STRUCTURE and kind not in KIT_BUILD_CORROBORATION):
+            continue
+        for norm in set(va[key].ids) & set(vb[key].ids):
+            vkey = (layer, kind, norm)
+            level = ctx.hierarchy.level(vkey) if ctx.hierarchy is not None else None
+            if level is not None and level not in (Level.campaign, Level.landing):
+                continue
+            k = ctx.groups(vkey)
+            if k <= KIT_BUILD_MAX_GROUPS and ctx.rarity(vkey, k, relation) <= cap:
+                rare.add(vkey)
+    kinds = {v[1] for v in rare}
+    if not (kinds & KIT_BUILD_ANCHORS and kinds & KIT_BUILD_CORROBORATION):
+        return frozenset()
+    return frozenset(v for v in rare if v[1] in KIT_BUILD_STRUCTURE)
+
+
 # Layers in which a kind without a weight entry may count as campaign evidence by its own Indicator.level
 # (HACK-53 campaign gate); elsewhere an unknown kind never opens the gate.
 _CAMPAIGN_FALLBACK_LAYERS = frozenset({Layer.creative, Layer.distribution_account, Layer.landing})
