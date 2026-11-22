@@ -74,6 +74,19 @@ def move(table: WeightTable, key: str, delta: float) -> WeightTable:
     return replace(table, layer_defaults={**table.layer_defaults, layer: max(table.layer_defaults[layer] + delta, 0.0)})
 
 
+def effective_delta(table: WeightTable, key: str, delta: float) -> float:
+    """The change in bits that `move` really makes (after − before). It is smaller in size than `delta`
+    when the 0-bit floor clamps the move."""
+    return round(bits_of(move(table, key, delta), key) - bits_of(table, key), 6)
+
+
+def _move_cell(move_result: dict[str, Any], nominal: float) -> str:
+    """Flip count for one move; a clamped move also shows the change it really made, e.g. `3 (eff. -1)`."""
+    if abs(move_result["effective"] - nominal) < 1e-9:
+        return str(move_result["total"])
+    return f"{move_result['total']} (eff. {move_result['effective']:+g})"
+
+
 def _subset(ds: Dataset, incident_ids: list[str]) -> Dataset:
     keep = set(incident_ids)
     data = ds.model_dump(mode="json")
@@ -145,7 +158,7 @@ def run_sensitivity(ds: Dataset, weights: WeightTable = HAND_TABLE, moves: tuple
         by_move = {}
         for d in moves:
             _, moved = decisions(ds, move(weights, key, d))
-            by_move[_move_name(d)] = compare(base, moved)
+            by_move[_move_name(d)] = {**compare(base, moved), "effective": effective_delta(weights, key, d)}
         relations: Counter[str] = Counter()
         for m in by_move.values():
             relations.update(m["pair_flips"])
@@ -205,7 +218,7 @@ def render_markdown(result: dict[str, Any], folder: dict[str, str]) -> str:
         "| weight | bits | −2 | −1 | +1 | +2 | total flips |", "|---|---|---|---|---|---|---|",
     ]
     for r in result["ranking"]:
-        cells = [str(r["by_move"][_move_name(d)]["total"]) for d in result["moves_bits"]]
+        cells = [_move_cell(r["by_move"][_move_name(d)], d) for d in result["moves_bits"]]
         lines.append(f"| {r['weight']} | {r['bits']:g} | " + " | ".join(cells) + f" | {r['flips_total']} |")
     f = result["fragile"]
     lines += ["", f"Fragile links (±{f['delta_bits']:g} bits, one layer): {f['fragile']} of {f['links']} pair links; "
