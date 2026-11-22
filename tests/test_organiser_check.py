@@ -148,3 +148,36 @@ def test_lookalike_of_public_service_is_still_a_hit(check, tmp_path, lookalike):
     path.write_text(json.dumps(ds), encoding="utf-8")
     root = _tree(tmp_path, {"src/a.py": f"HOST = '{lookalike}'\n"})
     assert check.check(path, root, None) == 1
+
+
+def test_scheme_less_url_with_reserved_tld_is_a_hit(check, tmp_path, capsys):
+    path = _write_dataset(tmp_path, [
+        {"kind": "script_url", "layer": "landing", "value": "shop.example/offer/page-7731"},
+        {"kind": "aio_landing", "layer": "landing", "value": VALUE},
+    ])
+    root = _tree(tmp_path, {"src/a.py": "x = 'shop.example/offer/page-7731'\n"})
+    assert check.check(path, root, None) == 1
+    out = capsys.readouterr().out
+    assert "src/a.py:1: organiser url" in out
+    assert "page-7731" not in out
+
+
+def test_id_in_scheme_less_path_of_public_host_is_a_hit(check, public_host, tmp_path, capsys):
+    path = _write_dataset(tmp_path, [
+        {"kind": "script_url", "layer": "landing", "value": "public.example/view/page-7731"},
+        {"kind": "aio_landing", "layer": "landing", "value": VALUE},
+    ])
+    root = _tree(tmp_path, {"src/a.py": "x = 'page-7731'\n"})
+    assert check.check(path, root, None) == 1
+    out = capsys.readouterr().out
+    assert "src/a.py:1: organiser id" in out
+    assert "page-7731" not in out
+
+
+def test_scheme_less_public_url_is_not_a_hit(check, public_host, tmp_path):
+    path = _write_dataset(tmp_path, [
+        {"kind": "script_url", "layer": "landing", "value": "public.example/tag.js"},
+        {"kind": "aio_landing", "layer": "landing", "value": VALUE},
+    ])
+    root = _tree(tmp_path, {"src/a.py": "x = 'public.example/tag.js'\n"})
+    assert check.check(path, root, None) == 0

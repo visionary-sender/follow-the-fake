@@ -71,6 +71,10 @@ DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
 DIMENSION_RE = re.compile(r"^\d+x\d+$")
 VERSION_RE = re.compile(r"^v?\d+(\.\d+)+$")
 URL_RE = re.compile(r"https?://[^\s\"'<>)\]]+", re.I)
+# A host with a path and no scheme, e.g. "shop.example/offer/x" (not preceded by a scheme or a path).
+SCHEME_LESS_URL_RE = re.compile(
+    r"(?<![\w@/.\-])((?:[a-z0-9](?:[a-z0-9\-]{0,61}[a-z0-9])?\.)+[a-z]{2,63})(/[^\s\"'<>)\]]*)", re.I
+)
 DOMAIN_RE = re.compile(r"(?<![\w@/])((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63})(?![\w])", re.I)
 TITLE_KIND_RE = re.compile(r"(title|name|caption|text|label)$|^page_title$")
 TOKEN_SPLIT_RE = re.compile(r"[^A-Za-z0-9_.:\-]+")
@@ -97,6 +101,16 @@ def _id_like(value: str, layer: str) -> bool:
     return len(value) >= 12 if value.isdigit() else True
 
 
+def _path_ids(path_and_query: str, layer: str) -> set[str]:
+    """Id-like tokens of a URL path or query (a trailing file extension is dropped first)."""
+    ids = set()
+    for token in TOKEN_SPLIT_RE.split(path_and_query):
+        stem = token.rsplit(".", 1)[0] if token.rsplit(".", 1)[-1] in FILE_EXTENSIONS else token
+        if _id_like(stem, layer):
+            ids.add(stem.lower())
+    return ids
+
+
 def _values(dataset: dict) -> list[tuple[str, str, str]]:
     """(kind, layer, value) of every indicator with a string value."""
     out = []
@@ -120,10 +134,16 @@ def extract(dataset: dict) -> dict[str, set[str]]:
             if host and _public(host):
                 # Only the host is exempt: an id-like token in the path or query is still checked.
                 parts = urlsplit(url)
-                for token in TOKEN_SPLIT_RE.split(f"{parts.path} {parts.query}"):
-                    stem = token.rsplit(".", 1)[0] if token.rsplit(".", 1)[-1] in FILE_EXTENSIONS else token
-                    if _id_like(stem, layer):
-                        found["id"].add(stem.lower())
+                found["id"] |= _path_ids(f"{parts.path} {parts.query}", layer)
+        for m in SCHEME_LESS_URL_RE.finditer(value):
+            host, path = m.group(1).lower(), m.group(2)
+            if host.rsplit(".", 1)[-1] in FILE_EXTENSIONS:
+                continue
+            if _public(host):
+                found["id"] |= _path_ids(path, layer)
+            else:
+                # Reserved TLDs are not checked here: the whole host and path must match exactly.
+                found["url"].add(host + path.lower())
         for dom in DOMAIN_RE.findall(value):
             if _real_domain(dom.lower()):
                 found["host"].add(dom.lower())
