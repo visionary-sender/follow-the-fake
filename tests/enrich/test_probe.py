@@ -51,7 +51,8 @@ def test_short_timeout_caps_each_lookup_and_retries_once():
     client = ShortTimeoutClient(_fetch(Unavailable("timed out"), seen), sleep=slept.append)
     with pytest.raises(Unavailable):
         client.get("https://crt.sh/?q=example.com", Politeness(min_interval=0.0, timeout=150, retries=3, backoff=15))
-    assert [timeout for _, timeout in seen] == [HOST_TIMEOUT["crt.sh"], HOST_TIMEOUT["crt.sh"]]
+    # one request reaches the network; its retry is refused because the first attempt got no answer
+    assert [timeout for _, timeout in seen] == [HOST_TIMEOUT["crt.sh"]]
     assert slept == [1.0]
 
 
