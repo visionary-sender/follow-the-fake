@@ -24,6 +24,9 @@ DEFAULT_OUT = Path(os.environ.get("FTF_EVAL_DIR") or "/data/derived/evaluation")
 DEFAULT_DATASET = Path(
     os.environ.get("FTF_EVAL_DATASET") or "/data/derived/ingest/organiser/dataset-indicators.json"
 )
+DEFAULT_CORPUS = Path(
+    os.environ.get("FTF_EVAL_CORPUS") or "/data/derived/corpus/batch-1/ingested/dataset.json"
+)
 
 
 class EvalInputError(RuntimeError):
@@ -171,11 +174,131 @@ def _register_baseline(sub: argparse._SubParsersAction) -> None:
     p.set_defaults(func=run)
 
 
-# Sibling issues (HACK-27/28/29) append their register function here.
+def _openset_command(args: argparse.Namespace, *, modes: list[str], subdir: str, title: str) -> int:
+    """Leave-one-out (E2/E3): run the open-set protocols for each mode and write JSON + markdown."""
+    from ftf.evaluate.engine import get_engine
+    from ftf.evaluate.labels import build_labels
+    from ftf.evaluate.openset import FULL, run_openset, summarise, threshold_sweep, to_jsonable
+    from ftf.evaluate.robustness import campaign_groups, openset_markdown
+
+    ds = load_dataset(args)
+    labels = build_labels(ds, load_spec(args.spec))
+    groups = campaign_groups(labels)
+    results = run_openset(get_engine(args.engine), ds, groups, modes=modes)
+    payload = {
+        "schema": "ftf-eval-openset@0.1",
+        "dataset": ds.name,
+        "dataset_build": dataset_build(args.dataset),
+        "engine": args.engine,
+        "relation": "campaign",
+        "modes": modes,
+        "groups": groups,
+        "summary": summarise(results),
+        "threshold_sweep": threshold_sweep(results) if FULL in modes else [],
+        "items": to_jsonable(results),
+    }
+    out = args.out_dir / subdir / f"{args.engine}.json"
+    write_json(out, payload)
+    md = openset_markdown(title, payload)
+    out.with_suffix(".md").write_text(md, encoding="utf-8")
+    print(md)
+    return 0
+
+
+def _register_openset(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser("openset", help="E2 leave-one-out open-set assignment, full inputs -> openset/<engine>.json")
+    add_common(p)
+    p.add_argument("--engine", default="linking", choices=["baseline", "linking"],
+                   help="engine: baseline | linking (default: %(default)s)")
+
+    def run(args: argparse.Namespace) -> int:
+        from ftf.evaluate.openset import FULL
+
+        return _openset_command(args, modes=[FULL], subdir="openset",
+                                title="E2 leave-one-out (one item, one whole group), full inputs")
+
+    p.set_defaults(func=run)
+
+
+def _register_degrade(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser("degrade", help="E3 leave-one-out with the held-out item degraded to one modality -> degrade/<engine>.json")
+    add_common(p)
+    p.add_argument("--engine", default="linking", choices=["baseline", "linking"],
+                   help="engine: baseline | linking (default: %(default)s)")
+
+    def run(args: argparse.Namespace) -> int:
+        from ftf.evaluate.openset import FULL
+        from ftf.evaluate.perturb import MODES
+
+        return _openset_command(args, modes=[FULL, *MODES], subdir="degrade",
+                                title="E3 degraded inputs (full row kept as the reference)")
+
+    p.set_defaults(func=run)
+
+
+def _run_distractors(args: argparse.Namespace) -> int:
+    """E4: every distractor checked against the engine; JSON + markdown with raw counts."""
+    from ftf.evaluate.engine import get_engine
+    from ftf.evaluate.labels import build_labels
+    from ftf.evaluate.metrics import must_not_link, predicted_partition
+    from ftf.evaluate.openset import run_distractors, to_jsonable
+    from ftf.evaluate.perturb import CORPUS_TAGS_FILE, read_corpus_tags, with_incidents
+    from ftf.evaluate.robustness import (
+        distractor_markdown,
+        distractor_plan,
+        expectation_text,
+        must_not_link_pairs,
+    )
+
+    ds = load_dataset(args)
+    labels = build_labels(ds, load_spec(args.spec))
+    corpus = Dataset.from_json(Path(args.corpus).read_bytes())
+    tags = read_corpus_tags(Path(args.corpus).parent / CORPUS_TAGS_FILE)
+    plan, notes = distractor_plan(ds, labels, corpus, tags, brand_limit=args.brand_limit)
+    engine = get_engine(args.engine)
+    results = run_distractors(engine, ds, plan)
+    base = engine.link_dataset(with_incidents(ds))
+    mnl = must_not_link(predicted_partition(base, "campaign"), must_not_link_pairs(labels))
+    payload = {
+        "schema": "ftf-eval-distractors@0.1",
+        "dataset": ds.name,
+        "dataset_build": dataset_build(args.dataset),
+        "engine": args.engine,
+        "selection": notes,
+        "results": [
+            {**to_jsonable([r])[0], "expected": expectation_text(d)}
+            for d, r in zip(plan, results, strict=True)
+        ],
+        "must_not_link": {"pairs": mnl["pairs"], "violated": mnl["violated"], "violations": mnl["violations"]},
+    }
+    out = args.out_dir / "distractors" / f"{args.engine}.json"
+    write_json(out, payload)
+    md = distractor_markdown(payload)
+    out.with_suffix(".md").write_text(md, encoding="utf-8")
+    print(md)
+    return 0
+
+
+def _register_distractors(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser("distractors", help="E4 distractors (must-not-link, kit copy, platform-only, collector, brand, celebrity) -> distractors/<engine>.json")
+    add_common(p)
+    p.add_argument("--engine", default="linking", choices=["baseline", "linking"],
+                   help="engine: baseline | linking (default: %(default)s)")
+    p.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS,
+                   help="background corpus batch-1 contract Dataset; its corpus_kind.jsonl tags sit beside it (default: %(default)s)")
+    p.add_argument("--brand-limit", type=int, default=None,
+                   help="check only the first N brand negatives (default: all tagged must_not_link)")
+    p.set_defaults(func=_run_distractors)
+
+
+# HACK-27/28/29 subcommands; append one register function per sibling issue.
 SUBCOMMANDS: list[Callable[[argparse._SubParsersAction], None]] = [
     _register_labels,
     _register_leak,
     _register_baseline,
+    _register_openset,
+    _register_degrade,
+    _register_distractors,
 ]
 
 
