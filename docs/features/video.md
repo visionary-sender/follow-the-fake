@@ -10,7 +10,7 @@ families). Extractor name: `video@0.1`.
 ## Method
 
 1. **Which artefacts.** Every artefact of type `video`, or with a video suffix (`.mp4 .mov .webm
-   .mkv .avi`). `.ts`/`.m2ts` files count only when they start with MPEG-TS sync bytes, because
+   .mkv .avi`). `.ts` files count only when they start with MPEG-TS sync bytes, because
    `.ts` is also TypeScript. Captures marked `duplicate_of` are skipped.
 2. **Probe.** `ffprobe` reads duration, resolution and whether there is an audio stream. A file
    with no readable video stream gets no indicators.
@@ -140,3 +140,14 @@ Coverage run: Ingestion's organiser dataset (`outputs/ingest/organiser/dataset.j
 - The scene threshold and grid are tuned on the three organiser videos only.
 - Speech: one transcript per video, no per-segment timestamps. Music-only or silent audio
   (case 47 has a silent track, −91 dB) gives no indicator.
+
+## Review notes (HACK-16)
+
+- Screen-recording keyframes lose their top 8 % (status bar: clock, date, notifications) before
+  the still-image families run, so collector data does not become creative indicators. Browser
+  chrome lower down can still be read by OCR.
+- Known limits: candidate frames are capped at 400 in time order before deduplication (all
+  organiser videos are under 5 minutes, so nothing is cut today); rotation side data is not
+  applied to `resolution` / `screen_size`.
+- Container: Debian's ffmpeg package is a GPL build. It is called as a separate program, not
+  linked, but the Demo project (HACK-32) must decide whether to ship it or an LGPL-only build.

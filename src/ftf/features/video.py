@@ -68,9 +68,12 @@ TIMEOUT = 900  # seconds per ffmpeg call
 FORMATS = "mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts"
 # MPEG-TS segments saved by HLS players (e.g. ``output_000_….ts``) are video too; ``.ts`` is also
 # TypeScript, so a file only counts when it starts with the TS sync byte.
-TS_SUFFIXES = frozenset({".ts", ".m2ts"})
+TS_SUFFIXES = frozenset({".ts"})
 
 SPEECH_MODEL = os.environ.get("FTF_VIDEO_SPEECH_MODEL", "Systran/faster-whisper-small")
+# Share of the frame height cut from the top of screen-recording keyframes before the still
+# families see them: the phone status bar (clock, date, notifications) is collector data.
+STATUS_BAR_CROP = 0.08
 _SCREEN_RECORDING = re.compile(r"screen.?recording|nagrywanie.ekranu|rpreplay|screencast", re.I)
 
 
@@ -239,6 +242,17 @@ def _locator(t: float, inner: Optional[str] = None) -> str:
     return f"{loc};{inner}" if inner else loc
 
 
+def _crop_status_bar(path: Path) -> Path:
+    """Copy of a screen-recording keyframe without the top status band (clock, date, alerts)."""
+    from PIL import Image
+
+    out = path.with_name(path.stem + ".content" + path.suffix)
+    with Image.open(path) as im:
+        w, h = im.size
+        im.crop((0, int(h * STATUS_BAR_CROP), w, h)).save(out)
+    return out
+
+
 def _builtin_image_features(path: Path) -> list[Feature]:
     """Stopgap while the image family (HACK-14) is not installed: a 64-bit pHash."""
     return [Feature(kind="image_phash", value=str(_phash(path)))]
@@ -344,7 +358,8 @@ def apply(ds: Dataset, raw_root: Path, out_dir: Path) -> Dataset:
         if info is None:
             print(f"ftf features video: {art.id}: no readable video stream", file=sys.stderr)
             continue
-        if _SCREEN_RECORDING.search(Path(art.path).name):
+        screen_recording = bool(_SCREEN_RECORDING.search(Path(art.path).name))
+        if screen_recording:
             writer.add(inc, cap, art, Feature(
                 kind="screen_size", layer=Layer.collector, level=Level.capture,
                 value=f"{info.width}x{info.height}", note="screen recording",
@@ -356,10 +371,11 @@ def apply(ds: Dataset, raw_root: Path, out_dir: Path) -> Dataset:
             writer.add(inc, cap, art, Feature(kind="video_meta", value=f"resolution={info.width}x{info.height}"))
 
         for k in extract_keyframes(path, out_dir / "keyframes" / _slug(art.id), info):
-            feats: list[Feature] = _builtin_image_features(k.path) if builtin else []
+            frame = _crop_status_bar(k.path) if screen_recording else k.path
+            feats: list[Feature] = _builtin_image_features(frame) if builtin else []
             for name, mod in families:
                 try:
-                    feats.extend(mod.features_for_image(k.path))
+                    feats.extend(mod.features_for_image(frame))
                 except Exception as e:  # one family failing on one frame must not stop the run
                     print(f"ftf features video: {name} on {art.id} t={k.t:.2f}: {e}", file=sys.stderr)
             for f in feats:
@@ -367,7 +383,11 @@ def apply(ds: Dataset, raw_root: Path, out_dir: Path) -> Dataset:
                 writer.add(inc, cap, art, f)
 
         if speech and info.has_audio:
-            res = transcribe(path)
+            try:
+                res = transcribe(path)
+            except Exception as e:  # missing faster-whisper or a failed download must not stop the run
+                print(f"ftf features video: speech on {art.id} skipped: {e}", file=sys.stderr)
+                res = None
             if res and res[0]:
                 text, secs, cpu = res
                 writer.add(inc, cap, art, Feature(
