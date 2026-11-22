@@ -14,6 +14,7 @@ import numpy as np
 from PIL import Image
 
 from ftf.features.common import model_dir
+from ftf.features.offline import offline
 
 log = logging.getLogger(__name__)
 
@@ -33,9 +34,14 @@ class Embedder:
 
         torch.set_num_threads(threads)
         cache = model_dir() / "hf"
+        local = offline()  # FTF_OFFLINE=1: read the cache only, never the network
         self.torch = torch
-        self.processor = AutoImageProcessor.from_pretrained(MODEL, revision=REVISION, cache_dir=cache)
-        self.model = AutoModel.from_pretrained(MODEL, revision=REVISION, cache_dir=cache).eval()
+        self.processor = AutoImageProcessor.from_pretrained(
+            MODEL, revision=REVISION, cache_dir=cache, local_files_only=local
+        )
+        self.model = AutoModel.from_pretrained(
+            MODEL, revision=REVISION, cache_dir=cache, local_files_only=local
+        ).eval()
         self.model_id = MODEL
 
     def __call__(self, rgb: Image.Image) -> tuple[np.ndarray, Optional[str]]:

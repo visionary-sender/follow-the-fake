@@ -46,12 +46,16 @@ organiser image is ever used as a reference. Images and embeddings are not in gi
   largest face) into `$FTF_MODEL_DIR/faces-reference/<manifest sha>/`;
 - or read from a prebuilt copy given by `FTF_FACES_REFERENCE=<dir>`. Ours is at
   `gs://follow-the-fake-data/outputs/visual/hack-15/reference/` (`embeddings.npy`, `rows.json`).
-- `FTF_OFFLINE=1` skips the build; if the build fails (no network, Wikimedia throttling) the
-  family still emits `face_embedding` and `brand`, just no `person_face`.
+- `FTF_OFFLINE=1` never builds: the reference set must already be in that cache (or at
+  `FTF_FACES_REFERENCE`), or `ftf features` stops naming it.
 
-Build it ahead of time with `python -m ftf.features.faces.reference build` (e.g. in a container
-build step). Wikimedia throttles bulk thumbnail downloads; the builder paces itself and honours
+Build it ahead of time with `ftf features prefetch` (default: from Wikimedia with the committed
+manifest; `--reference-from DIR` or `--reference-from gs://…/reference/` copies a prebuilt set
+instead). Wikimedia throttles bulk thumbnail downloads; the builder paces itself and honours
 `Retry-After`.
+
+Offline, `ftf features prefetch` also fills the YuNet and SFace weights, which are checked against
+their pinned SHA-256 digests on download and by size on later runs.
 
 **Brands.** A gazetteer in `brands.py` of about 50 Polish news portals, TV and radio, banks,
 large companies and public institutions that scam pages impersonate (general public knowledge;

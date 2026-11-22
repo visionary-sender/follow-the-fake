@@ -50,6 +50,7 @@ from ftf.features.common import (
     model_dir,
     resolve,
 )
+from ftf.features.offline import offline
 
 EXTRACTOR = "video@0.1"
 
@@ -309,6 +310,7 @@ def transcribe(path: Path) -> Optional[tuple[str, float, float]]:
             compute_type="int8",
             cpu_threads=_threads(),
             download_root=str(model_dir() / "faster-whisper"),
+            local_files_only=offline(),
         )
     t0 = time.process_time()
     segments, _ = _speech_model.transcribe(audio, language="pl", beam_size=5, vad_filter=True)
