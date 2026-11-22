@@ -13,8 +13,8 @@
       "connect.facebook.net", "www.facebook.com", "facebook.com", "graph.facebook.com", "static.xx.fbcdn.net", "www.googletagmanager.com",
       "www.google-analytics.com", "region1.google-analytics.com", "analytics.google.com", "stats.g.doubleclick.net", "googleads.g.doubleclick.net",
       "www.googleadservices.com", "pagead2.googlesyndication.com", "td.doubleclick.net", "www.google.com", "analytics.tiktok.com",
-      "sc-static.net", "tr.snapchat.com", "static.ads-twitter.com", "analytics.twitter.com", "snap.licdn.com", "bat.bing.com",
-      "www.clarity.ms", "c.clarity.ms", "mc.yandex.ru", "cdn.taboola.com", "trc.taboola.com", "q.quora.com", "challenges.cloudflare.com",
+      "sc-static.net", "tr.snapchat.com", "analytics.twitter.com", "snap.licdn.com",
+      "mc.yandex.ru", "challenges.cloudflare.com",
       "static.cloudflareinsights.com", "www.youtube.com", "i.ytimg.com", "www.w3.org", "github.com", "vuejs.org", "npms.io", "fpjs.dev",
       "schema.org", "ogp.me"
     ],

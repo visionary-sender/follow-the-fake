@@ -56,6 +56,15 @@ def test_offsite_well_known_redirect_is_decoy():
     assert cl.classify_content("https://www.facebook.com/a", "https://m.facebook.com/a", 200, _page()).outcome == cl.LIVE
 
 
+def test_offsite_redirect_rule_with_example_hosts(monkeypatch):
+    # The rule does not depend on which hosts are listed: test it with invented .example hosts.
+    monkeypatch.setattr(cl, "WELL_KNOWN_HOSTS", ("brand.example",))
+    v = cl.classify_content("https://scam.example/x", "https://www.brand.example/", 200, _page())
+    assert v.outcome == cl.DECOY and "brand.example" in v.reason
+    assert cl.classify_content("https://scam.example/x", "https://www.other.example/", 200, _page()).outcome == cl.LIVE
+    assert cl.classify_content("https://brand.example/a", "https://m.brand.example/a", 200, _page()).outcome == cl.LIVE
+
+
 def test_visible_text_ignores_scripts():
     assert cl.visible_text("<script>var a='long text here'</script><p>hi</p>") == "hi"
 
