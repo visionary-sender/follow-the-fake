@@ -152,6 +152,49 @@ Defaults: `--out-dir /data/derived/evaluation` (override with `$FTF_EVAL_DIR`), 
 
 `--no-hide` runs the engine on the visible dataset, which measures how much the platform ids help.
 
+## Leave-one-out, degraded inputs and distractors (HACK-28)
+
+The three commands below share one protocol (`ftf.evaluate.openset`, `ftf.evaluate.perturb`,
+glue in `ftf.evaluate.robustness`). Ground-truth groups are the label groups of the `campaign`
+relation with two or more canonical captures. Both protocols hold out whole incidents, and an
+exact duplicate of a held-out capture is held out with it.
+
+- `loo_item`: hold out one incident whose groups keep a member in the rest; cluster the rest;
+  assign the held-out incident.
+- `loco`: hold out every incident of one group; cluster the rest; each held-out incident should come
+  out `new`.
+
+An `assign` is **correct** when the chosen campaign maps to one of the item's known groups, **wrong**
+(a false accept) otherwise. `new`, `review` and the evidence capacity are counted as the engine
+reports them. Every count is raw; rates sit next to the counts.
+
+| command | writes |
+|---|---|
+| `ftf eval openset [--engine baseline\|linking] [--dataset F] [--spec F]` (E2) | `<out>/openset/<engine>.json` and `.md`: per (protocol, mode) counts, threshold sweep, every item |
+| `ftf eval degrade [--engine ...] [--dataset F] [--spec F]` (E3) | `<out>/degrade/<engine>.json` and `.md`: the same for the full reference and each degraded mode (`screenshot`, `url`, `html`, `har`, `ad_text`) |
+| `ftf eval distractors [--engine ...] [--dataset F] [--spec F] [--corpus F] [--brand-limit N]` (E4) | `<out>/distractors/<engine>.json` and `.md`: every distractor with its expected answer, pass or fail and the violations |
+
+E3 degrades only the held-out incident; the reference is never degraded. Every output records
+`dataset_build`.
+
+Distractor selection (`ftf.evaluate.robustness.distractor_plan`, one fixed rule, no values in code):
+
+- (a) every ground-truth must-not-link pair (campaign relation);
+- (b) a synthetic kit copy and (c) a platform-only page, of the first capture of each of the three largest groups;
+- (d) collector injection into two disjoint pairs of first captures from different incidents;
+- (e) brand negatives: each corpus incident whose tag in `corpus_kind.jsonl` is `must_not_link`.
+  The corpus tag lives in that sidecar file beside `dataset.json`, not in the indicators. Incidents
+  tagged `must_not_link_blocked` are left out: they are block pages, not outlet pages;
+- (f) celebrity-only: the first two canonical captures (by id) with a creative-layer indicator, each in its own incident.
+  The organiser dataset has no face or image indicator; its creative layer holds only the ad id and name.
+
+`--corpus` defaults to `/data/derived/corpus/batch-1/ingested/dataset.json` (override with
+`$FTF_EVAL_CORPUS`).
+
+A distractor passes when the engine produces no violation: no forbidden link or campaign, no
+assignment the expectation forbids, and no changed decision for collector injection. Expected
+relations (for example the template link of a kit copy) are reported, not required.
+
 A new subcommand is one `register(subparsers)` function appended to `SUBCOMMANDS` in
 `ftf/evaluate/commands.py`. It uses `add_common` and `load_dataset` for the shared options.
 
@@ -162,6 +205,9 @@ scripts/vm.sh run -- ftf eval labels
 scripts/vm.sh run -- ftf eval leak
 scripts/vm.sh run -- ftf eval baseline --engine baseline
 scripts/vm.sh run -- ftf eval baseline --engine linking
+scripts/vm.sh run -- ftf eval openset --engine linking
+scripts/vm.sh run -- ftf eval degrade --engine linking
+scripts/vm.sh run -- ftf eval distractors --engine linking
 ```
 
 Sync the results to the bucket from the VM:
