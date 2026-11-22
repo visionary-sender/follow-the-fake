@@ -175,6 +175,7 @@ Owner rules, the only exceptions to the permissive-only policy:
 | Playwright (Python package and driver) | Apache-2.0 | Keep the licence and notices. Optional `fetch` extra only. |
 | Chromium headless shell | BSD-3-Clause | Keep the notices. Bundles unmodified FFmpeg (LGPL-2.1): ship it unmodified, keep the LGPL text, and point to the upstream FFmpeg source. |
 | Node.js runtime (inside Playwright) | MIT | Keep the notices. |
+| Debian ffmpeg (features slot, `FTF_WITH_FFMPEG`; HACK-80) | GPL-2+ and GPL-3+ parts, LGPL-2.1+ parts, and permissive parts (the exact licence string is in `scripts/licences.py`, `SYSTEM_EXCEPTIONS`) | Named exception, pending owner decision (HACK-74). Used unmodified, run as a separate program. Only this exact licence string is accepted; GPL is not allowed in general. |
 | Debian system libraries of Chromium, 112 packages (HACK-68, section 2a) | LGPL, MPL, GPL and others, per package | Unmodified Debian packages, installed by `playwright install --with-deps`. Keep each package's copyright notices (`/usr/share/doc/<package>/copyright`). Recorded in `scripts/chromium-debian-packages.tsv`. |
 
 ## 4. Models

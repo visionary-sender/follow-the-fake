@@ -35,7 +35,7 @@ from packaging.utils import canonicalize_name
 
 ROOT = Path(__file__).resolve().parent.parent
 TABLE = ROOT / "LICENSES-THIRD-PARTY.md"
-EXTRAS = ("app", "dev", "fetch")
+EXTRAS = ("app", "dev", "fetch", "features")
 
 # Matched against whole words of a licence name ("MIT License", "BSD-2-Clause", "PSF-2.0").
 ALLOWED_WORDS = {"MIT", "BSD", "0BSD", "APACHE", "PSF", "ISC", "HPND", "ZLIB"}
@@ -54,8 +54,26 @@ EXCEPTIONS = {
         "licence": "Mozilla Public License 2.0 (MPL 2.0)",
         "shown_as": "MPL-2.0 (named exception, unmodified CA bundle; see README Licence section)",
     },
+    # HACK-80 (owner decision, 2026-11-22): tqdm, pulled in by transformers and huggingface_hub, used
+    # unmodified; pending owner review (HACK-74). Only this exact licence string is accepted.
+    "tqdm": {
+        "licence": "MPL-2.0 AND MIT",
+        "shown_as": "MPL-2.0 AND MIT (named exception, unmodified, pending owner review, HACK-74)",
+    },
+    # HACK-80 (owner decision, 2026-11-22): BSL-1.0 is one part of torch's bundled code, and
+    # CNRI-Python is the regex package's own licence. Each is accepted only as torch's or regex's
+    # exact licence string, so no other package can use either licence ID.
+    "torch": {
+        "licence": ("Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause "
+                    "AND BSL-1.0 AND ISC AND MIT AND Zlib"),
+        "shown_as": "Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause "
+                    "AND BSL-1.0 AND ISC AND MIT AND Zlib (named exception: BSL-1.0 part of bundled code, HACK-80)",
+    },
+    "regex": {
+        "licence": "Apache-2.0 AND CNRI-Python",
+        "shown_as": "Apache-2.0 AND CNRI-Python (named exception: CNRI-Python, HACK-80)",
+    },
 }
-
 
 # HACK-68 named exception (owner decision, 2026-11-22): the Debian system libraries that Chromium
 # needs, installed in the image by `playwright install --with-deps` (Dockerfile). They are used
@@ -140,8 +158,26 @@ def shown_licence(name: str, licence: str) -> str:
     return licence
 
 
+# HACK-80 named exception (owner decision, pending HACK-74): Debian's ffmpeg, installed by the
+# Dockerfile's features slot (FTF_WITH_FFMPEG). Used unmodified and run as a separate program. Its
+# copyright file lists GPL parts, so only this exact licence string is accepted, and no other package.
+SYSTEM_EXCEPTIONS = {
+    "ffmpeg": {
+        "licence": ("BSD-1-clause; BSD-2-clause; BSD-3-clause; BSL; Expat; GPL-2+; GPL-3+; IJG; ISC; "
+                    "LGPL-2+; LGPL-2.1+; LGPL-2.1+ and BSD-2-clause; LGPL-2.1+ and BSD-3-clause; "
+                    "LGPL-2.1+ and BSL; LGPL-2.1+ and Expat; LGPL-2.1+ and Sundry; Sundry; Zlib; "
+                    "man-page; public-domain"),
+        "shown_as": "ffmpeg (named exception: unmodified, run as a separate program, pending owner decision (HACK-74))",
+    },
+}
+
+
 def is_allowed_system(name: str, licence: str, chromium: dict[str, str]) -> bool:
-    """Permissive licence, or the HACK-68 exception: listed in CHROMIUM_TSV with the same licence."""
+    """Permissive licence, the HACK-68 exception (listed in CHROMIUM_TSV with the same licence), or the
+    named exception in SYSTEM_EXCEPTIONS (exact licence string)."""
+    exception = SYSTEM_EXCEPTIONS.get(name)
+    if exception is not None and licence == exception["licence"]:
+        return True
     return chromium.get(name) == licence or is_permissive(licence)
 
 
@@ -155,6 +191,22 @@ def audit_image(rows: dict[str, str], chromium: dict[str, str]) -> list[str]:
     errors += [f"listed in {CHROMIUM_TSV.name} but absent from the image: {name}"
                for name in sorted(set(chromium) - set(rows))]
     return errors
+
+
+def features_installed() -> bool:
+    """True when every requirement of the `features` extra is installed. The default VM venv has none,
+    so `scripts/vm.sh licences` installs the extra (HACK-80) and the licence test skips without it."""
+    for raw in metadata.requires("ftf") or []:
+        req = Requirement(raw)
+        in_features = req.marker is not None and req.marker.evaluate({"extra": "features"}) \
+            and not req.marker.evaluate({"extra": ""})
+        if not in_features:
+            continue
+        try:
+            metadata.distribution(req.name)
+        except metadata.PackageNotFoundError:
+            return False
+    return True
 
 
 def dependencies() -> dict[str, metadata.Distribution]:
@@ -175,7 +227,7 @@ def dependencies() -> dict[str, metadata.Distribution]:
         try:
             dist = metadata.distribution(req.name)
         except metadata.PackageNotFoundError:
-            raise SystemExit(f"required package not installed: {req.name} (install .[app,dev,fetch])")
+            raise SystemExit(f"required package not installed: {req.name} (install .[app,dev,fetch,features])")
         found[name] = dist
         queue.extend((r, frozenset(req.extras)) for r in dist.requires or [])
     return found

@@ -6,27 +6,44 @@ Covers the runtime dependencies and the `app`, `dev` and `fetch` extras of `ftf`
 | Package | Licence |
 |---|---|
 | altair | BSD License |
+| annotated-doc | MIT |
 | annotated-types | MIT |
 | anyio | MIT |
 | attrs | MIT |
+| av | BSD-3-Clause |
+| beautifulsoup4 | MIT License |
 | certifi | MPL-2.0 (named exception, unmodified CA bundle; see README Licence section) |
 | charset-normalizer | MIT |
 | click | BSD-3-Clause |
+| ctranslate2 | MIT |
 | datasketch | MIT License |
+| faster-whisper | MIT License |
 | filelock | MIT |
+| flatbuffers | Apache Software License |
+| fsspec | BSD-3-Clause |
 | greenlet | MIT AND PSF-2.0 |
 | h11 | MIT License |
+| hf-xet | Apache-2.0 |
+| httpcore | BSD-3-Clause |
+| httpx | BSD License |
+| huggingface-hub | Apache Software License |
 | idna | BSD-3-Clause |
+| imagehash | 2-clause BSD License |
 | iniconfig | MIT |
 | itsdangerous | BSD License |
 | jinja2 | BSD License |
 | jsonschema | MIT |
 | jsonschema-specifications | MIT |
 | lxml | BSD-3-Clause |
+| markdown-it-py | MIT License |
 | markupsafe | BSD-3-Clause |
+| mdurl | MIT License |
+| mpmath | BSD License |
 | narwhals | MIT |
 | networkx | BSD-3-Clause |
 | numpy | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 |
+| onnxruntime | MIT License |
+| opencv-python-headless | Apache Software License |
 | packaging | Apache-2.0 OR BSD-2-Clause |
 | pandas | BSD-3-Clause |
 | pillow | MIT-CMU |
@@ -43,14 +60,28 @@ Covers the runtime dependencies and the `app`, `dev` and `fetch` extras of `ftf`
 | pytest | MIT |
 | python-dateutil | BSD-3-Clause |
 | python-multipart | Apache-2.0 |
+| pywavelets | MIT AND BSD-3-Clause |
+| pyyaml | MIT License |
 | referencing | MIT |
+| regex | Apache-2.0 AND CNRI-Python (named exception: CNRI-Python, HACK-80) |
 | requests | Apache Software License |
 | requests-file | Apache Software License |
+| rich | MIT License |
 | rpds-py | MIT |
+| safetensors | Apache Software License |
 | scipy | BSD License |
+| setuptools | MIT |
+| shellingham | ISC License (ISCL) |
+| soupsieve | MIT |
 | starlette | BSD-3-Clause |
 | streamlit | Apache-2.0 |
+| sympy | BSD License |
 | tldextract | BSD-3-Clause |
+| tokenizers | Apache Software License |
+| torch | Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND ISC AND MIT AND Zlib (named exception: BSL-1.0 part of bundled code, HACK-80) |
+| tqdm | MPL-2.0 AND MIT (named exception, unmodified, pending owner review, HACK-74) |
+| transformers | Apache 2.0 License |
+| typer | MIT |
 | typing-extensions | PSF-2.0 |
 | typing-inspection | MIT |
 | tzdata | Apache-2.0 |

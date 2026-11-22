@@ -3,7 +3,7 @@
 #
 #   scripts/vm.sh test [pytest args...]   run the test suite on the VM, return pytest's exit code
 #   scripts/vm.sh run -- <cmd...>         run a command in the synced checkout, venv active
-#   scripts/vm.sh licences                regenerate LICENSES-THIRD-PARTY.md (written locally)
+#   scripts/vm.sh licences                regenerate LICENSES-THIRD-PARTY.md (written locally; installs the features extra)
 #
 # Every call syncs the worktree's tracked and untracked-but-not-ignored files (never data/ or
 # anything gitignored) to /work/<slug>/src on the VM, replacing the previous copy so files
@@ -55,13 +55,18 @@ rm -rf "$w/src"
 mv "$w/src.new" "$w/src"
 # Rebuild the venv when the package metadata or the base venv's pins change.
 extras=${FTF_VM_EXTRAS:-app,dev,fetch}
-hash=$( { cat "$w/src/pyproject.toml" "$w/src/src/ftf/__init__.py"; echo "$extras"; /opt/venv-base/bin/pip freeze; } \
+hash=$( { cat "$w/src/pyproject.toml" "$w/src/src/ftf/__init__.py"; echo "$extras torch=2.15.0+cpu"; /opt/venv-base/bin/pip freeze; } \
   | sha256sum | cut -d' ' -f1)
 if [ ! -x "$w/venv/bin/python" ] || [ "$(cat "$w/venv/.pyproject-hash" 2>/dev/null)" != "$hash" ]; then
   echo "vm.sh: (re)installing venv $w/venv" >&2
   rm -rf "$w/venv"
   python3 -m venv "$w/venv"
   /opt/venv-base/bin/pip freeze --exclude-editable > "$w/base-constraints.txt"
+  # CPU torch from the PyTorch index (pinned, as in the Dockerfile), so `features` pulls no CUDA wheels.
+  case ",$extras," in *,features,*)
+    "$w/venv/bin/pip" install -q --disable-pip-version-check \
+      --extra-index-url https://download.pytorch.org/whl/cpu "torch==2.15.0+cpu" >&2 ;;
+  esac
   "$w/venv/bin/pip" install -q --disable-pip-version-check \
     -c "$w/base-constraints.txt" -e "$w/src[$extras]" >&2
   echo "$hash" > "$w/venv/.pyproject-hash"
@@ -88,7 +93,10 @@ ssh_vm() {
     --ssh-flag=-T --command "$1"
 }
 
-remote_cmd="FTF_VM_EXTRAS=$(printf '%q' "${FTF_VM_EXTRAS:-app,dev,fetch}") bash -c $(printf '%q' "$remote") ftf-vm $(printf '%q ' "$slug" "$mode" "$@")"
+# The licence table covers the `features` extra too (HACK-80), so `licences` installs it by default.
+extras=${FTF_VM_EXTRAS:-app,dev,fetch}
+if [ "$mode" = licences ]; then extras=${FTF_VM_EXTRAS:-app,dev,fetch,features}; fi
+remote_cmd="FTF_VM_EXTRAS=$(printf '%q' "$extras") bash -c $(printf '%q' "$remote") ftf-vm $(printf '%q ' "$slug" "$mode" "$@")"
 echo "vm.sh: $VM:/work/$slug ($mode)" >&2
 
 if [ "$mode" = licences ]; then

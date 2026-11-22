@@ -12,8 +12,22 @@ _spec.loader.exec_module(licences)
 
 
 def test_licence_table_is_current_and_permissive():
+    if not licences.features_installed():
+        # The table covers the `features` extra; `scripts/vm.sh licences` installs it and regenerates the table.
+        pytest.skip("features extra not installed here: the table check needs it (scripts/vm.sh licences)")
     out = subprocess.run([sys.executable, str(SCRIPT), "--check"], capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
+
+
+def test_bsl_and_cnri_only_for_torch_and_regex():
+    # HACK-80: BSL-1.0 and CNRI-Python are accepted for torch and regex and nothing else.
+    assert not licences.is_permissive("BSL-1.0")
+    assert not licences.is_permissive("CNRI-Python")
+    assert licences.is_allowed("torch", licences.EXCEPTIONS["torch"]["licence"])
+    assert licences.is_allowed("regex", licences.EXCEPTIONS["regex"]["licence"])
+    assert not licences.is_allowed("some-other-package", "BSL-1.0")
+    assert not licences.is_allowed("some-other-package", "CNRI-Python")
+    assert not licences.is_allowed("torch", "BSL-1.0")  # exact licence string only
 
 
 @pytest.mark.parametrize(
@@ -78,6 +92,14 @@ def test_chromium_exception_is_exact_and_narrow():
     assert not licences.is_allowed_system("libfake-other", "LGPL-2.1+", chromium)
     assert not licences.is_allowed_system("libfake-other", "GPL-2+", chromium)
     assert licences.is_allowed_system("libfake-other", "MIT", chromium)  # permissive needs no exception
+
+
+def test_ffmpeg_exception_is_exact_and_narrow():
+    # HACK-80: Debian's ffmpeg with exactly its recorded licence string; GPL is not allowed in general.
+    ffmpeg = licences.SYSTEM_EXCEPTIONS["ffmpeg"]["licence"]
+    assert licences.is_allowed_system("ffmpeg", ffmpeg, {})
+    assert not licences.is_allowed_system("ffmpeg", "GPL-3+", {})
+    assert not licences.is_allowed_system("some-other-package", ffmpeg, {})
 
 
 def test_image_audit_reports_unlisted_copyleft_and_missing_entries():

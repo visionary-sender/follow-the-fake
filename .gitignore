@@ -66,5 +66,8 @@ notes/
 *.plan.md
 *.local.md
 
+# Build-context folders filled on the workbench VM only (never in git; see scripts/fetch_face_reference.sh).
+docker/build-context/faces-reference/*
+!docker/build-context/faces-reference/.gitkeep
 # Face reference images (HACK-83): built on a VM, live in the bucket, never in git
 **/face-reference/

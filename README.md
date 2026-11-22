@@ -108,37 +108,22 @@ The image ships it: `scripts/fetch-brand-stoplist.sh` copies it into the build c
 build still works and the engine warns and scores without the stop-list. Details:
 [docs/container.md](docs/container.md) and [docs/linking-decisions.md](docs/linking-decisions.md).
 
-### Face reference set (`FTF_FACES_REFERENCE`)
+### Face reference set (`FTF_FACE_REFERENCE`)
 
-The faces feature family (`ftf.features.faces`) compares every face in an ad creative or landing page
-with a small reference set of public figures who are impersonated in scam ads. For each face it
-records the nearest reference person (`person_face`, with the cosine similarity and the top three
-candidates) and a 128-dimension face embedding, so the same face can be linked across captures. No
-threshold is applied here: the linking engine weighs `person_face` low, because one celebrity is used
-by many unrelated campaigns.
+The faces feature family (`ftf.features.faces`) compares every face in an ad creative or landing page with a small reference set of public figures whose likeness scam ads use. Each face gets its nearest reference people (`person_face`: the top three candidates by cosine similarity of 128-dimension SFace embeddings), so the same face can be linked across captures. No threshold is applied here: the linking engine weighs `person_face` low, because one celebrity is used by many unrelated campaigns.
 
-The set is defined by `src/ftf/features/faces/reference_manifest.json`. It lists 11 people, each with
-their Wikidata id and the Wikimedia Commons images used (24 in total, at most five per person):
+The set covers 33 public figures with 96 portraits, as listed in `src/ftf/features/faces/reference_manifest.json`:
+Adam Glapiński, Andrzej Domański, Andrzej Duda, Anita Werner, Bogdan Rymanowski, Cristiano Ronaldo, Donald Tusk, Elon Musk, Iga Świątek, Jarosław Kaczyński, Justyna Kowalczyk, Karol Nawrocki, Krzysztof Stanowski, Kuba Wojewódzki, Leszek Balcerowicz, Mateusz Morawiecki, Michał Sołowow, Monika Olejnik, Piotr Kraśko, Radosław Sikorski, Rafał Brzoska, Robert Kubica, Robert Lewandowski, Robert Makłowicz, Szymon Hołownia, Sławomir Mentzen, Tomasz Lis, Tomasz Sekielski, Ursula von der Leyen, Wojciech Szczęsny, Wołodymyr Zełenski, Władysław Kosiniak-Kamysz, Zbigniew Boniek.
 
-- Rafał Brzoska, Krzysztof Stanowski, Tomasz Sekielski, Monika Olejnik, Mateusz Morawiecki, Donald Tusk,
-  Robert Lewandowski, Radosław Sikorski, Andrzej Domański, Andrzej Duda, Anita Werner.
+The set is built on a VM with `python -m ftf.features.faces.reference build` from Wikidata and Wikimedia Commons. Only CC0 and CC BY images are used, each with exactly one clear face, and no organiser image is ever used as a reference. The images and embeddings are not in git. The prebuilt set lives in `gs://follow-the-fake-data/outputs/visual/face-reference/`, and the container image bakes it into `/opt/ftf-models/face-reference`.
 
-Only public domain, CC0 and CC BY images are accepted, each with exactly one clear face. The build
-downloads the Commons thumbnails and embeds the largest face of each with SFace. No organiser image is
-ever used as a reference, and the images and embeddings are not in git. The build is
-`python -m ftf.features.faces.reference build`; the embeddings take about 12 KB.
+The reference directory is resolved in this order:
 
-The reference is loaded in this order:
+1. `FTF_FACE_REFERENCE`, if set;
+2. `FTF_FACES_REFERENCE`, the older name, still read with a deprecation warning;
+3. `$FTF_MODEL_DIR/face-reference` (default `~/.cache/ftf/models/face-reference`; in the container `/opt/ftf-models/face-reference`).
 
-1. the prebuilt directory named by `FTF_FACES_REFERENCE` (our copy is
-   `gs://follow-the-fake-data/outputs/visual/hack-15/reference/`);
-2. the cache `$FTF_MODEL_DIR/faces-reference/<manifest sha>`. In the container `FTF_MODEL_DIR` is
-   `/opt/ftf-models`, so the cache is `/opt/ftf-models/faces-reference/<manifest sha>`; without it the
-   default is `~/.cache/ftf/models`;
-3. a fresh build from Wikimedia, unless `FTF_OFFLINE=1`.
-
-If none of these works, faces are still embedded and linked, but no `person_face` is written. Details:
-[docs/features/faces.md](docs/features/faces.md).
+Nothing is downloaded at scan time. Without a manifest in that directory, faces are still embedded and linked, but no `person_face` is written. Details: [docs/features/faces.md](docs/features/faces.md).
 
 ### Safe URL fetcher (`ftf fetch`)
 
