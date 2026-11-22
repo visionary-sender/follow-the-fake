@@ -300,6 +300,26 @@ def is_campaign_evidence(layer: Layer, kind: str) -> bool:
     return kind in CAMPAIGN_EVIDENCE_KINDS
 
 
+# Corroborated landing build (HACK-84, applied in `ledger.kit_build`). With the platform ids hidden, one
+# campaign's captures usually share one landing build. A copied kit alone stays template-level (HACK-77), and on
+# the organiser set one operator reuses its build (skeleton, inline scripts, assets) across its campaigns, so even
+# two rare structure kinds do not tell campaigns apart. A build counts for the campaign only when a page-level
+# structure value (whole-page skeleton or normalised inline script) carried by at most KIT_BUILD_MAX_GROUPS
+# pre-groups is backed by a rare shared creative image, which the operator changes per campaign. Then, for the
+# relations in KIT_BUILD_RELATIONS, the rare structure values (only those, not every value of their kind) count
+# at KIT_BUILD_SCALE and open the campaign gate, and the page and the script take one kit-layer term each.
+KIT_BUILD_ANCHORS = frozenset({"dom_skeleton_sha256", "inline_script_sha256"})
+KIT_BUILD_STRUCTURE = KIT_BUILD_ANCHORS | {"asset_norm_sha256"}
+# masked text templates are left out: one operator reuses its article text across campaigns (review, HACK-84)
+KIT_BUILD_CORROBORATION = frozenset({"image_phash", "image_pdq"})
+KIT_BUILD_MAX_GROUPS = 2
+KIT_BUILD_SCALE = 1.0
+KIT_BUILD_RELATIONS = frozenset({Relation.campaign})
+# kit-layer term per kind under a corroborated build: page structure vs page script (others share the page slot)
+KIT_BUILD_SLOTS = {"inline_script_sha256": "build:script"}
+KIT_BUILD_PAGE_SLOT = "build:page"
+
+
 # Values that record a failed lookup, not evidence (HACK-19 writes `unknown` when a source is down).
 IGNORED_VALUES = frozenset({"unknown"})
 
