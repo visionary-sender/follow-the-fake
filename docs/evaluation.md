@@ -212,3 +212,24 @@ scripts/vm.sh run -- ftf eval distractors --engine linking
 
 Sync the results to the bucket from the VM:
 `gcloud storage rsync -r /data/derived/evaluation/ gs://follow-the-fake-data/outputs/evaluation/`.
+
+## README anchors
+
+The README "Evaluation results" section wraps each block copied from the report in
+`<!-- eval:<name> start -->` … `<!-- eval:<name> end -->`, so the final numbers can be refreshed by
+replacing the block contents. The names map to the report's `report.md` sections:
+
+| anchor | report section |
+|---|---|
+| `build` | the `Dataset build:` line |
+| `ground-truth` | Ground truth and leak check |
+| `e1-hidden` | E1 hidden-layer recovery |
+| `e7-timesplit` | E7 time split |
+| `e2-openset` | E2 leave-one-out open-set assignment |
+| `e3-degraded` | E3 degraded inputs |
+| `e4-distractors` | E4 distractors |
+| `e6-sensitivity` | E6 sensitivity |
+| `run-status` | Run status |
+| `limitations` | Limitations paragraph |
+
+Read `report.md` from `gs://follow-the-fake-data/outputs/evaluation/report/`, never from `logs/`.

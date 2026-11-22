@@ -129,7 +129,7 @@ The protocol, from the method notes:
 - **Time split (E7).** The base holds the earlier captures, and the later ones are scored as new items. This is the closest proxy we have to a hidden test set.
 - **Hidden-layer recovery (E1).** The platform ids are hidden, and the engine must recover campaign and operator pairs from the other layers. It is scored on pairwise counts, macro B-cubed precision and recall, and must-not-link violations.
 - **Leave-one-out (E2).** Each incident of a campaign with two or more incidents is removed in turn and assigned against the rest. We report how often the right campaign is chosen, how often a wrong one is accepted (the false-accept rate, which should be zero) and the median evidence capacity.
-- **Degraded inputs (E3).** The held-out item loses one modality at a time (traffic, saved page, ad text or screenshot). A screenshot-only item must end in review, not new.
+- **Degraded inputs (E3).** The held-out item loses one modality at a time (traffic, saved page, ad text or screenshot), and a URL-only mode keeps just the link. A screenshot-only item must end in review, not new.
 - **Distractors (E4).** Pairs that must not link (captures of two different campaigns of one operator, a kit copied onto another platform, a real outlet page used for a brand, a page with only platform constants, a page with only a celebrity) and a synthetic copy of a kit must not join a campaign.
 - **Sensitivity (E6).** Each prior is moved by −2, −1, +1 and +2 bits, one at a time. The links that flip are flagged as fragile.
 
@@ -137,12 +137,12 @@ The tables below are the final evaluation report (HACK-29, `report.md` in `gs://
 
 Two results matter most for the claims above, and the tables below give the counts:
 
-- With platform ids hidden (E1), the Linking engine's campaign gate (HACK-53) trades recall for precision: it links almost no true campaign pairs, and it violates no must-not-link pair.
+- With platform ids hidden (E1), the Linking engine's campaign gate (HACK-53) trades recall for precision: it links no true campaign pairs, and it violates no must-not-link pair.
 - On the distractors (E4), the Linking engine passes every class except the synthetic kit copy (b), which is reported in its table rather than hidden.
 
 In the pair counts, `P` is out of the predicted pairs and `R` is out of the true pairs, as the report defines them.
 
-**Cases and incidents.** The evaluation counts 26 case folders. The organiser dataset has 28 incidents: the 25 case folders (15 in `BACKUP`, 10 in `do_udostępnienia`) and 3 ad-hoc inputs, each one URL from the organiser's scam-link list. The labels group the three scam-link URLs as one folder, which is why the report shows 26 case folders.
+**Cases and incidents.** The evaluation counts 26 case folders. The organiser dataset has 28 incidents: the 25 case folders (15 in `BACKUP`, 10 in `do_udostepnienia`) and 3 ad-hoc inputs, each one URL from the organiser's scam-link list. The report's 26 case folders are those 25 plus one group for the three scam-link inputs. The E7 time split and the `input:` rows treat the three inputs as separate incidents.
 
 <!-- eval:build start -->
 Dataset build: `main 6ff9e3e`. Each table title states its evidence setting: E1, E6 and E7 run with platform ids hidden; E2, E3 and E4 run on all evidence (platform ids visible), the realistic setting. The labels and leak check use the platform ids as ground truth. Counts are raw: `P 2 of 11 pairs` means 2 of the 11 predicted pairs are true, and `R 2 of 12 pairs` means 2 of the 12 true pairs were found. Macro scores average over label groups first, then over groups. `baseline` is the loose floor; `linking` is the Linking engine.
