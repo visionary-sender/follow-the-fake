@@ -1,0 +1,382 @@
+{
+ "about": "Reference faces of public figures impersonated in scam ads. Images are not redistributed; they are downloaded from Wikimedia Commons at build time. Allowed licences: public domain, CC0, CC BY.",
+ "people": [
+  {
+   "name": "Rafał Brzoska",
+   "wikidata": "Q48845086",
+   "description": "Polish businessman",
+   "images": [
+    {
+     "title": "File:Rafał Brzoska.png",
+     "source": "https://commons.wikimedia.org/wiki/File:Rafa%C5%82_Brzoska.png",
+     "thumb_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/a2/Rafa%C5%82_Brzoska.png/500px-Rafa%C5%82_Brzoska.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+     "author": "Warsaw PhotoProton Studio",
+     "credit": "https://www.flickr.com/photos/202351831@N03/54365050188/",
+     "licence": "CC0",
+     "licence_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+     "restrictions": "",
+     "sha256": "dfa710abefa0e9399a3c3767afd8ca8755eaed7a2389027061db1b8382bbbfda",
+     "consistency_cosine": 1.0
+    }
+   ]
+  },
+  {
+   "name": "Krzysztof Stanowski",
+   "wikidata": "Q56339782",
+   "description": "Polish businessman, journalist, publicist",
+   "images": [
+    {
+     "title": "File:Krzysztof Stanowski i Magdalena Biejat - 23.03.25 (54405349059) 01 (Stanowski cropped).jpg",
+     "source": "https://commons.wikimedia.org/wiki/File:Krzysztof_Stanowski_i_Magdalena_Biejat_-_23.03.25_(54405349059)_01_(Stanowski_cropped).jpg",
+     "thumb_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/5a/Krzysztof_Stanowski_i_Magdalena_Biejat_-_23.03.25_%2854405349059%29_01_%28Stanowski_cropped%29.jpg/500px-Krzysztof_Stanowski_i_Magdalena_Biejat_-_23.03.25_%2854405349059%29_01_%28Stanowski_cropped%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+     "author": "Monika Szafrańska (Klub Lewicy)",
+     "credit": "https://www.flickr.com/photos/193098256@N08/54405349059/",
+     "licence": "Public domain",
+     "licence_url": "",
+     "restrictions": "",
+     "sha256": "f994da661b0e13a4fddec24d2c1c49b99c51bad16972269e19e7c10a22874e8c",
+     "consistency_cosine": 1.0
+    }
+   ]
+  },
+  {
+   "name": "Tomasz Sekielski",
+   "wikidata": "Q9359684",
+   "description": "Polish journalist",
+   "images": [
+    {
+     "title": "File:Tomasz.Sekielski.JPG",
+     "source": "https://commons.wikimedia.org/wiki/File:Tomasz.Sekielski.JPG",
+     "thumb_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/3f/Tomasz.Sekielski.JPG/500px-Tomasz.Sekielski.JPG?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+     "author": "#WybieramEuropę",
+     "credit": "#WybieramEuropę Tomasz Sekielski (0:09)",
+     "licence": "CC BY 3.0",
+     "licence_url": "https://creativecommons.org/licenses/by/3.0",
+     "restrictions": "",
+     "sha256": "af4588ace97bdb8db1792fd9c1dee08550f4e78945786116cf20fbe5370cca3b",
+     "consistency_cosine": 1.0
+    },
+    {
+     "title": "File:Tomasz.Sekielski (cropped).JPG",
+     "source": "https://commons.wikimedia.org/wiki/File:Tomasz.Sekielski_(cropped).JPG",
+     "thumb_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/77/Tomasz.Sekielski_%28cropped%29.JPG/500px-Tomasz.Sekielski_%28cropped%29.JPG?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+     "author": "#WybieramEuropę",
+     "credit": "#WybieramEuropę Tomasz Sekielski (0:09)",
+     "licence": "CC BY 3.0",
+     "licence_url": "https://creativecommons.org/licenses/by/3.0",
+     "restrictions": "",
+     "sha256": "1216e701846cc5f56c0a80168c5e6282641f6354661a22ef891b40150f50c80c",
+     "consistency_cosine": 0.969
+    }
+   ]
+  },
+  {
+   "name": "Monika Olejnik",
+   "wikidata": "Q42965",
+   "description": "Polish journalist",
+   "images": [
+    {
+     "title": "File:Monika.Olejnik.JPG",
+     "source": "https://commons.wikimedia.org/wiki/File:Monika.Olejnik.JPG",
+     "thumb_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/84/Monika.Olejnik.JPG/500px-Monika.Olejnik.JPG?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+     "author": "Fashion Post",
+     "credit": "Co ostatnio czytała Monika Olejnik? (0:11)",
+     "licence": "CC BY 3.0",
+     "licence_url": "https://creativecommons.org/licenses/by/3.0",
+     "restrictions": "",
+     "sha256": "b160c1b436437809a7443e216681ee8292a347f46c8ad01744848235f6e0b8cb",
+     "consistency_cosine": 1.0
+    }
+   ]
+  },
+  {
+   "name": "Mateusz Morawiecki",
+   "wikidata": "Q11771436",
+   "description": "17th Prime Minister of the Republic of Poland",
+   "images": [
+    {
+     "title": "File:Mateusz Morawiecki 2023.jpg",
+     "source": "https://commons.wikimedia.org/wiki/File:Mateusz_Morawiecki_2023.jpg",
+     "thumb_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/2a/Mateusz_Morawiecki_2023.jpg/500px-Mateusz_Morawiecki_2023.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+     "author": "Kancelaria Premiera",
+     "credit": "https://www.flickr.com/photos/premierrp/53348575598/",
+     "licence": "Public domain",
+     "licence_url": "",
+     "restrictions": "",
+     "sha256": "0920e9bcd1a1587f9b7caa74b256c6f28b32e0e1b544b4571698eace7c8901a0",
+     "consistency_cosine": 0.954
+    },
+    {
+     "title": "File:Mateusz Morawiecki Prezes Rady Ministrów (cropped).jpg",
+     "source": "https://commons.wikimedia.org/wiki/File:Mateusz_Morawiecki_Prezes_Rady_Ministr%C3%B3w_(cropped).jpg",
+     "thumb_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/5d/Mateusz_Morawiecki_Prezes_Rady_Ministr%C3%B3w_%28cropped%29.jpg/500px-Mateusz_Morawiecki_Prezes_Rady_Ministr%C3%B3w_%28cropped%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+     "author": "Kancelaria Premiera",
+     "credit": "File:Mateusz_Morawiecki_Prezes_Rady_Ministrów.jpg",
+     "licence": "Public domain",
+     "licence_url": "",
+     "restrictions": "",
+     "sha256": "d22f1819a0365037a27b900fcddd21da3c848c01c52ecfc4aaced1e1990c726e",
+     "consistency_cosine": 0.954
+    }
+   ]
+  },
+  {
+   "name": "Donald Tusk",
+   "wikidata": "Q946",
+   "description": "Prime Minister of Poland (2007–2014; since 2023)",
+   "images": [
+    {
+     "title": "File:Prime Minister Donald Tusk of Poland in the Oval Office in 2024 (cropped).jpg",
+     "source": "https://commons.wikimedia.org/wiki/File:Prime_Minister_Donald_Tusk_of_Poland_in_the_Oval_Office_in_2024_(cropped).jpg",
+     "thumb_url": "https://upload.wikimedia.org/wikipedia/commons/c/c9/Prime_Minister_Donald_Tusk_of_Poland_in_the_Oval_Office_in_2024_%28cropped%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+     "author": "The White House",
+     "credit": "https://twitter.com/WhiteHouse/status/1767702120495542736",
+     "licence": "Public domain",
+     "licence_url": "",
+     "restrictions": "",
+     "sha256": "3e1bd2a782c37ef98bdd6e999a700ae0f0f57fed9f78f4f9d96a62ea048bee07",
+     "consistency_cosine": 0.927
+    },
+    {
+     "title": "File:Premier Donald Tusk KPRM.jpg",
+     "source": "https://commons.wikimedia.org/wiki/File:Premier_Donald_Tusk_KPRM.jpg",
+     "thumb_url": "https://upload.wikimedia.org/wikipedia/commons/2/2a/Premier_Donald_Tusk_KPRM.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+     "author": "The Chancellery of the Prime Minister of the Republic of Poland",
+     "credit": "https://web.archive.org/web/20240115221246/https://www.gov.pl/web/primeminister/donald-tusk",
+     "licence": "CC BY 3.0 pl",
+     "licence_url": "https://creativecommons.org/licenses/by/3.0/pl/deed.en",
+     "restrictions": "",
+     "sha256": "05788a43a05f66afc5b56ccf3df8b4ce16316970f75cf60d205e8a00106d961b",
+     "consistency_cosine": 0.907
+    },
+    {
+     "title": "File:Donald Tusk EPP Summit 2023.png",
+     "source": "https://commons.wikimedia.org/wiki/File:Donald_Tusk_EPP_Summit_2023.png",
+     "thumb_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/aa/Donald_Tusk_EPP_Summit_2023.png/500px-Donald_Tusk_EPP_Summit_2023.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+     "author": "https://www.flickr.com/people/45198836@N04",
+     "credit": "https://www.flickr.com/photos/eppofficial/53287183894/",
+     "licence": "CC BY 2.0",
+     "licence_url": "https://creativecommons.org/licenses/by/2.0",
+     "restrictions": "",
+     "sha256": "5089c0632ce1e2f8239d693b0c77169f1657d54c87358ac3ce5a874ae52dee22",
+     "consistency_cosine": 0.905
+    },
+    {
+     "title": "File:Official portrait of Donald Tusk.png",
+     "source": "https://commons.wikimedia.org/wiki/File:Official_portrait_of_Donald_Tusk.png",
+     "thumb_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/16/Official_portrait_of_Donald_Tusk.png/500px-Official_portrait_of_Donald_Tusk.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+     "author": "gov.pl",
+     "credit": "https://www.gov.pl/web/primeminister/donald-tusk",
+     "licence": "CC BY 3.0 pl",
+     "licence_url": "https://creativecommons.org/licenses/by/3.0/pl/deed.en",
+     "restrictions": "",
+     "sha256": "bd2552585fb9df381d63564af0b470d994ad6dcc068e8841c04f81ddc67e2f25",
+     "consistency_cosine": 0.89
+    },
+    {
+     "title": "File:Donald Tusk KPRM HQ 2023.jpg",
+     "source": "https://commons.wikimedia.org/wiki/File:Donald_Tusk_KPRM_HQ_2023.jpg",
+     "thumb_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/ce/Donald_Tusk_KPRM_HQ_2023.jpg/500px-Donald_Tusk_KPRM_HQ_2023.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+     "author": "Chancellery of the Prime Minister of the Republic of Poland",
+     "credit": "https://web.archive.org/web/20240115221246/https://www.gov.pl/web/primeminister/donald-tusk",
+     "licence": "CC BY 3.0 pl",
+     "licence_url": "https://creativecommons.org/licenses/by/3.0/pl/deed.en",
+     "restrictions": "",
+     "sha256": "70e7741d926fb2c74570981c8f4ae9c43edafcc64753d53311adf70783c27c46",
+     "consistency_cosine": 0.869
+    }
+   ]
+  },
+  {
+   "name": "Robert Lewandowski",
+   "wikidata": "Q151269",
+   "description": "Polish association football player (born 1988)",
+   "images": [
+    {
+     "title": "File:Robert Lewandowski (2025).png",
+     "source": "https://commons.wikimedia.org/wiki/File:Robert_Lewandowski_(2025).png",
+     "thumb_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/0e/Robert_Lewandowski_%282025%29.png/500px-Robert_Lewandowski_%282025%29.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+     "author": "Unknown author Unknown author",
+     "credit": "https://www.youtube.com/watch?v=fRt7943pUB4",
+     "licence": "CC BY 4.0",
+     "licence_url": "https://creativecommons.org/licenses/by/4.0",
+     "restrictions": "",
+     "sha256": "bcdd182d3519a4ae3c55f09e6542f9c3d072bd4c8d2339f4a83a3ce67de5ebdf",
+     "consistency_cosine": 1.0
+    }
+   ]
+  },
+  {
+   "name": "Radosław Sikorski",
+   "wikidata": "Q58085",
+   "description": "Minister of Foreign Affairs of the Republic of Poland",
+   "images": [
+    {
+     "title": "File:Radosław Sikorski in 2024 (cropped).jpg",
+     "source": "https://commons.wikimedia.org/wiki/File:Rados%C5%82aw_Sikorski_in_2024_(cropped).jpg",
+     "thumb_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/ca/Rados%C5%82aw_Sikorski_in_2024_%28cropped%29.jpg/500px-Rados%C5%82aw_Sikorski_in_2024_%28cropped%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+     "author": "Barbara Milkowska/MFA",
+     "credit": "https://web.archive.org/web/20240108220916/https://www.gov.pl/web/diplomacy/foreign-minister-meets-leader-of-belarusian-democratic-opposition-sviatlana-tsikhanouskaya",
+     "licence": "CC BY 3.0 pl",
+     "licence_url": "https://creativecommons.org/licenses/by/3.0/pl/deed.en",
+     "restrictions": "",
+     "sha256": "4ec08d72051ed21cd5818e9ec7e5983bbc89eacc2541a896c59824588ef04105",
+     "consistency_cosine": 0.945
+    },
+    {
+     "title": "File:Radosław Sikorski, Foreign Minister of Poland in Washington, D.C. on 26 February 2024 (cropped).jpg",
+     "source": "https://commons.wikimedia.org/wiki/File:Rados%C5%82aw_Sikorski,_Foreign_Minister_of_Poland_in_Washington,_D.C._on_26_February_2024_(cropped).jpg",
+     "thumb_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/5e/Rados%C5%82aw_Sikorski%2C_Foreign_Minister_of_Poland_in_Washington%2C_D.C._on_26_February_2024_%28cropped%29.jpg/500px-Rados%C5%82aw_Sikorski%2C_Foreign_Minister_of_Poland_in_Washington%2C_D.C._on_26_February_2024_%28cropped%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+     "author": "U.S. Department of State from United States",
+     "credit": "Secretary Blinken Meets with Polish Foreign Minister",
+     "licence": "Public domain",
+     "licence_url": "",
+     "restrictions": "",
+     "sha256": "ab74d83eff1c32d2a471a6e99531daea1fb3ebb9d372d238cc0aa1fadabb5449",
+     "consistency_cosine": 0.941
+    },
+    {
+     "title": "File:Min. Radosław Sikorski 2024 (cropped).jpg",
+     "source": "https://commons.wikimedia.org/wiki/File:Min._Rados%C5%82aw_Sikorski_2024_(cropped).jpg",
+     "thumb_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/a6/Min._Rados%C5%82aw_Sikorski_2024_%28cropped%29.jpg/500px-Min._Rados%C5%82aw_Sikorski_2024_%28cropped%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+     "author": "Ministry of Foreign Affairs of Poland",
+     "credit": "https://www.gov.pl/web/diplomacy/radoslaw-sikorski",
+     "licence": "CC BY 3.0 pl",
+     "licence_url": "https://creativecommons.org/licenses/by/3.0/pl/deed.en",
+     "restrictions": "",
+     "sha256": "5eb6a81167e11623964b52a3f63c02ed6a457821ddf2b7b0c6f53284eb2cce17",
+     "consistency_cosine": 0.933
+    }
+   ]
+  },
+  {
+   "name": "Andrzej Domański",
+   "wikidata": "Q123107527",
+   "description": "Minister of Finance of the Republic of Poland",
+   "images": [
+    {
+     "title": "File:Donald Tusk, Andrzej Domański – konferencja prasowa 03.09.2024 (cropped 4).jpg",
+     "source": "https://commons.wikimedia.org/wiki/File:Donald_Tusk,_Andrzej_Doma%C5%84ski_%E2%80%93_konferencja_prasowa_03.09.2024_(cropped_4).jpg",
+     "thumb_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/d/d5/Donald_Tusk%2C_Andrzej_Doma%C5%84ski_%E2%80%93_konferencja_prasowa_03.09.2024_%28cropped_4%29.jpg/500px-Donald_Tusk%2C_Andrzej_Doma%C5%84ski_%E2%80%93_konferencja_prasowa_03.09.2024_%28cropped_4%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+     "author": "The Chancellery of the Prime Minister of the Republic of Poland",
+     "credit": "https://www.gov.pl/web/primeminister/the-renaissance-of-local-self-government",
+     "licence": "CC BY 3.0 pl",
+     "licence_url": "https://creativecommons.org/licenses/by/3.0/pl/deed.en",
+     "restrictions": "",
+     "sha256": "af62b409b7a71e13e8e9f93768ba826ea194e903c868f5de4e72971dc13d04b3",
+     "consistency_cosine": 1.0
+    },
+    {
+     "title": "File:Donald Tusk, Andrzej Domański – konferencja prasowa 03.09.2024 4.jpg",
+     "source": "https://commons.wikimedia.org/wiki/File:Donald_Tusk,_Andrzej_Doma%C5%84ski_%E2%80%93_konferencja_prasowa_03.09.2024_4.jpg",
+     "thumb_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/0f/Donald_Tusk%2C_Andrzej_Doma%C5%84ski_%E2%80%93_konferencja_prasowa_03.09.2024_4.jpg/500px-Donald_Tusk%2C_Andrzej_Doma%C5%84ski_%E2%80%93_konferencja_prasowa_03.09.2024_4.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+     "author": "The Chancellery of the Prime Minister of the Republic of Poland",
+     "credit": "https://www.gov.pl/web/primeminister/the-renaissance-of-local-self-government",
+     "licence": "CC BY 3.0 pl",
+     "licence_url": "https://creativecommons.org/licenses/by/3.0/pl/deed.en",
+     "restrictions": "",
+     "sha256": "1ac3f220ba723d882478eba7968740e9b2f63f8466a198128c5bbd69b2df7483",
+     "consistency_cosine": 0.963
+    },
+    {
+     "title": "File:Andrzej Domański 2024.jpg",
+     "source": "https://commons.wikimedia.org/wiki/File:Andrzej_Doma%C5%84ski_2024.jpg",
+     "thumb_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/2a/Andrzej_Doma%C5%84ski_2024.jpg/500px-Andrzej_Doma%C5%84ski_2024.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+     "author": "The Chancellery of the Prime Minister of the Republic of Poland",
+     "credit": "https://www.gov.pl/web/primeminister/investment-strong-economy",
+     "licence": "CC BY 3.0 pl",
+     "licence_url": "https://creativecommons.org/licenses/by/3.0/pl/deed.en",
+     "restrictions": "",
+     "sha256": "bc0c36c0087405edf019d0a1da4f1e707b7441e728870c35239bbc4ce28ce000",
+     "consistency_cosine": 0.866
+    },
+    {
+     "title": "File:Economic and Financial Affairs Council A. Domański 2025.jpg",
+     "source": "https://commons.wikimedia.org/wiki/File:Economic_and_Financial_Affairs_Council_A._Doma%C5%84ski_2025.jpg",
+     "thumb_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/e8/Economic_and_Financial_Affairs_Council_A._Doma%C5%84ski_2025.jpg/500px-Economic_and_Financial_Affairs_Council_A._Doma%C5%84ski_2025.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+     "author": "Polish presidency of the Council of the EU 2025",
+     "credit": "https://www.flickr.com/photos/poland25eu/54516676806/",
+     "licence": "Public domain",
+     "licence_url": "",
+     "restrictions": "",
+     "sha256": "89c7c2af1d9a9034a918ecf05f2ae976e0cb4d1b0992c920d0c9c9d94896ddea",
+     "consistency_cosine": 0.835
+    },
+    {
+     "title": "File:Andrzej Domański 2024 (cropped).jpg",
+     "source": "https://commons.wikimedia.org/wiki/File:Andrzej_Doma%C5%84ski_2024_(cropped).jpg",
+     "thumb_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/78/Andrzej_Doma%C5%84ski_2024_%28cropped%29.jpg/500px-Andrzej_Doma%C5%84ski_2024_%28cropped%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+     "author": "The Chancellery of the Prime Minister of the Republic of Poland",
+     "credit": "https://www.gov.pl/web/primeminister/investment-strong-economy",
+     "licence": "CC BY 3.0 pl",
+     "licence_url": "https://creativecommons.org/licenses/by/3.0/pl/deed.en",
+     "restrictions": "",
+     "sha256": "248fb518932b410777809952e1a4b5c52ff15c230d538e494c7409720ea6a1b3",
+     "consistency_cosine": 0.82
+    }
+   ]
+  },
+  {
+   "name": "Andrzej Duda",
+   "wikidata": "Q9151911",
+   "description": "politician and lawyer, president of Poland from 2015 to 2025",
+   "images": [
+    {
+     "title": "File:Andrzej Duda 2025 (cropped).jpg",
+     "source": "https://commons.wikimedia.org/wiki/File:Andrzej_Duda_2025_(cropped).jpg",
+     "thumb_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/20/Andrzej_Duda_2025_%28cropped%29.jpg/500px-Andrzej_Duda_2025_%28cropped%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+     "author": "U.S. Secretary of Defense",
+     "credit": "250214-D-PM193-2538",
+     "licence": "Public domain",
+     "licence_url": "",
+     "restrictions": "",
+     "sha256": "3fd68165e2c52386b00b06b3b03f19cb9b80a031e6aa96497bb23444f55f5d9e",
+     "consistency_cosine": 1.0
+    },
+    {
+     "title": "File:Andrzej Duda Powązki 2025 IMG 2049.jpg",
+     "source": "https://commons.wikimedia.org/wiki/File:Andrzej_Duda_Pow%C4%85zki_2025_IMG_2049.jpg",
+     "thumb_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/24/Andrzej_Duda_Pow%C4%85zki_2025_IMG_2049.jpg/500px-Andrzej_Duda_Pow%C4%85zki_2025_IMG_2049.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+     "author": "W2k2",
+     "credit": "Own work",
+     "licence": "CC BY 4.0",
+     "licence_url": "https://creativecommons.org/licenses/by/4.0",
+     "restrictions": "",
+     "sha256": "7bbcecb0bb1cf1e8abfe3b6c48a3f5fe37ffc9f705d184abb273b3967489c4f7",
+     "consistency_cosine": 0.757
+    }
+   ]
+  },
+  {
+   "name": "Anita Werner",
+   "wikidata": "Q4765659",
+   "description": "Polish television journalist",
+   "images": [
+    {
+     "title": "File:AnitaWerner.png",
+     "source": "https://commons.wikimedia.org/wiki/File:AnitaWerner.png",
+     "thumb_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/9/96/AnitaWerner.png/500px-AnitaWerner.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+     "author": "Magazyn VIVA!",
+     "credit": "Anita Werner z partnerem zgodzili się na wspólną sesję. Oto kulisy!, https://www.youtube.com/watch?v=LCjjzI1mL8g (0:22)",
+     "licence": "CC BY 3.0",
+     "licence_url": "https://creativecommons.org/licenses/by/3.0",
+     "restrictions": "",
+     "sha256": "2337b73e0033b2a260f93b29e4b4413b9a655469f5a3e252069981be4a404ed3",
+     "consistency_cosine": 1.0
+    }
+   ]
+  }
+ ],
+ "skipped": [
+  {
+   "name": "Tomasz Lis",
+   "qid": "Q1557411",
+   "reason": "0 licensed files, none with one clear face"
+  },
+  {
+   "name": "Adam Glapiński",
+   "qid": "Q9139594",
+   "reason": "2 licensed files, none with one clear face"
+  }
+ ]
+}
