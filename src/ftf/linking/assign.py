@@ -24,6 +24,8 @@ Method (07 §2.4, D1/D2 "Assignment"):
   `grouping.incident_chain`) may hold unrelated sites (HACK-57): each lander is matched on its
   own (its assign target, or the campaign holding the capture it duplicates), and if two
   landers point to different campaigns the incident goes to review, with a note naming both.
+  When landers point to one campaign, an assignment elsewhere (won through an ad capture)
+  also goes to review.
 * Under operator / campaign a tenant or owner conflict between any probe capture and a member
   of the chosen campaign (cannot-link) sends the incident to review instead of assigning it.
 * The collection is not re-clustered.
@@ -192,12 +194,19 @@ def link_incident(
     else:
         decision, campaign_id = Decision.review, None
 
+    off_lander = decision is Decision.assign and bool(pointed) and campaign_id not in pointed.values()
+    if off_lander:
+        decision, campaign_id = Decision.review, None
+
     note = _note(relation, best, tau, bar, k, capacity, gains, best_ps, min_layers)
     if dup_of:
         where = f"campaign {dup_camp.id}" if dup_camp is not None else f"{len(dup_camps)} campaigns"
         note = f"exact duplicate of {', '.join(dup_of)} ({where}); " + note
     if decision is Decision.review and conflicted & {c.id for c in [target, dup_camp] if c is not None}:
         note = "tenant/owner conflict with the best campaign; " + note
+    if off_lander:
+        named = "; ".join(f"{x} -> {cid}" for x, cid in sorted(pointed.items()))
+        note = f"best match is not the campaign the landers point to ({named}); " + note
     if disagree:
         named = "; ".join(f"{x} -> {cid}" for x, cid in sorted(pointed.items()))
         note = f"landers disagree ({named}); " + note

@@ -258,3 +258,17 @@ def test_landers_agreeing_or_one_pointing_nowhere_still_assign():
         assert a.decision is Decision.assign, y_vals
         assert a.campaign_id == camp_a
         assert "landers disagree" not in a.note
+
+
+def test_ad_match_elsewhere_than_the_landers_point_goes_to_review():
+    col = _collection()
+    camp_a = next(c.id for c in col.campaigns if c.relation is Relation.campaign and "a0-c1" in c.capture_ids)
+    vals = {
+        "n-ad": [(L.platform, "P1"), (L.tenant, "T2"), (L.landing, "LB"), (L.kit, "K2")],  # 13.5 bits against B
+        "n-x": [(L.platform, "P1"), (L.landing, "LA"), (L.kit, "K1"), (L.tracking_account, "PXA", True)],  # 12.5 against A
+        "n-y": [(L.offer, "O-unrelated")],
+    }
+    new = incident("n", [cap("n-ad", "ad"), cap("n-x"), cap("n-y")], vals)
+    a = assign(col, new, backend=stub_backend)
+    assert a.decision is Decision.review
+    assert f"n-x -> {camp_a}" in a.note
