@@ -244,6 +244,10 @@ Seven experiments, E1 to E7, ran in 13 steps, all `ok`. The 33 canonical capture
 
 *A link-anything-shared baseline finds all 11 campaign pairs but only 11 of its 66 links are right. The linker finds 11/11 with every link right, and under leave-one-incident-out it assigns 7 of 8 held-out items correctly with no wrong campaign.*
 
+![One organiser campaign as a graph of shared evidence](docs/figures/campaign_graph.png)
+
+*One organiser campaign: four incidents linked pairwise by the same platform tenant and owner ids (about 16 bits per pair, well above the threshold); a fifth incident of the campaign shares no evidence with them and is not drawn.*
+
 Figures: organiser build main 8eec049 with the visual features, code main aca1f57, platform ids hidden.
 
 <!-- eval:build start -->
@@ -488,6 +492,8 @@ The offline package is one folder of 331 files, about 2.0 GB in total. Nothing i
 | `README.txt` | 1 | under 1 KB | what is inside and how to mount it |
 
 ### Online, with the base bundle
+
+The online path (live lookups with the automatic fallback to the cache) is covered by the test suite with a mocked network; the container itself was checked end to end offline, with `--network none`.
 
 ```bash
 docker run --rm -p 127.0.0.1:8501:8501 -v "$PWD/base-bundle:/base:ro" ftf
