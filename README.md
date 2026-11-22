@@ -55,11 +55,11 @@ environment variables, offline and online modes, and the image leak check) is in
 
 ## Demo walkthrough
 
-The walkthrough uses the hour-4 slice: a linked campaign base built from the challenge cases on the workbench VM, with one case held out. It runs three items through `ftf analyze`. Cases are named by their folder number.
+The walkthrough uses the hour-4 slice: a linked campaign base (`base-h4-main`) built from the challenge cases on the workbench VM, with case 1 held out. It runs three items through `ftf analyze` on current main. The decisions were the same on the VM and in the container image. Cases are named by their folder number.
 
-1. **A known variant.** `do_udostepnienia:1`, held out of the base, is assigned to the 7-incident campaign it belongs to. Its ledger shows which layers carry the 22.7 bits. Collector values appear as excluded rows with 0 bits.
-2. **A new campaign.** A submitted landing page with no shared value that carries bits, against any campaign, is declared **new**. Its evidence capacity is 44.4 bits, so the pages it could still show are enough to settle the question.
-3. **A screenshot-only item.** A submitted ad screenshot with no landing page (its video and its Ad Library entry are missing) is sent to **review**. Its evidence capacity is 0 bits, far below the threshold, so the system does not call it new. The report says which pages would settle it.
+1. **A known variant.** `do_udostepnienia:1`, held out of the base, is assigned (`assign`) to the 7-capture campaign it belongs to. The best candidate scores 18.7 bits and the evidence capacity is 48.4 bits. Collector values appear as excluded rows with 0 bits.
+2. **A new campaign.** An unrelated saved page, with no shared value against any campaign, is declared **new** (`new`). Its evidence capacity is 44.9 bits, so the pages it could still show are enough to settle the question.
+3. **A screenshot-only item.** The ad screenshot of case 1, submitted alone with no landing page and no traffic, is sent to **review** (`review`). Its evidence capacity is 0 bits, far below the threshold, so the system does not call it new.
 
 The numbers are the method's output from hand-set weights, not a measured accuracy; see [Evaluation](#evaluation).
 
@@ -106,27 +106,221 @@ Metadata sources considered but not used in this release:
 
 ## Evaluation
 
-### Evaluation results (pending HACK-29)
-
-> **Pending.** The full evaluation (HACK-29) has not run. No accuracy figure is reported here, and none should be quoted until it has.
+### Evaluation results
 
 The protocol, from the method notes:
 
 - **Time split.** The base holds the earlier captures, and the later ones are scored as new items. This is the closest proxy we have to a hidden test set.
 - **Leave-one-out.** Each incident of a campaign with two or more incidents is removed in turn and assigned against the rest. We report how often the right campaign is chosen, how often a wrong one is accepted (the false-accept rate, which should be zero) and the median evidence capacity.
-- **Distractors and degraded inputs.** Pairs that must not link (captures of two different campaigns of one operator, a kit copied onto another platform, a real news article impersonated by a scam) and a synthetic copy of a kit must not join a campaign. Each item is also scored with its traffic, saved page or ad text removed, and a screenshot-only item must end in review. A ±2-bit sweep over every prior flags the links that flip.
+- **Distractors and degraded inputs.** Pairs that must not link (captures of two different campaigns of one operator, a kit copied onto another platform, a real outlet page used for a brand, a page with only platform constants, a page with only a celebrity) and a synthetic copy of a kit must not join a campaign. Each item is also scored with its traffic, saved page or ad text removed, and a screenshot-only item must end in review. A ±2-bit sweep over every prior flags the links that flip.
 
-The hour-4 slice result, with case numbers only: held-out case `do_udostepnienia:1` is assigned to its 7-incident campaign at 22.7 bits (threshold 10.4); a screenshot-only item goes to review; an unrelated page goes to new.
+The tables below are HACK-29's report, copied from its file with only the heading levels changed. Each table states its evidence setting, and cases are named by folder number only. The counts are raw, so read them as counts, not as accuracy.
+
+Two results matter most for the claims above:
+
+- With platform ids hidden (E1), the Linking engine recovers 0 of 11 true campaign pairs, so recall without the platform layer is 0 of 11. Its precision is safe: 0 of 37 must-not-link pairs are violated.
+- Open issue HACK-66: the Linking engine still links 34 of 58 real outlet pages (brand negatives, E4 e), 3 of 3 platform-only pages (E4 c) and 2 of 2 celebrity-only pages (E4 f) into a campaign. Those pages must stay outside campaigns above brand level. This is not fixed in this release.
+
+Dataset build: `main 6ff9e3e`. Each table title states its evidence setting: E1, E6 and E7 run with platform ids hidden; E2, E3 and E4 run on all evidence (platform ids visible), the realistic setting. The labels and leak check use the platform ids as ground truth. Counts are raw: `P 2 of 11 pairs` means 2 of the 11 predicted pairs are true, and `R 2 of 12 pairs` means 2 of the 12 true pairs were found. Macro scores average over label groups first, then over groups. `baseline` is the loose floor; `linking` is the Linking engine.
+
+#### Ground truth and leak check
+
+| item | count |
+|---|---|
+| captures (with duplicates) | 34 |
+| canonical captures | 33 |
+| case folders (incidents) | 26 |
+| analyst must-not-link pairs | 44 |
+| leak check hits (expected 0) | 0 |
+| hidden indicators (removed) | 164 |
+
+| level | groups | non-singleton groups | captures |
+|---|---|---|---|
+| analyst_campaign | 1 | 1 | 2 |
+| analyst_operator | 1 | 1 | 3 |
+| analyst_template | 3 | 3 | 9 |
+| campaign | 7 | 3 | 13 |
+| landing | 9 | 2 | 14 |
+| owner | 5 | 3 | 13 |
+| template | 4 | 3 | 13 |
+| tenant | 4 | 3 | 14 |
+
+#### E1 hidden-layer recovery (platform ids hidden)
+
+| relation vs level | baseline pairwise | linking pairwise | baseline macro B-cubed P / R | linking macro B-cubed P / R | must-not-link violated, baseline | must-not-link violated, linking |
+|---|---|---|---|---|---|---|
+| campaign vs campaign | P 11 of 55 pairs, R 11 of 11 pairs | P 0 of 0 pairs, R 0 of 11 pairs | 0.29 / 1.00 over 7 groups | 1.00 / 0.81 over 7 groups | 31 of 37 pairs | 0 of 37 pairs |
+| operator vs owner | P 22 of 55 pairs, R 22 of 22 pairs | P 3 of 3 pairs, R 3 of 22 pairs | 0.40 / 1.00 over 5 groups | 1.00 / 0.75 over 5 groups | 1 of 1 pairs | 0 of 1 pairs |
+| operator vs tenant | P 22 of 55 pairs, R 22 of 23 pairs | P 3 of 3 pairs, R 3 of 23 pairs | 0.36 / 0.88 over 4 groups | 1.00 / 0.57 over 4 groups | 1 of 1 pairs | 0 of 1 pairs |
+
+#### E7 time split (reference = 8 October captures; platform ids hidden)
+
+| engine | reference folders | later items | correct assignment | wrong assignment | false accept | correct new | missed (new, should assign) | review | bridging folders | fragmented groups |
+|---|---|---|---|---|---|---|---|---|---|---|
+| baseline | 15 | 13 | 3 | 0 | 6 | 4 | 0 | 0 | 12 | 0 |
+| linking | 15 | 13 | 0 | 0 | 0 | 6 | 1 | 6 | 12 | 0 |
+
+| case folder | date | expected | baseline verdict | linking verdict |
+|---|---|---|---|---|
+| do_udostepnienia:5 | - | new | correct new | review |
+| input:15c96e9a0fe4 | - | new | correct new | review |
+| input:7a4b9bcf6948 | - | new | correct new | review |
+| input:dff1e493c8d3 | - | new | correct new | review |
+| do_udostepnienia:1 | 2026-10-09 | assign to BACKUP:p1, BACKUP:p15, BACKUP:p7 | correct assignment | review |
+| do_udostepnienia:2 | 2026-10-09 | assign to BACKUP:p1, BACKUP:p15, BACKUP:p7 | correct assignment | review |
+| do_udostepnienia:3 | 2026-10-09 | assign to BACKUP:p1, BACKUP:p15, BACKUP:p7 | correct assignment | missed (new, should assign) |
+| do_udostepnienia:10 | 2026-10-12 | new | false accept | correct new |
+| do_udostepnienia:14 | 2026-10-12 | new | false accept | correct new |
+| do_udostepnienia:36 | 2026-10-19 | new | false accept | correct new |
+| do_udostepnienia:61 | 2026-10-20 | new | false accept | correct new |
+| do_udostepnienia:47 | 2026-10-27 | new | false accept | correct new |
+| do_udostepnienia:48 | 2026-10-28 | new | false accept | correct new |
+
+#### E2 leave-one-out open-set assignment (all evidence)
+
+| engine | protocol | mode | items | correct | wrong campaign | new | review | assigned | median capacity (bits) |
+|---|---|---|---|---|---|---|---|---|---|
+| baseline | loco | full | 8 | 0 | 8 | 0 | 0 | 8 | 75.00 |
+| baseline | loco_mixed | full | 2 | 1 | 1 | 0 | 0 | 2 | 110.00 |
+| baseline | loo_item | full | 8 | 5 | 3 | 0 | 0 | 8 | 75.00 |
+| linking | loco | full | 8 | 0 | 0 | 8 | 0 | 0 | 48.40 |
+| linking | loco_mixed | full | 2 | 1 | 0 | 0 | 1 | 1 | 48.40 |
+| linking | loo_item | full | 8 | 7 | 0 | 0 | 1 | 7 | 48.40 |
+
+Counts are per item; a leave-one-group item stands for one whole group. A wrong campaign is an assignment into a campaign the item does not belong to; false accepts (an assignment of an item that should be new) are counted in E7 only.
+
+#### E3 degraded inputs, the held-out item loses one modality (all evidence)
+
+| engine | protocol | mode | items | correct | wrong campaign | new | review | assigned | median capacity (bits) |
+|---|---|---|---|---|---|---|---|---|---|
+| baseline | loco | ad_text | 8 | 0 | 0 | 8 | 0 | 0 | 0.00 |
+| baseline | loco | full | 8 | 0 | 8 | 0 | 0 | 8 | 75.00 |
+| baseline | loco | har | 8 | 0 | 7 | 1 | 0 | 7 | 64.00 |
+| baseline | loco | html | 8 | 0 | 8 | 0 | 0 | 8 | 33.50 |
+| baseline | loco | screenshot | 8 | 0 | 0 | 8 | 0 | 0 | 0.00 |
+| baseline | loco | url | 8 | 0 | 0 | 8 | 0 | 0 | 0.00 |
+| baseline | loco_mixed | ad_text | 2 | 0 | 0 | 2 | 0 | 0 | 0.00 |
+| baseline | loco_mixed | full | 2 | 1 | 1 | 0 | 0 | 2 | 110.00 |
+| baseline | loco_mixed | har | 2 | 1 | 1 | 0 | 0 | 2 | 102.00 |
+| baseline | loco_mixed | html | 2 | 1 | 1 | 0 | 0 | 2 | 26.00 |
+| baseline | loco_mixed | screenshot | 2 | 0 | 0 | 2 | 0 | 0 | 0.00 |
+| baseline | loco_mixed | url | 2 | 0 | 0 | 2 | 0 | 0 | 0.00 |
+| baseline | loo_item | ad_text | 8 | 0 | 0 | 8 | 0 | 0 | 0.00 |
+| baseline | loo_item | full | 8 | 5 | 3 | 0 | 0 | 8 | 75.00 |
+| baseline | loo_item | har | 8 | 5 | 2 | 1 | 0 | 7 | 64.00 |
+| baseline | loo_item | html | 8 | 5 | 3 | 0 | 0 | 8 | 27.00 |
+| baseline | loo_item | screenshot | 8 | 0 | 0 | 8 | 0 | 0 | 0.00 |
+| baseline | loo_item | url | 8 | 0 | 0 | 8 | 0 | 0 | 0.00 |
+| linking | loco | ad_text | 8 | 0 | 0 | 0 | 8 | 0 | 0.00 |
+| linking | loco | full | 8 | 0 | 0 | 8 | 0 | 0 | 48.40 |
+| linking | loco | har | 8 | 0 | 0 | 4 | 4 | 0 | 48.40 |
+| linking | loco | html | 8 | 0 | 0 | 8 | 0 | 0 | 44.90 |
+| linking | loco | screenshot | 8 | 0 | 0 | 0 | 8 | 0 | 0.00 |
+| linking | loco | url | 8 | 0 | 0 | 0 | 8 | 0 | 0.00 |
+| linking | loco_mixed | ad_text | 2 | 0 | 0 | 0 | 2 | 0 | 0.00 |
+| linking | loco_mixed | full | 2 | 1 | 0 | 0 | 1 | 1 | 48.40 |
+| linking | loco_mixed | har | 2 | 1 | 0 | 0 | 1 | 1 | 48.40 |
+| linking | loco_mixed | html | 2 | 0 | 0 | 2 | 0 | 0 | 44.90 |
+| linking | loco_mixed | screenshot | 2 | 0 | 0 | 0 | 2 | 0 | 0.00 |
+| linking | loco_mixed | url | 2 | 0 | 0 | 0 | 2 | 0 | 0.00 |
+| linking | loo_item | ad_text | 8 | 0 | 0 | 0 | 8 | 0 | 0.00 |
+| linking | loo_item | full | 8 | 7 | 0 | 0 | 1 | 7 | 48.40 |
+| linking | loo_item | har | 8 | 5 | 0 | 0 | 3 | 5 | 48.40 |
+| linking | loo_item | html | 8 | 0 | 0 | 5 | 3 | 0 | 44.90 |
+| linking | loo_item | screenshot | 8 | 0 | 0 | 0 | 8 | 0 | 0.00 |
+| linking | loo_item | url | 8 | 0 | 0 | 0 | 8 | 0 | 0.00 |
+
+#### E4 distractors (all evidence)
+
+| distractor | expected | baseline passed | linking passed |
+|---|---|---|---|
+| natural must-not-link pair (a) | no link or campaign of relation campaign between the subjects and the paired capture | 5 of 43 | 43 of 43 |
+| synthetic kit copy (b) | no link or campaign of relation campaign, operator, tracking_account between the subjects and outside captures; never assigned (new or review); expected template link to the original (reported, not required) | 0 of 3 | 2 of 3 |
+| platform-only page (c) | no link or campaign of relation campaign, operator, template, tracking_account between the subjects and outside captures; never assigned (new or review) | 0 of 3 | 0 of 3 |
+| collector invariance (injected fingerprint) (d) | zero decisions change | 2 of 2 | 2 of 2 |
+| brand negative (e) | no link or campaign of relation campaign, operator, template, tracking_account between the subjects and outside captures; never assigned (new or review) | 9 of 58 | 24 of 58 |
+| celebrity-only context (f) | no link or campaign of relation campaign, operator, template, tracking_account between the subjects and outside captures; never assigned (new or review) | 0 of 2 | 0 of 2 |
+
+Must-not-link pairs violated: baseline 38 of 43, linking 0 of 43.
+
+#### E6 sensitivity (linking table, moves of −2, −1, +1, +2 bits; platform ids hidden)
+
+Weights tested: 34 of 89 in the table; 17 flip no decision.
+
+| relation | pair links (unperturbed) | pair flips, all moves | fragile links (±2, one layer) | worst-case only |
+|---|---|---|---|---|
+| campaign | 1 | 0 | 0 of 1 | 1 |
+| ecosystem | 12 | 93 | 9 of 12 | 12 |
+| operator | 8 | 49 | 7 of 8 | 8 |
+| template | 1 | 8 | 0 of 1 | 1 |
+| tracking_account | 0 | 3 | 0 of 0 | 0 |
+
+E7 verdicts, unperturbed: assign 0, new 7, review 6.
+A cell `n (eff. x)` is a move that the 0-bit floor clamped: x is the change really made, in bits.
+
+| weight | bits | −2 | −1 | +1 | +2 | total |
+|---|---|---|---|---|---|---|
+| kind:aio_sdk_asset | 1.7 | 9 (eff. -1.7) | 9 | 0 | 15 | 33 |
+| kind:inline_script_sha256 | 3 | 0 | 0 | 5 | 20 | 25 |
+| kind:form_field_set | 2 | 1 | 1 | 3 | 15 | 20 |
+| kind:third_party_host | 1.5 | 6 (eff. -1.5) | 6 | 3 | 5 | 20 |
+| kind:third_party_domain | 1.5 | 1 (eff. -1.5) | 1 | 3 | 9 | 14 |
+| kind:meta_pixel | 3 | 3 | 3 | 0 | 4 | 10 |
+| kind:form_endpoint | 2 | 0 | 0 | 1 | 7 | 8 |
+| kind:platform_name | 1.7 | 0 (eff. -1.7) | 0 | 3 | 4 | 7 |
+| kind:asset_norm_sha256 | 2.5 | 0 | 0 | 2 | 4 | 6 |
+| kind:asset_sha256 | 2.5 | 0 | 0 | 2 | 4 | 6 |
+
+Fragile links, by case folder (a fragile link flips under one layer moved ±2 bits):
+
+| relation | case folder a | case folder b | state | flips when |
+|---|---|---|---|---|
+| operator | BACKUP:p1 | BACKUP:p3 | link | tracking_account -2 to review; kit -2 to review; platform -2 to review; infrastructure -2 to review |
+| operator | BACKUP:p1 | BACKUP:p4 | link | tracking_account -2 to review; kit -2 to review; platform -2 to review; infrastructure -2 to review |
+| operator | BACKUP:p1 | BACKUP:p7 | link | tracking_account -2 to review; kit -2 to review; platform -2 to review; infrastructure -2 to review |
+| operator | BACKUP:p3 | BACKUP:p4 | link | tracking_account -2 to review; kit -2 to review; platform -2 to review; infrastructure -2 to review |
+| operator | BACKUP:p3 | BACKUP:p7 | link | tracking_account -2 to review; kit -2 to review; platform -2 to review; infrastructure -2 to review |
+| operator | BACKUP:p4 | BACKUP:p7 | link | tracking_account -2 to review; kit -2 to review; platform -2 to review; infrastructure -2 to review |
+| operator | do_udostepnienia:61 | do_udostepnienia:61 | link | tracking_account -2 to review; kit -2 to review; offer -2 to review; infrastructure -2 to review |
+| ecosystem | BACKUP:p1 | BACKUP:p3 | link | kit -2 to review |
+| ecosystem | BACKUP:p1 | BACKUP:p4 | link | kit -2 to review |
+| ecosystem | BACKUP:p1 | BACKUP:p7 | link | kit -2 to review |
+| ecosystem | BACKUP:p3 | BACKUP:p7 | link | kit -2 to review |
+| ecosystem | BACKUP:p4 | BACKUP:p7 | link | kit -2 to review |
+| ecosystem | BACKUP:p15 | do_udostepnienia:1 | link | tracking_account -2 to review; kit -2 to review; platform -2 to review |
+| ecosystem | BACKUP:p15 | do_udostepnienia:2 | link | tracking_account -2 to review; kit -2 to review; platform -2 to review |
+| ecosystem | do_udostepnienia:1 | do_udostepnienia:2 | link | tracking_account -2 to review; kit -2 to review; platform -2 to review |
+| ecosystem | BACKUP:p5 | do_udostepnienia:2 | link | kit -2 to review; infrastructure -2 to review |
+
+#### Run status
+
+| step | status |
+|---|---|
+| labels | ok |
+| leak | ok |
+| hidden baseline | ok |
+| hidden linking | ok |
+| timesplit baseline | ok |
+| timesplit linking | ok |
+| sensitivity | ok |
+| openset baseline | ok |
+| openset linking | ok |
+| degrade baseline | ok |
+| degrade linking | ok |
+| distractors baseline | ok |
+| distractors linking | ok |
 
 ## Limitations
 
-- **The weights are priors.** They are explicit, hand-set bits, not fitted to the data, and the case sample is 25 scams with no true negatives. Section 9 of [docs/methodology.md](docs/methodology.md) lists what that implies. A learned table (HACK-23) can be passed with `ftf link --weights`, but the default run keeps the hand-set priors.
-- **The demo base is small.** The 2026-11-22 slice (a dated snapshot) is small, and the scaling figures in the methodology are design estimates and have not been measured.
+The sample is small: 33 canonical captures in 26 case folders, 3 non-singleton campaign groups and 13 later items, so these counts are a regression check, not a benchmark. Cluster sizes are skewed: the largest campaign group holds 5 of 33 captures, so pair counts are dominated by it and macro-averages over groups are reported next to them. The E7 time split uses the organiser's source set instead of a capture date for 4 of 13 later items, so it tests organiser sets rather than dates. The reference base is not grown during E7: each later item is assigned against the reference folders alone, so later items never join one another or the base. The synthetic distractors (E4) are built from one organiser batch, so they test the engine on controlled edits rather than on other sources. The brand negatives are one batch of pages, so a clean E4 result says little about other brands or sources. Open-set assignment (E2, all evidence) gives 0 wrong-campaign assignments out of 7 assigned items for the Linking engine, against 3 of 8 for the baseline, over 8 leave-one-item and 8 leave-one-group items, so one error moves any rate by a large step. False accepts, assignments of items that should be new, are counted in E7 only. The sensitivity check moves 34 weights by ±1 and ±2 bits one at a time: 16 of 22 pair links change verdict under a single-layer ±2 move, so their verdicts depend on the hand-set priors and are flagged as fragile. With platform ids hidden (E1) the Linking engine recovers 0 of 11 true campaign pairs: recall without the platform layer is 0 of 11, while precision is safe, with 0 of 37 must-not-link pairs violated. Linking's campaign gate (HACK-53) means that with platform ids hidden it links 0 campaign pairs. The baseline recovers 11 of 11 and violates 31 of 37.
+
+- **The weights are priors.** They are explicit, hand-set bits, not fitted to the data, and the case sample is 26 case folders. Its must-not-link pairs come from analysts and from synthetic distractors, not from an independent sample. Section 9 of [docs/methodology.md](docs/methodology.md) lists what that implies. A learned table (HACK-23) can be passed with `ftf link --weights`, but the default run keeps the hand-set priors.
+- **The demo base is small.** The walkthrough base is the 2026-11-22 hour-4 slice (a dated snapshot), and the scaling figures in the methodology are design estimates and have not been measured.
 - **Content features are scaffolding.** Text embeddings, image hashes and faces do not yet carry bits, and the Visual layer is paused.
 - **Enrichment and live fetching depend on outside services.** When a service is down, the item carries less evidence and is more likely to go to review.
 - **Campaigns rotate.** Operators change pages, pixels and ad accounts inside a campaign. The campaign relation is kept strict for that reason, so variants can end in review rather than in a campaign.
 - **The demo app's "insufficient alone" label** still uses an adapter threshold (log2 of the number of captures) until the engine publishes its threshold in the dataset.
-- **The evaluation is pending**, so the method's quality is not yet measured.
+- **Distractor failures are open (HACK-66).** Real outlet, platform-only and celebrity-only pages can link into campaigns in this release; see the results above.
 
 ## Repository layout
 

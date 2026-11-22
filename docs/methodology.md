@@ -349,5 +349,7 @@ at scale. The design targets 10^5 incidents; that target is a plan, not a result
   is recorded as `unknown` and carries no bits; a stale cache entry is labelled as stale.
 - **Campaigns rotate.** Operators change pages and pixels inside a campaign. The campaign relation
   is strict for that reason, and screenshot-only variants go to review rather than to a campaign.
-- **The evaluation is pending.** The protocol and the first slice result are in the README
-  ("Evaluation"), and no accuracy figure is claimed here.
+- **The evaluation is a regression check, not a benchmark.** HACK-29's raw counts are in the README
+  ("Evaluation results"). They show 0 of 11 true campaign pairs recovered when platform ids are
+  hidden, and real outlet, platform-only and celebrity-only pages still link into campaigns (HACK-66,
+  open). No accuracy figure is claimed here.
