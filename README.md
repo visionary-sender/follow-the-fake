@@ -1,33 +1,164 @@
 # Follow the Fake
 
-HackNation challenge by NASK PIB ("Kolekcjoner fejków"). Scam ads that abuse the likeness of
-well-known people usually arrive one at a time. This tool turns single suspicious ads and their
-landing pages into campaigns: it extracts content, visual and public infrastructure features
-(domains, redirects, links, keywords, faces), deduplicates them and groups related incidents,
-showing the similarities and links in a readable form.
+HackNation challenge by NASK PIB ("Kolekcjoner fejków"). Scam ads that abuse the likeness of well-known people usually arrive one at a time. This tool turns single suspicious ads and their landing pages into campaigns: it extracts what each capture shows, deduplicates the captures and groups related incidents, showing the similarities and links in a readable form.
 
 Challenge data lives in a private bucket and never in this repository.
 
-## Layout
+## What it does
+
+- Takes a suspicious ad, a landing page, a URL, a keyword or a batch of them, and extracts what each capture shows: the ad text, the saved page, the network traffic, the redirect chain and public infrastructure facts (registrar, nameservers, certificates).
+- Turns each capture into **indicators** (a tracking pixel, a platform tenant, a page-kit fingerprint, a landing id, a domain fact) and scores pairs of captures in **bits of evidence**: how much more likely a shared value is if the two belong to one campaign than if they do not.
+- Groups captures into campaigns, one partition per relation (same template, same tracking account, same operator, same campaign, same ecosystem), and assigns a new item to a campaign, to a new campaign, or to a review queue.
+- Explains every link with an itemised ledger, labelled with the evidence tiers that CERT Polska uses (Strong, Medium, Supplementary, insufficient alone).
+- Ships as the `ftf` command, a Streamlit demo app and a container image. Content features (text embeddings, image hashes, faces) are scaffolding only in this release; see [Limitations](#limitations).
+
+## Quick start
+
+- **Jury:** build and run the container image, see [Container](#container) and the full run instructions in [docs/container.md](docs/container.md).
+- **One item:** `ftf analyze INPUT --base dataset.json --out result.json` runs ingestion, enrichment and linking on one ad, page, URL or keyword against a campaign base, and prints the decision (assign, new or review).
+- **Campaign tables:** `ftf export --base dataset.json --out DIR` writes the linked dataset as CSV tables, a validated copy of the dataset and `campaign_patterns.md`.
+- **Demo app:** `ftf serve --base dataset.json` (needs the `app` extra), see [Run the demo app on the VM](#run-the-demo-app-on-the-vm).
+- **Development:** all computation runs on the workbench VM, see [Running the tests on the VM](#running-the-tests-on-the-vm).
+
+Without `--base`, the commands use `$FTF_BASE`, and otherwise the private fixture on the VM, which is not in git.
+
+## Container
+
+The image contains only the installed `ftf` package (no data, no secrets, no git metadata; the
+build context is default-deny in `.dockerignore`). It runs as a non-root user, and the
+entry point is `ftf`. Building needs internet access, because pip fetches the dependencies.
+
+For the jury, from a clean checkout of the repository root:
+
+```bash
+docker build -t ftf .
+docker run --rm ftf --help
+docker run --rm ftf --version
+```
+
+For the team, on the workbench VM. The sync copies the worktree to `/work/<slug>/src`, where
+`<slug>` is the worktree directory name (replace it, e.g. `hack-3-container`):
+
+```bash
+scripts/vm.sh run -- true      # sync the worktree to the VM
+gcloud compute ssh ftf-workbench --project follow-the-fake --zone europe-central2-a \
+  --tunnel-through-iap --quiet \
+  --command 'cd /work/<slug>/src && sudo docker build -t ftf:dev . && sudo docker run --rm ftf:dev --help'
+```
+
+Docker on the VM is a one-time setup: `sudo apt-get install -y docker.io`.
+Remove dangling images afterwards with `sudo docker image prune -f`.
+
+The jury run in full (first start with the organiser's folder, a prebuilt base bundle, the
+environment variables, offline and online modes, and the image leak check) is in
+[docs/container.md](docs/container.md).
+
+## Demo walkthrough
+
+The walkthrough uses the hour-4 slice: a linked campaign base built from the challenge cases on the workbench VM, with one case held out. It runs three items through `ftf analyze`. Cases are named by their folder number.
+
+1. **A known variant.** `do_udostepnienia:1`, held out of the base, is assigned to the 7-incident campaign it belongs to. Its ledger shows which layers carry the 22.7 bits. Collector values appear as excluded rows with 0 bits.
+2. **A new campaign.** A submitted landing page with no shared value that carries bits, against any campaign, is declared **new**. Its evidence capacity is 44.4 bits, so the pages it could still show are enough to settle the question.
+3. **A screenshot-only item.** A submitted ad screenshot with no landing page (its video and its Ad Library entry are missing) is sent to **review**. Its evidence capacity is 0 bits, far below the threshold, so the system does not call it new. The report says which pages would settle it.
+
+The numbers are the method's output from hand-set weights, not a measured accuracy; see [Evaluation](#evaluation).
+
+## Methodology
+
+The full description is in [docs/methodology.md](docs/methodology.md). Its weights and thresholds are read from the code (`src/ftf/linking/`). In short:
+
+1. **Captures.** A visit or a saved item (ad, pre-lander, lander, decoy) is one capture, with the modalities it has and the ones it lacks. Exact duplicates collapse onto one capture first.
+2. **Indicators per layer.** Identifiers and features come from saved files and recorded traffic: tracking accounts, operator and tenant configuration, page-kit fingerprints, landing ids, infrastructure facts and ad text. Each indicator sits in one layer and is marked live (seen in traffic) or static (seen in saved files).
+3. **Collector exclusion.** Values that describe the analyst or the capture tool (fingerprints, addresses, user agents, screen sizes, capture times) are excluded by type. They never link anything.
+4. **Evidence in bits.** A shared value is worth the log2 of how much more likely it is under "same campaign" than under "different campaign". Rarity is counted over groups of incidents, not over pages. The ids of one operator form a chain (platform, tenant, owner, campaign, landing), and a value is counted once, at the level the data shows it belongs to. The best value of a layer counts, the layers add up, a conflict on a single-valued operator id costs 4 bits and forbids a link, and a missing layer counts 0.
+5. **Relations and grouping.** Each of the five relations has its own partition. Clustering is greedy average linkage with cannot-links, so one false match does not chain two campaigns together.
+6. **Assign, new or review.** An item is assigned to a campaign when it clears the bar (the threshold plus log2 of the number of campaigns), declared new when it scores at least 3 bits below the threshold and could still reach it, and otherwise sent to review.
+7. **Explanation.** Each link carries its ledger: one row per layer and value, with its status, bits, the groups that carry it and the supporting indicator ids.
+
+## Data sources and metadata sources
+
+The challenge data (the case folders, the BACKUP archive and the link list) is the organiser's. It lives in the bucket `gs://follow-the-fake-data` and on the workbench VM, never in this repository. Derived outputs go to the bucket under `outputs/`.
+
+| Source | Provenance | What we take | Terms and limits |
+|---|---|---|---|
+| Challenge cases | the organiser, in `raw/2026-11-21/` | saved ads, pages, HAR files, screenshots, metadata | Not redistributed. Used for the challenge only. Never in git or in published text. |
+| Live pages, through the safe fetcher | pages we fetch in a sandbox VM | HAR, final DOM, screenshot, redirect chain, outcome | GET and HEAD only; no form is submitted and nothing is clicked. Runs only on the sandbox VM. Timeouts and byte budgets apply. Details: [docs/fetcher.md](docs/fetcher.md). |
+| Ad libraries, through the scanner | Meta Ad Library page, Google Ads Transparency Center RPC, Google's public BigQuery dataset of removed creatives, the CERT Polska warning list | ad text, advertiser, declared landing domain, creative links, listing dates | Meta's terms forbid automated collection, so the Meta source is a demonstration only; the production route is the official Meta Ad Library API. The BigQuery query is billed to the GCP project that runs it. The CERT Polska list may be used for any purpose, with no attribution required. Details: [docs/scanner.md](docs/scanner.md). |
+| Domain and certificate metadata | IANA RDAP bootstrap, registry RDAP servers, DNS over HTTPS (dns.google), crt.sh, hole.cert.pl | registrar, creation date, nameservers, MX, certificate issuer and siblings, CERT Polska listing | Keyless services, each with its own rate limit and cache TTL. A failed lookup never raises and is recorded as `unknown`; a stale cache entry is labelled as stale. Details and terms: [docs/enrichment.md](docs/enrichment.md). |
+
+Metadata sources considered but not used in this release:
+
+- **urlscan.io** hit counts for hashes and file names, to estimate background frequencies. Its queries are built from organiser data, so they need the owner's approval first.
+- **Public library hash lists** (cdnjs, jsDelivr), as an extension of the stop list of shared public libraries.
+- **The Meta Ad Library API**, the production route for ads, which needs a developer account and identity confirmation.
+
+### Safe URL fetcher (`ftf fetch`)
+
+`ftf fetch URL --out DIR` opens a URL in a locked-down headless Chromium and saves what a visitor would receive: the network traffic (HAR), the final HTML, a full-page screenshot and the redirect chain, as one capture folder that ingestion reads like a case folder. It never fills in or submits a form and never clicks. Dead and cloaked pages are results with an outcome, not errors. A network guard refuses private and metadata addresses and checks every redirect, and the browser runs with no credentials. Details, the outcome categories, the safety model, the sandbox VM and the hardened container run are in [docs/fetcher.md](docs/fetcher.md).
+
+### Ad-library scanner (`ftf scan`)
+
+`ftf scan` searches public ad libraries by keyword and date, and turns each ad it has not seen before into one incident in a queue waiting for assignment. It never opens a landing page; landing URLs go to the sandboxed fetcher. The sources, their terms, the output layout and the scheduled sandbox runs are in [docs/scanner.md](docs/scanner.md).
+
+### Domain enrichment (`ftf enrich-domain`)
+
+`ftf enrich-domain` looks up registrable domains in four keyless services and writes contract indicators in the `infrastructure` layer. It contacts only those services, never the scanned domain's own server, and sends a generic User-Agent. The services, their terms and limits, and the indicator kinds and levels are in [docs/enrichment.md](docs/enrichment.md).
+
+## Evaluation
+
+### Evaluation results (pending HACK-29)
+
+> **Pending.** The full evaluation (HACK-29) has not run. No accuracy figure is reported here, and none should be quoted until it has.
+
+The protocol, from the method notes:
+
+- **Time split.** The base holds the earlier captures, and the later ones are scored as new items. This is the closest proxy we have to a hidden test set.
+- **Leave-one-out.** Each incident of a campaign with two or more incidents is removed in turn and assigned against the rest. We report how often the right campaign is chosen, how often a wrong one is accepted (the false-accept rate, which should be zero) and the median evidence capacity.
+- **Distractors and degraded inputs.** Pairs that must not link (captures of two different campaigns of one operator, a kit copied onto another platform, a real news article impersonated by a scam) and a synthetic copy of a kit must not join a campaign. Each item is also scored with its traffic, saved page or ad text removed, and a screenshot-only item must end in review. A ±2-bit sweep over every prior flags the links that flip.
+
+The hour-4 slice result, with case numbers only: held-out case `do_udostepnienia:1` is assigned to its 7-incident campaign at 22.7 bits (threshold 10.4); a screenshot-only item goes to review; an unrelated page goes to new.
+
+## Limitations
+
+- **The weights are priors.** They are explicit, hand-set bits, not fitted to the data, and the case sample is 25 scams with no true negatives. Section 9 of [docs/methodology.md](docs/methodology.md) lists what that implies. A learned table (HACK-23) can be passed with `ftf link --weights`, but the default run keeps the hand-set priors.
+- **The demo base is small.** The 2026-11-22 slice (a dated snapshot) is small, and the scaling figures in the methodology are design estimates and have not been measured.
+- **Content features are scaffolding.** Text embeddings, image hashes and faces do not yet carry bits, and the Visual layer is paused.
+- **Enrichment and live fetching depend on outside services.** When a service is down, the item carries less evidence and is more likely to go to review.
+- **Campaigns rotate.** Operators change pages, pixels and ad accounts inside a campaign. The campaign relation is kept strict for that reason, so variants can end in review rather than in a campaign.
+- **The demo app's "insufficient alone" label** still uses an adapter threshold (log2 of the number of captures) until the engine publishes its threshold in the dataset.
+- **The evaluation is pending**, so the method's quality is not yet measured.
+
+## Repository layout
 
 | Path | What |
 |---|---|
 | `src/ftf/` | the Python package; `ftf` is the command-line entry point |
-| `src/ftf/enrich/` | keyless domain enrichment (`ftf enrich-domain`, see below) |
-| `src/ftf/pipeline/` | end-to-end analysis of one input (`ftf analyze`); stage adapters in `stages.py` |
-| `src/ftf/app/` | Streamlit demo app (`ftf serve`); evidence ledger logic in `ledger.py` |
-| `tests/` | pytest suite |
-| `scripts/spend.py` | read-only cloud spend report (see Cloud spend) |
-| `scripts/vm.sh` | cloud dev loop (sync to the workbench VM, run tests or commands there) |
-| `scripts/sandbox.sh` | sandbox VM for live fetching (create, sync, run, move captures) |
-| `scripts/egress.sh`, `scripts/egress_measure.py` | short-lived egress workers with fresh Google Cloud IPs (corpus building only) and the HACK-45 measurement |
+| `src/ftf/ingest/` | case folders and captures become contract incidents |
+| `src/ftf/indicators/` | indicator extractors per layer (kinds in `_ids.py`), including collector traces |
+| `src/ftf/linking/` | evidence ledger, weights (hand table and learned), id hierarchy and chain rule, background rarity, relations and grouping, assignment |
+| `src/ftf/enrich/` | keyless domain enrichment (`ftf enrich-domain`) |
 | `src/ftf/fetch/` | safe URL fetcher (`ftf fetch`) |
-| `docker/seccomp-chromium.json` | seccomp profile that lets Chromium's sandbox run inside the container |
+| `src/ftf/scanner/` | ad-library scanner (`ftf scan`) |
+| `src/ftf/features/` | content features (scaffolding; the Visual layer is paused) |
+| `src/ftf/pipeline/` | end-to-end analysis (`ftf analyze`) and the export (`ftf export`); stage adapters in `stages.py` |
+| `src/ftf/app/` | Streamlit demo app (`ftf serve`); evidence ledger in `ledger.py`, campaign views in `relations.py` |
+| `src/ftf/contract/` | the data contract (pydantic models); see `docs/contract.md` |
+| `docs/` | `contract.md`, `methodology.md`, `container.md` (the jury run), and the details of the fetcher, scanner and enrichment |
+| `tests/` | pytest suite, run on the workbench VM |
+| `scripts/vm.sh` | cloud dev loop: sync to the workbench VM, run tests or commands there |
+| `scripts/check_no_organiser_values.py` | fails if organiser values reach tracked files or commit messages |
+| `scripts/egress.sh`, `scripts/egress_measure.py` | short-lived egress workers with fresh Google Cloud IPs (corpus building only) and the HACK-45 measurement |
+| `scripts/sandbox.sh` | sandbox VM for live fetching |
+| `scripts/scanner-sandbox.sh`, `deploy/scanner/` | scheduled ad-library scanner on the sandbox VM |
+| `scripts/spend.py` | read-only cloud spend report |
 | `scripts/licences.py` | generates and checks `LICENSES-THIRD-PARTY.md` |
-| `scripts/scanner-sandbox.sh`, `deploy/scanner/` | install and drive the scheduled ad-library scanner on the sandbox VM |
-| `Dockerfile`, `.dockerignore`, `docker/` | container image: `ftf` command, demo app, fetcher (see "Run it with Docker (jury)") |
+| `scripts/build_fixture.py` | rebuilds the private fixture on the VM |
+| `docker/seccomp-chromium.json` | seccomp profile that lets Chromium's sandbox run inside the container |
+| `Dockerfile`, `.dockerignore` | container image that runs the `ftf` command |
 
-## Running the tests
+## Tests
+
+### Running the tests on the VM
 
 All computation runs on the workbench VM, not on the laptop.
 
@@ -52,14 +183,37 @@ rebuilt only when `pyproject.toml` changes. Different worktrees get different di
 they can use the VM at the same time; set `FTF_VM_SLUG` to choose the name yourself. The script
 refuses to take over an existing `/work/<name>` that it did not create.
 
-## Dependencies and licences
+### Organiser-value check
+
+`scripts/check_no_organiser_values.py` fails if a domain, host, URL, id-like indicator value or page
+title of the organiser dataset appears in a tracked file or in a commit message. The dataset exists
+only on the workbench VM, so the check runs there. Write the commit messages on the laptop, copy them
+to the VM with `gcloud compute scp`, then run:
+
+```bash
+git log --all --format=%B > commit-messages.txt        # on the laptop
+scripts/vm.sh run -- true                              # sync the worktree
+gcloud compute scp commit-messages.txt ftf-workbench:/work/<slug>/ --project follow-the-fake \
+  --zone europe-central2-a --tunnel-through-iap --quiet
+scripts/vm.sh run -- python3 -I scripts/check_no_organiser_values.py \
+  --dataset /data/derived/ingest/organiser/dataset.json --root . \
+  --messages /work/<slug>/commit-messages.txt          # <slug> is the worktree directory name
+```
+
+A hit prints `file:line`, the kind of value and a short hash of the match, never the value itself.
+Exit 0 means no hit, and exit 1 means at least one. Values shorter than 6 characters and a short
+allowlist of public services are ignored.
+
+## Licences
+
+### Dependencies and licences
 
 Only permissively licensed open-source dependencies are allowed (MIT, BSD, Apache, PSF, ISC, HPND).
 `LICENSES-THIRD-PARTY.md` is generated from installed package metadata by
 `scripts/vm.sh licences`; a test fails if the table is stale or lists a licence outside the
 allowlist. After changing dependencies in `pyproject.toml`, regenerate it and commit it.
 
-## Licence
+### Licence
 
 The code in this repository is not under an open licence: all rights are reserved by its authors.
 Under the HackNation competition rules, the economic copyright to a winning solution is transferred
@@ -76,307 +230,38 @@ during the build are not a licensing concern. Playwright, its Chromium (with Chr
 unmodified LGPL-2.1 FFmpeg) and its Node.js driver are a named exception (owner, 2026-11-21); they
 come only with the optional `fetch` extra and are listed separately in `LICENSES-THIRD-PARTY.md`.
 
-## Container
+## Operations
 
-The image contains only the installed `ftf` package (no data, no secrets, no git metadata; the
-build context is default-deny in `.dockerignore`). It runs as a non-root user; the entry point
-(`docker/entrypoint.sh`) runs `ftf <arguments>`, or with no arguments builds the base if needed
-and serves the app (next section). Building needs internet access, because pip fetches the dependencies.
+### Export (`ftf export`)
 
-For the jury, from a clean checkout of the repository root:
+`ftf export --base dataset.json --out DIR` writes the linked dataset as flat tables: `incidents.csv`,
+`captures.csv`, `indicators.csv`, `links.csv`, `evidence.csv` (one row per ledger row of every link)
+and `campaigns.csv`. It also writes `dataset.json`, a validated copy of the contract document, and
+`campaign_patterns.md`, one generated section per campaign with its size, date span, the relations
+that hold it, its stages, its missing modalities and its top shared indicators by bits. The Markdown
+defangs every value. The CSV and JSON files keep values as they are, so an export built from organiser
+data belongs in the private bucket and never in git.
+
+### Run the demo app on the VM
+
+The app needs the `app` extra (`pip install -e '.[app]'`; `scripts/vm.sh` installs it). The
+campaign base is a contract `dataset.json`: `--base`, else `$FTF_BASE`, else the fixture
+(`$FTF_FIXTURE_DIR`). On the workbench it binds to `127.0.0.1` only; view it through an IAP tunnel.
 
 ```bash
-docker build -t ftf .
-docker run --rm ftf --help
-docker run --rm ftf --version
-```
-
-For the team, on the workbench VM. The sync copies the worktree to `/work/<slug>/src`, where
-`<slug>` is the worktree directory name (replace it, e.g. `hack-3-container`):
-
-```bash
-scripts/vm.sh run -- true      # sync the worktree to the VM
+scripts/vm.sh run -- env FTF_FIXTURE_DIR=/data/derived/fixture-v0 ftf serve --port 8501
+# second terminal on the laptop, then open http://localhost:8501
 gcloud compute ssh ftf-workbench --project follow-the-fake --zone europe-central2-a \
-  --tunnel-through-iap --quiet \
-  --command 'cd /work/<slug>/src && sudo docker build -t ftf:dev . && sudo docker run --rm ftf:dev --help'
+  --tunnel-through-iap -- -N -L 8501:127.0.0.1:8501
 ```
 
-Docker on the VM is a one-time setup: `sudo apt-get install -y docker.io`.
-Before handing an image over, scan it (on the VM; exit 1 on any hit, paths only, never contents):
-`python3 -I scripts/image_leak_check.py ftf:dev --raw /data/raw --docker "sudo docker"`. It flags
-`.git`, capture formats, base files (`dataset.json`, `cache.json`, `vectors/`), credential
-files, files under `/data` or `/base`, stray images, key/token patterns, organiser case folder
-names, and byte copies of organiser files (512 bytes or larger).
-Remove dangling images afterwards with `sudo docker image prune -f`.
+The same analysis without the UI: `ftf analyze INPUT [--kind K] [--base PATH] [--online] [--out result.json]`
+prints a stage summary and writes a contract dataset (exit 0 for assign, new and review).
+Inputs are copied to a per-run directory (`$FTF_RUN_DIR`, else the system temp dir) and
+hashed, never executed; captured HTML is never rendered, and URLs are shown defanged.
+Enrichment and fetching are offline unless `--online` is given.
 
-## Run it with Docker (jury)
-
-One image holds the `ftf` command, the demo web app and the safe URL fetcher. It needs a CPU
-only (no GPU), none of our keys and none of our cloud. It contains no organiser data, no campaign
-base and no secrets (`scripts/image_leak_check.py` checks the built image). Run every command from
-the repository root, because the run command reads the Chromium seccomp profile from
-`docker/seccomp-chromium.json`.
-
-**1. Build** (needs internet for pip and Playwright's Chromium; about 5 minutes, image about
-1.6 GB):
-
-```bash
-docker build -t ftf .
-```
-
-**2. First run with the organiser's dataset folder.** Mount the folder read-only at `/data/raw`
-and a writable volume at `/base`. On first start the container builds the campaign base from the
-folder (`ftf build-base`: ingest → content features → linking, about 2 minutes on 2 CPUs for the
-challenge set), then serves the app. Later starts reuse the base in the volume.
-
-```bash
-docker volume create ftf-base
-docker run --rm --name ftf \
-  --read-only --tmpfs /tmp:rw,nosuid,nodev,size=512m --tmpfs /home/ftf:rw,nosuid,nodev,size=256m,uid=10001,gid=10001 \
-  --cap-drop=ALL --cap-add=SYS_CHROOT --security-opt no-new-privileges \
-  --security-opt seccomp=docker/seccomp-chromium.json \
-  --shm-size=1g --pids-limit=512 --memory=4g --cpus=2 \
-  -p 127.0.0.1:8501:8501 \
-  -v "/path/to/organiser-folder:/data/raw:ro" \
-  -v ftf-base:/base \
-  ftf
-```
-
-Open <http://127.0.0.1:8501>. Inside the container the app listens on `0.0.0.0` (Docker's port
-publishing needs it); `-p 127.0.0.1:...` keeps it reachable from this machine only. The hardening
-flags are the fetcher's (see "Safe URL fetcher → Running it in the container") plus
-`uid=10001,gid=10001` on the `/home/ftf` tmpfs: Docker mounts it root-owned with mode 0700, and
-the app (Streamlit, the Public Suffix List cache) needs a writable home.
-
-**3. Run with a prebuilt base.** If you were handed a base bundle, mount it at `/base` (read-only
-is fine) and leave out `/data/raw`; nothing is rebuilt:
-
-```bash
-docker run --rm --name ftf <same flags as above> -p 127.0.0.1:8501:8501 \
-  -v "/path/to/base-bundle:/base:ro" ftf
-```
-
-To rebuild a base by hand, or to build one into a host folder (`chmod 777` it first, the
-container user is uid 10001):
-
-```bash
-docker run --rm <same flags> -v "/path/to/organiser-folder:/data/raw:ro" -v ftf-base:/base \
-  ftf build-base --raw /data/raw --out /base --force
-```
-
-`ftf build-base --raw DIR --out DIR [--offline] [--force]` exits 1 and writes no `dataset.json` if no
-linkable indicator is left after ingest and features (an empty base never reaches the app), and 2
-on bad arguments or an existing base without `--force`. With no arguments the container builds
-(if needed) and serves; with arguments it runs `ftf <arguments>`, e.g. `ftf --help`.
-
-**Base bundle layout** (what `/base` holds):
-
-```
-dataset.json             contract Dataset: incidents, indicators, links, campaigns (FTF_BASE)
-vectors/                 embeddings that VectorRef.store points to (only when feature models run)
-enrichment/cache.json    domain enrichment cache (optional; used as FTF_ENRICH_CACHE if present)
-build-report.json        which build stages ran or were skipped
-```
-
-The enrichment cache is derived from organiser domains, so it is never baked into the image; it
-travels only inside a privately handed-over base bundle.
-
-**Environment variables**
-
-| Variable | Default in the image | Meaning |
-|---|---|---|
-| `FTF_BASE` | `/base/dataset.json` if present | campaign base the app and `ftf analyze` use |
-| `FTF_BASE_DIR` | `/base` | where the entry point looks for and builds the base |
-| `FTF_RAW_ROOT` | `/data/raw` | organiser folder; artefact paths in the base are relative to it |
-| `FTF_OFFLINE` | unset | `1` forces every network lookup off (enrichment, build-base) |
-| `FTF_FETCH` | unset | `1` lets the app fetch a submitted URL live with the safe fetcher, only while "Online enrichment" is ticked and `FTF_OFFLINE` is not set |
-| `FTF_ENRICH_CACHE` | `/base/enrichment/cache.json` if present | enrichment cache file |
-| `FTF_PORT` | `8501` | app port inside the container |
-
-**Offline and online.** The jury's machine has internet access. In the app, "Online enrichment"
-(off by default) allows registry and DNS lookups for submitted domains; live page fetching is
-additionally off unless the container gets `-e FTF_FETCH=1` and "Online enrichment" is ticked
-(`FTF_OFFLINE=1` overrides both), and then it only runs under the
-hardened flags above (the fetcher refuses to run as root and keeps Chromium's sandbox on). A dead
-or cloaked page is a normal result, not an error. Building the base makes no network requests.
-On our workbench VM the same image runs with `--network none` or `-e FTF_OFFLINE=1`: nothing there
-contacts scam infrastructure.
-
-**Resources.** 2 CPUs and 4 GB memory are enough (the app idles at about 150 MB; building the base
-for the challenge set takes about 2 minutes). Disk: the image (about 1.6 GB) plus a few MB of
-base.
-
-## Safe URL fetcher (`ftf fetch`)
-
-Given a URL, `ftf fetch` opens it in a locked-down headless Chromium (Playwright) and saves
-what a visitor would get: the network traffic (HAR), the final HTML, a full-page screenshot and
-the redirect chain. It never fills in or submits a form and never clicks.
-
-```bash
-ftf fetch https://example.org/landing --out captures/           # one or more URLs
-ftf fetch --list urls.txt --out captures/                       # batch: every http(s) URL in the file
-ftf fetch --list urls.txt --out captures/ --timeout 30 --settle 6 --max-mb 64
-ftf fetch --profile victim-pl-mobile --referer https://l.facebook.com/ --fbclid --list urls.txt --out captures/
-```
-
-Scam pages are often cloaked: they show the scam only to visitors who look like targets and a
-decoy to everyone else. The opt-in `victim-pl-mobile` profile presents the visit as a Polish phone
-user (Android Chrome user agent and client hints, `pl-PL`, Europe/Warsaw, mobile viewport and
-touch); `--referer` and `--fbclid` make it look like a click from a Meta ad. No proxies or IP
-rotation are used, and the network guard and lockdown are the same. Every capture records its
-profile in `capture.json` (`profile`); this describes our visit, so it never links captures. All
-profiles send client hints matching the user agent, without Chromium's `HeadlessChrome` brand.
-
-Each visit becomes a capture folder laid out like an organiser case folder, so Ingestion reads
-both the same way:
-
-```
-captures/<capture_id>/            e.g. 20261121T221500Z-landing.example-1a2b3c4d
-    url.txt          requested URL, then every main-frame URL visited, one per line
-    page.har         network traffic, response bodies embedded
-    page.html        final DOM
-    screenshot.png   full page (height capped at 12,000 px)
-    capture.json     manifest: outcome, reason, redirect chain, blocked requests, limits,
-                     and the contract Incident (source live_fetch, one Capture, observed=live)
-captures/dataset.json             contract Dataset with every capture in the folder
-```
-
-Artefact paths in the contract are relative to the output folder, as organiser paths are
-relative to the raw data root.
-
-### Dead and cloaked pages are results, not errors
-
-Every URL gives a capture folder and an outcome. The command exits 0 and prints one line per URL
-plus a summary.
-
-| Category | Outcome | When |
-|---|---|---|
-| live | `live` | a page loaded |
-| dead | `http_error` | the final response is 4xx/5xx, e.g. 404 or a CDN's "origin unreachable" 52x (the error page is still saved) |
-| cloaked | `bot_wall` | Cloudflare/DDoS-Guard/Imperva/PerimeterX/DataDome challenge, captcha, JS verification |
-| cloaked | `decoy` | parked domain, default server page, directory listing, suspended host, or a redirect off-site to a well-known site (the cloaker's "white page") |
-| cloaked | `empty` | almost no visible text and no media |
-| dead | `dns_failure`, `connection_failed`, `timeout`, `navigation_error` | the site did not answer |
-| dead | `blocked_address` | the guard refused the destination (private, loopback, metadata, odd port) |
-| dead | `size_limit` | the page's byte budget ran out before the document arrived |
-| dead | `download` | the URL served a file download (refused; nothing is saved) |
-| dead | `invalid_url`, `fetcher_error` | not an http(s) URL / the fetcher itself failed |
-
-In the contract: dead pages list `html` and `screenshot` (and `har` if nothing was recorded) in
-`Capture.missing` with the reason (`"dns_failure: ..."`); decoys get `stage = decoy`; every
-capture carries one `fetch_outcome` indicator in the `collector` layer (it describes our visit,
-so it never links captures). Content heuristics only fire on well-known markers, and the reason
-names the marker.
-
-### Safety model
-
-Scam pages are hostile. The fetcher assumes the page will try to attack the machine it runs on.
-
-- **Network guard.** All browser traffic goes through a small proxy inside the fetcher
-  (`src/ftf/fetch/guard.py`). It allows only http/https on web ports, resolves each host once,
-  refuses it if any address is not globally routable (RFC 1918, loopback, link-local including
-  `169.254.169.254`, CGNAT, `::1`, `fc00::/7`, `fe80::/10`, and IPv4-mapped/6to4/NAT64 forms of
-  those) or if the name is internal (`localhost`, `*.internal`, `metadata.google.internal`, ...),
-  and then connects to the exact address it checked. Every redirect hop is a new request through
-  the guard, and a DNS answer that changes after the check (DNS rebinding) is never used.
-  WebRTC may not send UDP outside the proxy, QUIC is off, and Chromium's loopback bypass is
-  disabled.
-- **Nothing is submitted.** Only GET/HEAD/OPTIONS requests leave the browser; `form.submit()`,
-  `requestSubmit()` and submit events are neutralised before page scripts run; the fetcher never
-  clicks. Blocked requests are listed in `capture.json`, so their URLs are still evidence.
-- **Browser lockdown.** JavaScript is on (scam pages need it), but downloads are refused,
-  permissions denied, service workers blocked and popups closed at once. Requests other than
-  http(s) are aborted (`file://`, `chrome://`, ...); Chromium itself blocks pages from navigating
-  the top frame to `data:` URLs, and `ftf fetch` refuses non-http(s) start URLs. Chromium's own sandbox stays on, the fetcher refuses to run as
-  root, and the browser gets a minimal environment with a throwaway home directory, so it never
-  sees host variables or credentials.
-- **Hard limits.** Navigation timeout (30 s), settle time (6 s), 64 MB received per page, 1,500
-  requests, 15 MB of HTML, 12,000 px of screenshot. Each visit runs under its own small
-  supervisor process (a child subreaper with a private temp directory). After a wall-clock limit
-  (timeout + settle + 45 s) the supervisor kills every process of the visit, Chromium included,
-  and removes the temp directory; the capture then says `timeout`.
-- **Where it runs.** During the build, live URLs are fetched only on the sandbox VM
-  (`scripts/sandbox.sh`): no service account and no scopes (no cloud credentials at all), SSH
-  only through IAP, outbound traffic through an ephemeral IP, automatic stop after 8 h, fetcher
-  running as an unprivileged user. Captures move from the sandbox straight to the workbench over
-  the internal network with a key that can only run a fixed transfer command, and from there to
-  `gs://follow-the-fake-data/outputs/fetcher/`. They never pass through a laptop.
-
-### Sandbox VM (team only)
-
-```bash
-scripts/sandbox.sh create                 # once: ftf-sandbox, e2-medium, no service account, auto-stop 8 h
-scripts/sandbox.sh start                  # later sessions
-scripts/sandbox.sh sync                   # code -> /opt/ftf, venv + Chromium (rebuilt when pyproject changes)
-scripts/sandbox.sh authorize-workbench    # once: workbench key, restricted to the transfer command
-scripts/sandbox.sh push-list /data/raw/scam_links_odszyfrowane.txt links.txt   # workbench -> sandbox
-scripts/sandbox.sh run -- ftf fetch --list /srv/ftf/inbox/links.txt --out /srv/ftf/captures/run1
-scripts/sandbox.sh pull run1              # sandbox -> workbench /data/derived/fetcher/ -> bucket
-scripts/sandbox.sh stop
-```
-
-The fetcher's browser tests run against a local test server only. The `dev` extra does not
-install Playwright, so they are skipped by default. To run them on the workbench, add the extra to
-your worktree's venv once (and Chromium for your user, `playwright install --only-shell chromium`):
-
-```bash
-scripts/vm.sh run -- pip install -c /work/<slug>/base-constraints.txt -e '.[fetch]'
-scripts/vm.sh test tests/fetch
-```
-
-### Egress workers (team only, corpus building during the hackathon)
-
-Ad libraries and cloaked scam pages rate-limit or block a single cloud IP. While building the
-corpus we spread collection over a few short-lived Google Cloud VMs (`scripts/egress.sh`), each a
-clone of the sandbox's safety model (no service account, IAP-only SSH, no firewall rule of its own,
-deleted automatically after 2 h), each with its own ephemeral IP, at low volume per IP. Workers are
-sandbox VMs in the sense of the project rule: live scam pages are fetched there and nowhere else
-besides `ftf-sandbox`, and captures go straight to the workbench. This was
-used only to build the corpus during the hackathon. It is opt-in: the container and the demo never
-use it, and nothing changes when it is absent.
-
-```bash
-scripts/egress.sh up 6                    # workers 1..6 (Warsaw x3, Frankfurt, Eemshaven, Hamina)
-scripts/egress.sh sync                    # code -> /opt/ftf on every worker
-scripts/egress.sh push-list <wb-file> urls.txt ftf-egress-1
-scripts/egress.sh job ftf-egress-1 r1 -- ftf fetch --list /srv/ftf/inbox/urls.txt --out /srv/ftf/captures/run1/ftf-egress-1
-scripts/egress.sh rotate ftf-egress-1     # new IP between jobs
-scripts/egress.sh pull run1               # workers -> workbench /data/derived/egress/ -> bucket
-scripts/egress.sh down                    # delete all workers, confirm none is left
-```
-
-Each capture made on a worker records which egress it used, in the manifest (`egress`: worker,
-region, zone, salted SHA-256 of the IP) and as a collector-layer `analyst_ip` indicator, so it can
-never link two captures. The raw IP is never written; the salt lives only in the workers' metadata
-and disappears with them.
-
-### Running it in the container
-
-The image includes Playwright's headless Chromium. Run the fetcher with these flags:
-
-```bash
-mkdir -p captures && chmod 777 captures      # the container user (uid 10001) writes here
-docker run --rm \
-  --read-only --tmpfs /tmp:rw,nosuid,nodev,size=512m --tmpfs /home/ftf:rw,nosuid,nodev,size=256m \
-  --cap-drop=ALL --cap-add=SYS_CHROOT --security-opt no-new-privileges \
-  --security-opt seccomp=docker/seccomp-chromium.json \
-  --shm-size=1g --pids-limit=512 --memory=2g --cpus=2 \
-  -v "$PWD/captures:/out" \
-  ftf fetch --out /out https://example.org/
-```
-
-- `--read-only` plus two small tmpfs mounts: the root filesystem cannot be changed; the only
-  host directory the container sees is the output folder.
-- `--cap-drop=ALL --cap-add=SYS_CHROOT`: no capabilities except the one Chromium's
-  user-namespace sandbox needs in its bounding set. The process runs as the non-root user `ftf`
-  and `no-new-privileges` stops it from ever gaining privileges.
-- `seccomp=docker/seccomp-chromium.json`: Docker's default seccomp profile blocks the namespace
-  calls Chromium's sandbox needs ("No usable sandbox!"). This file is Playwright's published
-  profile (`utils/docker/seccomp_profile.json` at v1.64.1, Apache-2.0, unchanged).
-- No other volumes, no Docker socket, no host network, no environment variables or keys.
-  Internet access is needed only to reach the pages being fetched.
-
-## Cloud spend
+### Cloud spend
 
 ```bash
 python3 -I scripts/spend.py
@@ -403,186 +288,3 @@ is just gcloud calls plus arithmetic.
   and set in one place (`ATTIC_LABEL_KEY`, `ATTIC_NAME_PATTERN`).
 - Backstop: billing data lags by hours, no BigQuery billing export is set up and no GCP budget
   alert is known on the billing account (the Budget API is not readable here), so the script is the primary check.
-
-## Domain enrichment
-
-`ftf enrich-domain` looks up registrable domains in four keyless services and writes contract
-`Indicator`s (layer `infrastructure`, observed `live`). Each answer carries its fetch time and
-its origin (live, cache or stale-cache). Answers are cached in one JSON file, which is also the
-offline export. With no network and no cache entry, the indicators come out as `unknown`.
-
-```bash
-ftf enrich-domain example.com --cache data/enrichment/cache.json --out enrichment.json
-ftf enrich-domain --from-raw /data/raw --offline --cache cache.json --summary summary.json
-```
-
-`--from-raw DIR` takes the domains the organiser's data names: the page URL of each HAR capture
-(the `pages` titles, or the first request if there are none) and the URLs in
-`scam_links*.txt`. Files are read as inert data. Hosts that appear inside a captured page
-(CDNs, trackers, platforms) are not looked up. Registrable domains come from tldextract with its
-bundled Public Suffix List snapshot, so nothing is downloaded to normalise a name.
-
-Kinds: `registrar`, `registrar_iana_id`, `created_date`, `domain_age_days_at_capture`,
-`a_record_ip`, `nameserver`, `ns_provider`, `mx`, `cert_issuer`, `cert_first_seen`,
-`cert_san_sibling`, `cert_pl_listed` (`true`/`false`), `cert_pl_listed_date`. The levels and
-their reasons are in the docstring of `src/ftf/enrich/domain.py`. `ip_asn` is not produced: the
-only keyless ASN data is a bulk table that would have to ship with the container, which this
-issue does not do.
-
-### Sources, terms and limits
-
-Only these services are contacted, and never the scanned domain's own web server or nameservers.
-DNS goes through a public DoH resolver. Nothing is submitted to scanning services. The User-Agent
-is generic (`ftf-domain-enrichment/0.1 (+keyless registry lookups; research)`).
-
-| Service | Used for | Terms (checked 2026-11-21) | Our limits |
-|---|---|---|---|
-| IANA RDAP bootstrap, `data.iana.org/rdap/dns.json` | which RDAP server runs a TLD | Openly published file. The IANA terms page we tried returned 404, so no terms text was confirmed. | one request per run; cached 30 days |
-| RDAP servers of the registries | registrar, IANA registrar id, creation date | Each registry sets its own policy. No key is needed. | 1 request/s per host; retry 429/5xx with backoff, honouring `Retry-After`; cached 30 days |
-| Google Public DNS, `dns.google/resolve` (DoH JSON) | A, NS, MX | The Google Public DNS terms bind the use to the Google APIs Terms of Service. The page we read gives no numeric limit. The resolver makes its own queries to the domain's nameservers; the workbench does not. | 1 request/s; A, NS and MX per domain; cached 1 day |
-| crt.sh, `crt.sh/?q=…&output=json` | issuers, earliest `not_before`, other names on the same certificates | The page states no terms of use or limits. It returns 429 and 502 under load. | 1 request per 5 s; 150 s timeout; 3 retries; cached 7 days |
-| CERT Polska warning list, `hole.cert.pl/domains/v2/domains.json` (about 22 MB) | `cert_pl_listed`, listed date | Usage rules on cert.pl/lista-ostrzezen: anyone may use the list for any purpose, commercial use included; no attribution is required; no warranty; users act at their own risk. No download limit is stated. | one download per run, matched locally; each domain cached 1 day |
-
-Failures never raise. A source that fails three times in a row is skipped for the rest of the
-run, and its cached answers are used, labelled `stale-cache`. The shared User-Agent and pacing
-are in `src/ftf/enrich/http.py`; the service policies are in `src/ftf/enrich/sources.py`.
-
-## Run the demo app on the VM
-
-The app needs the `app` extra (`pip install -e '.[app]'`; `scripts/vm.sh` installs it). The
-campaign base is a contract `dataset.json`: `--base`, else `$FTF_BASE`, else the fixture
-(`$FTF_FIXTURE_DIR`). On the workbench it binds to `127.0.0.1` only; view it through an IAP tunnel.
-
-```bash
-scripts/vm.sh run -- env FTF_FIXTURE_DIR=/data/derived/fixture-v0 ftf serve --port 8501
-# second terminal on the laptop, then open http://localhost:8501
-gcloud compute ssh ftf-workbench --project follow-the-fake --zone europe-central2-a \
-  --tunnel-through-iap -- -N -L 8501:127.0.0.1:8501
-```
-
-The same analysis without the UI: `ftf analyze INPUT [--kind K] [--base PATH] [--online] [--out result.json]`
-prints a stage summary and writes a contract dataset (exit 0 for assign, new and review).
-Inputs are copied to a per-run directory (`$FTF_RUN_DIR`, else the system temp dir) and
-hashed, never executed; captured HTML is never rendered, and URLs are shown defanged.
-Enrichment and fetching are offline unless `--online` is given.
-
-## Ad-library scanner
-
-`ftf scan` searches public ad libraries by keyword and date, turns every ad it has not seen
-before into one contract `Incident`, and appends it to a queue of items waiting for
-assignment to a campaign. It never opens a landing page; landing URLs are only queued for the
-sandboxed URL fetcher.
-
-| Source | How | What an item carries |
-|---|---|---|
-| `meta` | Meta Ad Library search page in headless Chromium, **no login**; ads are read from the page's own GraphQL responses and the JSON embedded in the first page | Library id, page id and name, ad text, title, display domain, landing URL as declared to Meta, creative image links, creative group (`collation_id`), platforms, start and end date, taken-down flag |
-| `google_atc` | Google Ads Transparency Center RPC endpoints, plain HTTPS, no key; keywords match advertiser names and domains (the Center has no ad-copy search), region Poland | Creative id, advertiser id and name, advertiser domain, creative image or preview link, format, first and last shown |
-| `google_bq` | Google's public BigQuery dataset `bigquery-public-data.google_ads_transparency_center.removed_creative_stats`: creatives Google **removed** in Poland since `--since` for scam-like reasons (misrepresentation, account suspension, dishonest behaviour, financial products, abusing the ad network). Google's sanctioned bulk route: no scraping, no rate limit. Needs a GCP project to bill (`--bq-project` or `FTF_BQ_PROJECT`) and a token (`FTF_BQ_TOKEN` or `gcloud auth print-access-token`); otherwise it reports `unavailable`. One run scans about 3.4 GB (about 0.02 USD on demand, inside the free monthly terabyte); `maximumBytesBilled` caps it at 10 GB | Creative id, advertiser id when the page URL names it, first and last shown in Poland, removal reason. No ad text, image or landing URL in the dataset. It shares the id `adlib:<CR…>` and the deduplication key with `google_atc` |
-| `certpl` | CERT Polska warning list (`hole.cert.pl/domains/v2/domains.json`), public and keyless | Register id, newly listed domain, listing date |
-
-```bash
-ftf scan                                              # all sources, built-in keywords, last 7 days
-ftf scan --source meta --keywords "Brzoska,pasywny dochód" --since 2026-11-14
-ftf scan --source certpl --cert-filter invest,inwest  # only CERT domains containing a filter word
-ftf scan --source google_atc --max-ads 50 --delay 3 --out scan
-ftf scan --source google_bq --bq-project my-gcp-project --since 2026-10-22   # run on the workbench
-```
-
-- **Output** (`--out`, default `./scan`), in the same per-capture folder layout as the URL
-  fetcher, so one ingestion adapter reads both. One folder per new ad,
-  `<capture id>/` with capture id `<run stamp>-<source>-<ad id>`, holding `ad.json` (the
-  library fields: source, ad id, page and advertiser, text, landing URL and domain, creative
-  URLs, first and last shown), `capture.json` (manifest with a contract `Incident`) and the
-  downloaded creatives (`creative-<n>.<ext>`). Ids never depend on time: an ad is
-  `adlib:<ad archive id>` (Meta: the Ad Library archive id; Google: the creative id `CR…`,
-  which is unique across advertisers) with capture `adlib:<id>:ad`; a CERT Polska entry is a
-  bare domain, `certpl:<registrable domain>` with capture `certpl:<domain>:listing` (one per
-  registrable domain, its newest listing). `ad.json` carries `source`, `stable_id`,
-  `ad_archive_id` and `kind` (`ad` or `domain`). The folder and `ad.json` are the stable output;
-  the Incident is provisional, and the ingestion adapter builds the canonical one. Next to the
-  folders: `dataset.json` (a contract `Dataset` of every incident), `queue.jsonl` (one line per
-  new ad: key, source, ad id, capture folder, incident id, landing URL and domain, run id,
-  status `pending`, `assigned` or `rejected`), `state/seen.json` (every key ever queued) and
-  `runs/<run id>/summary.json` (per source and query: status `ok`, `empty`, `throttled`,
-  `blocked`, `error`, `skipped` or `unavailable`, counts and evidence such as HTTP status,
-  final URL and GraphQL calls seen).
-- **Library**: `ftf.scanner.scan(sources, keywords, since, out=…)` runs the same scan and
-  returns the new ads (`ScannedAd`: key, capture folder, `ad.json` fields, provisional
-  Incident); `ftf.scanner.pending(out)` lists the queue items waiting for assignment and
-  `ftf.scanner.mark(out, keys, "assigned")` updates them.
-- **Deduplication**: by source plus the library's own id, across runs. A run saves each source
-  as soon as it finishes: capture folders, then the queue, then `seen.json`; keys already in the queue also count as seen,
-  so a run that dies half-way never queues an ad twice. A lock file stops two runs at once.
-- **Indicators** per ad (all `static`): `advertiser_page_id`, `advertiser_page_name`,
-  `advertiser_id`, `advertiser_name` (distribution account); `ad_text`, `ad_title`,
-  `ad_collation_id`, `ad_display_domain`, `creative_url` (creative); `landing_url`,
-  `landing_domain` (landing). The search term is kept as `scan_keyword` in the collector layer,
-  so it never links two ads.
-- **Dates**: `--since` filters by last shown (Google, BigQuery) or listing date (CERT
-  Polska); for Meta it is passed as the Ad Library start-date filter, so ads that started
-  earlier and still run are not found.
-- **Politeness**: a few keywords per run, one request at a time with `--delay` seconds between
-  requests (default 5), a hard cap of `--max-ads` ads per source per run (default 150) and
-  `--max-per-keyword` (default 50). The browser loads no images, media or fonts itself.
-- **Creatives** are hostile data. With `--download-creatives` (used on the sandbox only),
-  images are fetched only over HTTPS from the platforms' image CDNs, only `image/*` up to
-  5 MB, at most 2 per ad and `--max-creatives` (default 100) per run, and stored under their
-  SHA-256 without being opened. Meta's signed image links expire
-  within days, so they are fetched in the run that finds the ad.
-
-**Meta's terms.** Meta's terms (Automated Data Collection Terms, `facebook.com/robots.txt`)
-forbid collecting data from Facebook by automated means without written permission. The `meta`
-source does exactly that, from a logged-out headless browser, at low volume, from a sandbox
-VM. It is a demonstration of the method for this challenge, not a production setup. The ads
-it reads are the ones Meta publishes for transparency under Article 39 of the EU Digital
-Services Act. **The production route is the official Meta Ad Library API** (`/ads_archive`,
-all ads delivered in the EU, `ad_reached_countries=PL`), which needs a Meta developer account
-with identity confirmation; the `meta` source should be replaced by an API client there. The
-other two sources do not depend on it: Google's Transparency Center and the CERT Polska list
-are public and keyless.
-
-**In the jury's container** there is no scheduler; run the scanner by hand and mount a
-directory for its output:
-
-```bash
-docker run --rm -v "$PWD/scan:/home/ftf/scan" ftf scan --source google_atc --source certpl --out scan
-```
-
-The `meta` source needs the optional `playwright` package and Chromium, which the image does
-not include. Without them it reports `unavailable` and the other sources still run. To use
-it anyway: `pip install '.[fetch]' && playwright install --with-deps chromium`.
-
-**Scheduled runs (team setup).** The scanner runs only on the sandbox VM `ftf-sandbox`, never
-on the laptop or the workbench. `scripts/scanner-sandbox.sh install` copies the code to
-`/opt/hack-20` there (tracked files only), builds a venv with Chromium and installs a systemd
-timer (`deploy/scanner/`) that runs `ftf scan --download-creatives` as the unprivileged user
-`hack20` 2 minutes after it starts and then every 6 hours while the VM is up. Each source is
-saved as soon as it finishes, so a run stopped half-way keeps what it found.
-`scripts/scanner-sandbox.sh status` shows the timer, the runs and the queue.
-`scripts/scanner-sandbox.sh authorize-workbench` (once) and `scripts/scanner-sandbox.sh pull`
-(a read-only mirror: queue statuses are changed with `ftf.scanner.mark` on the sandbox copy,
-which a pull overwrites on the workbench) copy the output from the sandbox to the workbench (`/data/derived/scanner/`) over the internal
-network, with a key restricted to one read-only command, and sync it to
-`gs://follow-the-fake-data/outputs/scanner/`. Nothing passes through the laptop.
-
-**Meta from a cloud IP (observed 2026-11-21).** From the sandbox VM (Google Cloud,
-europe-central2) the Ad Library page loads without login after a JavaScript challenge (the
-first response is HTTP 403, then the browser passes). The first page of results, about 30 ads
-per keyword, comes with the page. The GraphQL calls behind scrolling return
-`Rate limit exceeded` (code 1675004), so the scanner gets about 30 new ads per keyword per
-run from Meta. It reports that query as `throttled`, keeps the first page and stops
-scrolling at once. More keywords per run, or the official API, are the way to more ads.
-
-**Google from a cloud IP (observed 2026-11-21).** The first run from the sandbox got 59
-creatives, then the Transparency Center answered HTTP 429 (too many requests); runs in the
-following half hour got 429 on the first request. The scanner records the query as `blocked`
-with the error, skips the remaining Google queries of that run and tries again only at the next
-scheduled run. CERT Polska and Meta still delivered in those runs.
-The `google_bq` source is the way around this: it reads Google's own published dataset instead
-of the website. It runs on the workbench (the sandbox has no cloud credentials), so it is
-not part of the sandbox timer; a manual run on 2026-11-21 queued 115 removed creatives
-(`/data/derived/scanner-bq/`, `gs://follow-the-fake-data/outputs/scanner-bq/`).
-
-## Methods
-
-To be written: ingestion, feature extraction, deduplication, campaign grouping and the demo app.
