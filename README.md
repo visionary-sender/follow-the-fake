@@ -14,7 +14,7 @@ Starting from one suspicious item (an ad, a saved page, a URL or a keyword), the
 2. **Extract.** Each capture yields indicators, filed under layers such as tracking account, kit, infrastructure or face.
 3. **Enrich.** Domains are looked up in four keyless public services. Enrichment is online by default and falls back to a cache when the network is down. A failed lookup becomes "unknown", never an error.
 4. **Link.** Each pair of captures gets a score in bits. A shared value is worth bits only if it is rare. The engine then assigns the new item to a known campaign, starts a new campaign, or sends it to review.
-5. **Show.** The app shows the campaign with each link and its evidence; every number can be traced to a row of the evidence ledger. `ftf export` writes the same result as CSV tables.
+5. **Show.** The app shows the campaign with each link and its evidence; every link score and verdict can be traced to rows of the evidence ledger. `ftf export` writes the same result as CSV tables.
 
 Terms used throughout:
 
@@ -30,8 +30,6 @@ A campaign keeps some layers and changes others. A scammer can rotate the creati
 ![Campaign recall with one layer removed at a time](docs/figures/layer_ablation.png)
 
 *Campaign recall rests on tracking accounts (0/11 without them), image hashes (1/11), kit and page structure (2/11) and partly infrastructure (7/11). Removing text or faces changes nothing, and no must-not-link pair is linked in any run.*
-
-In this sample, campaign recall comes from tracking accounts, image hashes, kit and page structure and, partly, infrastructure. Text and faces add no campaign recall: they are content views, off by default.
 
 #### Technical infrastructure
 
@@ -63,7 +61,7 @@ A kit is the build of a page: its asset hashes, a normalised hash of its inline 
 | Platform constants | the SDK file a page builder injects | none for the campaign | every tenant gets the same file |
 | Brand skin | a logo, font or analytics id copied from the outlet | ecosystem only | scam clones copy real outlets |
 
-Brand skin is removed by a stop-list built from real outlet pages (see [Data and sources](#data-and-sources)). Its effect is measured in E4.
+Brand skin is removed by a stop-list built from real outlet pages (see [Data and sources](#data-and-sources)).
 
 #### Text
 
@@ -292,7 +290,7 @@ We remove one incident, build the base without it, and ask where it belongs.
 | linking | loo_item | full | 8 | 7 | 0 | 0 | 1 | 7 | 48.40 |
 <!-- eval:e2-openset end -->
 
-The Linking engine gets 7 of 8 incidents right with 0 wrong; the baseline gets 5 right and 3 wrong. The one miss goes to review, not to a wrong campaign. Leaving a whole group out (loco) gives the Linking engine 0 correct and 8 new: an item whose campaign has no other member in the base cannot be assigned, and "new" is the right answer the table does not credit. With 8 items, one item moves any rate a lot.
+The Linking engine gets 7 of 8 incidents right with 0 wrong; the baseline gets 5 right and 3 wrong. The one miss goes to review, not to a wrong campaign. Leaving a whole group out (loco) gives the Linking engine 0 correct and 8 new, which is the honest cost of a group with no other member in the base. With 8 items, one item moves any rate a lot.
 
 #### E3: degraded inputs
 
@@ -332,7 +330,7 @@ Cases that look like a link but are not one.
 Must-not-link pairs violated: baseline 40 of 43, linking 0 of 43.
 <!-- eval:e4-distractors end -->
 
-The Linking engine passes every class except one synthetic kit copy, which still links (2 of 3 pass). The brand stop-list does most of the work in the brand row: the baseline fails 49 of 58 real outlet pages. The brand and celebrity cases come from one batch and the kit copies are controlled edits, so a clean row says little about other sources.
+The Linking engine passes every class except one synthetic kit copy, which still links (2 of 3 pass). In the brand row the baseline fails 49 of 58 real outlet pages. The brand and celebrity cases come from one batch and the kit copies are controlled edits, so a clean row says little about other sources.
 
 #### E6: sensitivity to the weights
 
@@ -421,7 +419,7 @@ Each problem says what happened, what we did and what would work better; the las
 
 **2. Face references are thin.** Few public figures have an openly licensed portrait. Widening the set from 11 to 33 people raised confident matches from 15.5% to 25.1% of faces, and two people still have none. The set loads from `FTF_FACE_REFERENCE`, and no organiser image is ever used as a reference. *Better:* a licensed portrait for every impersonated person.
 
-**3. Look-alike outlet pages.** Scam pages copy outlet logos, fonts and analytics, and reuse celebrity photos. Without the brand stop-list and the gates, the baseline fails the E4 check on 49 of 58 real outlet pages, all 3 platform-only pages and both celebrity-only items; the Linking engine passes them. *Better:* a stop-list built from more outlets and batches; brand stock images still match unrelated cases.
+**3. Look-alike outlet pages.** Scam pages copy outlet logos, fonts and analytics, and reuse celebrity photos. Before the brand stop-list and the gates, the baseline failed the E4 check on 49 of 58 real outlet pages, all 3 platform-only pages and both celebrity-only items; the Linking engine passes them. *Better:* a stop-list built from more outlets and batches; brand stock images still match unrelated cases.
 
 **4. Platform ids dominate the evidence.** With platform ids hidden, the engine found 0 of 11 pairs at the start of the push. The gain came from the Visual features, the corroborated landing build (HACK-84) and the same-host rule (HACK-88); in the final build, removing text or faces changes nothing (layer figure in section 1). *Better:* weights calibrated on labelled pairs, so the remaining layers are not only hand-set.
 
